@@ -20,19 +20,23 @@ library(ggplot2)
 
 ## Load in example data
 HyperCom requires three inputs:
+
 1. A dense gene x cell matrix with genes as row names and cells as column names
+
 2. A dataframe of cell metadata containing sample and optionally group columns which need to be specified as variables
+
 3. A dataframe of ligand-receptor (LR) interactions where each gene in an interaction has its own column
+  + HyperCom contains the correctly formatted CellChat database for human and mouse which can be accessed via the `cellchat.hs.lrdb` and `cellchat.mm.lrdb` respectively.
 
 In this vignette we will use a 1000 cell subset of heart failure from [Alexanian et al, 2021](https://doi.org/10.1038/s41586-021-03674-1).
 ```{r}
-counts <- readRDS("counts.rds")
+counts <- readRDS("alexanian2021.counts.rds")
 dim(counts)
 head(rownames(counts))
 head(colnames(counts))
 ```
 ```{r}
-meta.data <- read.csv("metadata.csv", row.names = 1)
+meta.data <- read.csv("alexanian2021.metadata.csv", row.names = 1)
 sample.column <- "sample"
 group.column <- "condition"
 head(meta.data)
@@ -44,7 +48,6 @@ ggplot(meta.data, aes(x=UMAP_1, y=UMAP_2, colour=celltype)) +
 ```
 
 For the LR interactions we will use the CellChat murine database.
-HyperCom contains the correctly formatted CellChat database for human and mouse which can be accessed via the `cellchat.hs.lrdb` and `cellchat.mm.lrdb` respectively.
 ```{r}
 lrdb <- cellchat.mm.lrdb
 dim(lrdb)
@@ -59,13 +62,13 @@ head(lrdb)
 In order to reduce memory usage, we first filter the counts matrix to only genes present in the LR interactions with expression greater than 0.
 The function also transposes the matrix.
 ```{r}
-lr.counts <- filter_counts(counts=counts, lrdb=lrdb)
+lr.counts <- filter_counts(counts=counts, lrdb=lrdb, outfile=NULL)
 dim(lr.counts)
 ```
 
 Next we filter the ligand receptor interactions to only interactions where all genes are present in the filtered expression matrix.
 ```{r}
-lrs <- generate_lrs_table(counts=lr.counts, lrdb=lrdb)
+lrs <- generate_lrs_table(counts=lr.counts, lrdb=lrdb, outfile=NULL)
 dim(lrs)
 ```
 
@@ -80,21 +83,21 @@ To generate the hyperedges, which are edges that contain multiple nodes, we use 
 
 HyperCom represents these hyperedges as a dataframe with an edge and node column where the node belongs to the edge. The weight is set to 1 for each edge. 
 ```{r}
-hyperedgelist <- generate_hyperedges(counts=lr.counts, lrs=lrs)
+hyperedgelist <- generate_hyperedges(counts=lr.counts, lrs=lrs, outfile=NULL)
 head(hyperedgelist)
 ```
 
 We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
 Each entry is the number hyperedges shared by nodes.
 ```{r}
-adj <- generate_adjacency_matrix(hyperedgelist=hyperedgelist)
+adj <- generate_adjacency_matrix(hyperedgelist=hyperedgelist, outfile=NULL)
 dim(adj)
 ```
 
 ### Calculating Network Connectivity
 In order to calculate the network connectivity of the hypergraph we perform a random walk on the adjacency matrix to produce an influence matrix.
 ```{r}
-infMat <- calculate_infMat(adj=adj)
+infMat <- calculate_infMat(adj=adj, outfile=NULL)
 dim(infMat)
 ```
 
@@ -102,7 +105,7 @@ dim(infMat)
 To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
 Additionally to reduce memory, we reduce the number of columns to just node, sample, and group.
 ```{r}
-metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column)
+metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column, outfile=NULL)
 head(metadata)
 ```
 
@@ -116,8 +119,8 @@ head(network.score)
 
 Here we can see that globally, communication is higher in TAC.
 ```{r}
-network.score <- left_join(network.score, meta.data, by=join_by(cell))
 meta.data$cell <- rownames(meta.data)
+network.score <- left_join(network.score, meta.data, by=join_by(cell))
 
 transparent <- rgb(255, 255, 255, max=255, alpha = 0)
 ggplot(network.score, aes(x=UMAP_1, y=UMAP_2, colour=hypercom)) +
@@ -132,7 +135,7 @@ We can also identify important LR pairs by using HyperCom scoring on LR pairs.
 This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
 The `prioritize_lr` function can be run sequentially or parallelly. The parallel implementation uses the `parallelly` package.
 ```{r}
-priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, parallel=TRUE)
+priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, parallel=TRUE, outfile=NULL)
 head(priority)
 ```
 
