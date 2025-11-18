@@ -177,7 +177,7 @@ generate_com_clusters <- function(infMat, metadata){
 
 We can see that communication clusters do not necessarily line up with the annotated cell types.
 ```{r}
-com_clusters <- generate_com_clusters(infMat, metadata)
+com_clusters <- generate_com_clusters(infMat=infMat, metadata=metadata)
 
 annotations <- select(meta.data, celltype)
 annotations$cell <- rownames(annotations)

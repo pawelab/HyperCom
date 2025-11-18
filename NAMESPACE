@@ -3,7 +3,7 @@
 export(calculate_infMat)
 export(filter_counts)
 export(generate_adjacency_matrix)
-export(generate_edgelist)
+export(generate_hyperedges)
 export(generate_lrs_table)
 export(generate_metadata)
 export(prioritize_lr)
