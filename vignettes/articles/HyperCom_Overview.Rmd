@@ -1,0 +1,190 @@
+---
+title: "HyperCom_Overview"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(HyperCom)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+## Load in example data
+HyperCom requires three inputs:
+1. A dense gene x cell matrix with genes as row names and cells as column names
+2. A dataframe of cell metadata containing sample and optionally group columns which need to be specified as variables
+3. A dataframe of ligand-receptor (LR) interactions where each gene in an interaction has its own column
+
+In this vignette we will use a 1000 cell subset of heart failure from [Alexanian et al, 2021](https://doi.org/10.1038/s41586-021-03674-1).
+```{r}
+counts <- readRDS("counts.rds")
+dim(counts)
+head(rownames(counts))
+head(colnames(counts))
+```
+```{r}
+meta.data <- read.csv("metadata.csv", row.names = 1)
+sample.column <- "sample"
+group.column <- "condition"
+head(meta.data)
+```
+```{r}
+ggplot(meta.data, aes(x=UMAP_1, y=UMAP_2, colour=celltype)) +
+  geom_point(size=0.5) +
+  theme_classic()
+```
+
+For the LR interactions we will use the CellChat murine database.
+HyperCom contains the correctly formatted CellChat database for human and mouse which can be accessed via the `cellchat.hs.lrdb` and `cellchat.mm.lrdb` respectively.
+```{r}
+lrdb <- cellchat.mm.lrdb
+dim(lrdb)
+```
+
+```{r}
+head(lrdb)
+```
+## Running HyperCom
+
+### Preprocessing
+In order to reduce memory usage, we first filter the counts matrix to only genes present in the LR interactions with expression greater than 0.
+The function also transposes the matrix.
+```{r}
+lr.counts <- filter_counts(counts=counts, lrdb=lrdb)
+dim(lr.counts)
+```
+
+Next we filter the ligand receptor interactions to only interactions where all genes are present in the filtered expression matrix.
+```{r}
+lrs <- generate_lrs_table(counts=lr.counts, lrdb=lrdb)
+dim(lrs)
+```
+
+### Generating Hypergraph
+To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix LR interaction to create 3 types of hyperedges:
+
+1. expression edges - edges containing cells that express a given ligand or receptor
+
+2. complex edges - edges containing the genes that comprise a receptor complex
+
+3. interaction edges - edges containing the genes that comprise an LR interaction
+
+HyperCom represents these hyperedges as a dataframe with an edge and node column where the node belongs to the edge. The weight is set to 1 for each edge. 
+```{r}
+hyperedgelist <- generate_hyperedges(counts=lr.counts, lrs=lrs)
+head(hyperedgelist)
+```
+
+We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
+Each entry is the number hyperedges shared by nodes.
+```{r}
+adj <- generate_adjacency_matrix(hyperedgelist=hyperedgelist)
+dim(adj)
+```
+
+### Calculating Network Connectivity
+In order to calculate the network connectivity of the hypergraph we perform a random walk on the adjacency matrix to produce an influence matrix.
+```{r}
+infMat <- calculate_infMat(adj=adj)
+dim(infMat)
+```
+
+## Downstream Analysis
+To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
+Additionally to reduce memory, we reduce the number of columns to just node, sample, and group.
+```{r}
+metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column)
+head(metadata)
+```
+
+### Scoring Network Activity
+We can score network activity using the influence matrix to understand globally if cells are sending or receiving signals.
+HyperCom scoring generates a sender and receiver score based on a given matrix and uses both to create a composite HyperCom score. This HyperCom score ranges from -1 to 1 going from better senders to better receivers.
+```{r}
+network.score <- score_hypercom(infMat=infMat, metadata=metadata)
+head(network.score)
+```
+
+Here we can see that globally, communication is higher in TAC.
+```{r}
+network.score <- left_join(network.score, meta.data, by=join_by(cell))
+meta.data$cell <- rownames(meta.data)
+
+transparent <- rgb(255, 255, 255, max=255, alpha = 0)
+ggplot(network.score, aes(x=UMAP_1, y=UMAP_2, colour=hypercom)) +
+  geom_point(size=0.5) +
+  scale_color_gradient2(low="blue", mid=transparent, high="red", limits=c(-1,1)) +
+  facet_wrap(vars(condition)) +
+  theme_classic()
+```
+
+### Identifying Important LR Pairs
+We can also identify important LR pairs by using HyperCom scoring on LR pairs.
+This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
+The `prioritize_lr` function can be run sequentially or parallelly. The parallel implementation uses the `parallelly` package.
+```{r}
+priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, parallel=TRUE)
+head(priority)
+```
+
+We see that Thbs1 Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair.
+As a note, the `score_hypercom` function can also take a vector of receptor genes if the receptor is a complex.
+```{r}
+Thbs1_Sdc4 <- score_hypercom(infMat=infMat, metadata=metadata, ligand="Thbs1", receptors="Sdc4")
+head(Thbs1_Sdc4)
+```
+
+If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.
+```{r}
+Thbs1_Sdc4 <- left_join(Thbs1_Sdc4, metadata, by=join_by(cell))
+ggplot(Thbs1_Sdc4, aes(x=sender, y=receiver, colour=group)) +
+  geom_density_2d() +
+  theme_classic()
+```
+
+### Side Note: Communication Clusters
+Although clustering is not necessary for any step in HyperCom, it may be useful to conceptualize how groups of cells are communicating.
+We can cluster the influence matrix to generate communication clusters. Here we use Seurat's implementation of Louvain clustering.
+```{r}
+library(Seurat)
+generate_com_clusters <- function(infMat, metadata){
+  com.seurat <- CreateSeuratObject(t(infMat), meta.data = metadata, project="communication")
+  com.seurat <- NormalizeData(com.seurat, verbose=FALSE)
+  com.seurat <- FindVariableFeatures(com.seurat, selection.method = "vst", nfeatures = 2000, verbose=FALSE)
+  all.genes <- rownames(com.seurat)
+  com.seurat <- ScaleData(com.seurat, features = all.genes, verbose=FALSE)
+  com.seurat <- RunPCA(com.seurat, features = VariableFeatures(object = com.seurat), verbose=FALSE)
+  com.seurat <- FindNeighbors(com.seurat, dims = 1:10, verbose=FALSE)
+  com.seurat <- FindClusters(com.seurat, resolution = 0.5, cluster.name = "com_clusters", verbose=FALSE)
+  com.seurat <- RunUMAP(com.seurat, dims = 1:10, verbose=FALSE)
+  
+  hyper.com_clusters <- dplyr::select(com.seurat@meta.data, cell, com_clusters)
+  metadata <- left_join(metadata, hyper.com_clusters, by=join_by(cell))
+  metadata$com_clusters <- factor(metadata$com_clusters)
+  
+  return(metadata)
+}
+```
+
+We can see that communication clusters do not necessarily line up with the annotated cell types.
+```{r}
+com_clusters <- generate_com_clusters(infMat, metadata)
+
+annotations <- select(meta.data, celltype)
+annotations$cell <- rownames(annotations)
+com_clusters <- left_join(com_clusters, annotations, by=join_by(cell))
+com_clusters <- filter(com_clusters, group != "gene")
+
+ggplot(com_clusters, aes(x=com_clusters, fill=celltype)) +
+  geom_bar() +
+  theme_classic()
+```
