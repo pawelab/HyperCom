@@ -25,10 +25,14 @@ HyperCom requires three inputs:
 
 2. A dataframe of cell metadata containing sample and optionally group columns which need to be specified as variables
 
-3. A dataframe of ligand-receptor (LR) interactions where each gene in an interaction has its own column
-  + HyperCom contains the correctly formatted CellChat database for human and mouse which can be accessed via the `cellchat.hs.lrdb` and `cellchat.mm.lrdb` respectively.
+3. A dataframe of ligand-receptor (LR) interactions. HyperCom contains 2 built in LR databases formatted properly:
+
+  + CellChat human `cellchat.hs.lrdb`
+  
+  + CellChat mouse `cellchat.mm.lrdb`
 
 In this vignette we will use a 1000 cell subset of heart failure from [Alexanian et al, 2021](https://doi.org/10.1038/s41586-021-03674-1).
+This subset is available on Github.
 ```{r}
 counts <- readRDS("alexanian2021.counts.rds")
 dim(counts)
@@ -103,9 +107,10 @@ dim(infMat)
 
 ## Downstream Analysis
 To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
-Additionally to reduce memory, we reduce the number of columns to just node, sample, and group.
+Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. For this vignettes' visualization, we will also keep
+UMAP_1 and UMAP_2
 ```{r}
-metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column, outfile=NULL)
+metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column, keep=c("UMAP_1", "UMAP_2"), outfile=NULL)
 head(metadata)
 ```
 
@@ -119,14 +124,15 @@ head(network.score)
 
 Here we can see that globally, communication is higher in TAC.
 ```{r}
-meta.data$cell <- rownames(meta.data)
-network.score <- left_join(network.score, meta.data, by=join_by(cell))
+network.score <- left_join(network.score, metadata, by=join_by(cell))
 
 transparent <- rgb(255, 255, 255, max=255, alpha = 0)
-ggplot(network.score, aes(x=UMAP_1, y=UMAP_2, colour=hypercom)) +
+ggplot(network.score, aes(x=as.numeric(UMAP_1), y=as.numeric(UMAP_2), colour=hypercom)) +
   geom_point(size=0.5) +
   scale_color_gradient2(low="blue", mid=transparent, high="red", limits=c(-1,1)) +
-  facet_wrap(vars(condition)) +
+  facet_wrap(vars(group)) +
+  xlab("UMAP_1") +
+  ylab("UMAP_2") +
   theme_classic()
 ```
 

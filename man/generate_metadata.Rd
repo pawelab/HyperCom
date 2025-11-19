@@ -9,6 +9,7 @@ generate_metadata(
   metadata,
   sample,
   group = NULL,
+  keep = NULL,
   outfile = "5.metadata.csv"
 )
 }
@@ -20,6 +21,8 @@ generate_metadata(
 \item{sample}{A string that is the column name for sample in the provided metadata}
 
 \item{group}{A string that is the column name for group in the provided metadata}
+
+\item{keep}{A vector of strings that are column names to keep}
 
 \item{outfile}{A string naming the output file}
 }

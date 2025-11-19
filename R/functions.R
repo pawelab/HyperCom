@@ -68,29 +68,32 @@ generate_lrs_table <- function(counts, lrdb, outfile="1.lrs.csv"){
 #' @returns A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge
 #' @export
 generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
-  lr.edges <- unique(tidyr::pivot_longer(lrs, !edges, values_to = "nodes", names_to=NULL, values_drop_na = TRUE))
+  lr.edges <- unique(tidyr::pivot_longer(lrs, !interaction, values_to = "node", names_to=NULL, values_drop_na = TRUE))
   lr.edges$weight <- 1
+  colnames(lr.edges) <- c("edge", "node", "weight")
 
-  gene.edges <- data.frame(edges=colnames(counts), nodes=colnames(counts), weight=1)
+  gene.edges <- data.frame(edge=colnames(counts), node=colnames(counts), weight=1)
 
-  complexes <- unique(dplyr::select(lrs, 3:length(lrs)))
-  complexes <- complexes <- dplyr::filter(complexes, !is.na(complexes$r2))
+  if("r2" %in% colnames(lrs)){
+    complexes <- unique(dplyr::select(lrs, 3:length(lrs)))
+    complexes <- complexes <- dplyr::filter(complexes, !is.na(complexes$r2))
 
-  for (i in 1:dim(complexes)[1]) {
-    genes <- na.omit(unlist(complexes[i, 1:dim(complexes)[2]]))
-    complex.size <- length(genes)
-    edge.name <- paste0(genes, collapse="_")
-    complex.nodes <- counts[, genes] > 0
-    complex.df <- data.frame(edges=edge.name, nodes=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), rowSums(complex.nodes)))
-    complex.df <- dplyr::filter(complex.df, weight == complex.size)
-    complex.df$weight <- 1
-    lr.edges <- dplyr::bind_rows(lr.edges, complex.df)
+    for (i in 1:dim(complexes)[1]) {
+      genes <- na.omit(unlist(complexes[i, 1:dim(complexes)[2]]))
+      complex.size <- length(genes)
+      edge.name <- paste0(genes, collapse="_")
+      complex.nodes <- counts[, genes] > 0
+      complex.df <- data.frame(edge=edge.name, node=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), rowSums(complex.nodes)))
+      complex.df <- dplyr::filter(complex.df, weight == complex.size)
+      complex.df$weight <- 1
+      lr.edges <- dplyr::bind_rows(lr.edges, complex.df)
+    }
   }
 
   counts[counts == 0] <- NA
   counts <- as.data.frame(counts)
-  counts$nodes <- row.names(counts)
-  exp.edges <- tidyr::pivot_longer(counts, !nodes, names_to="edges", values_to="weight", values_drop_na=TRUE)
+  counts$node <- row.names(counts)
+  exp.edges <- tidyr::pivot_longer(counts, !node, names_to="edge", values_to="weight", values_drop_na=TRUE)
   exp.edges$weight <- 1
   exp.edges <- exp.edges[,c(2, 1, 3)]
 
@@ -112,7 +115,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
 #' @returns An adjacency matrix where each entry is the number of shared hyperedges between nodes
 #' @export
 generate_adjacency_matrix <- function(hyperedgelist, outfile="3.adj.rds"){
-  incidence.matrix <- xtabs(~nodes + edges, hyperedgelist, sparse=TRUE)
+  incidence.matrix <- xtabs(~node + edge, hyperedgelist, sparse=TRUE)
   adj <- Matrix::tcrossprod(incidence.matrix)
   diag(adj) <- 0
   adj <- as.matrix(adj)
@@ -167,10 +170,11 @@ calculate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds"){
 #' @param metadata A dataframe containing cell metadata
 #' @param sample A string that is the column name for sample in the provided metadata
 #' @param group A string that is the column name for group in the provided metadata
+#' @param keep A vector of strings that are column names to keep
 #' @param outfile A string naming the output file
 #' @returns An influence matrix
 #' @export
-generate_metadata <- function(infMat, metadata, sample, group=NULL, outfile="5.metadata.csv"){
+generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
   index <- data.frame(cell = row.names(infMat))
   metadata$cell <- rownames(metadata)
 
@@ -181,6 +185,11 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, outfile="5.m
   }
   else{
     clean.df$group <- factor(clean.df$group, levels=c(unique(clean.df$group), "gene"))
+  }
+
+  if(!is.null(keep)){
+    additional <- metadata[, keep]
+    clean.df <- cbind(clean.df, additional)
   }
 
   clean.df <- dplyr::left_join(index, clean.df, by=dplyr::join_by(cell))
