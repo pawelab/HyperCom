@@ -430,21 +430,3 @@ if(!is.null(outfile)){
 }
 return(lrs)
 }
-
-#' Load outputs from running HyperCom
-#'
-#' `read_vars` loads outputs from HyperCom
-#'
-#' This function loads the influence matrix, metadata, and ligand-receptor priority
-#' from a directory and appends a supplied prefix to the variable names.
-#' @param prefix A string to append to the variable name
-#' @param dir A string of the directory to load files from
-read_vars <- function(prefix="", dir="."){
-  if(prefix != ""){
-    prefix <- paste0(prefix, ".")
-  }
-  dir <- paste0(dir, "/")
-  assign(paste0(prefix, "infMat"), readRDS(paste0(dir, "4.infMat.rds")), envir = parent.frame())
-  assign(paste0(prefix, "metadata"), read.csv(paste0(dir, "5.metadata.csv")), envir = parent.frame())
-  assign(paste0(prefix, "priority"), read.csv(paste0(dir, "6.priority.csv")), envir = parent.frame())
-}
