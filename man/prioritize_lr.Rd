@@ -10,6 +10,7 @@ prioritize_lr(
   infMat,
   metadata,
   parallel = TRUE,
+  cl = NULL,
   outfile = "6.priority.csv"
 )
 }
@@ -25,6 +26,8 @@ interactions with only interactions present in the counts matrix}
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
 \item{parallel}{A boolean of whether to run in parallel}
+
+\item{cl}{A compute cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
 
 \item{outfile}{A string naming the output file}
 }

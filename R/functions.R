@@ -364,16 +364,19 @@ score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param parallel A boolean of whether to run in parallel
+#' @param cl A compute cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
 #' @param outfile A string naming the output file
 #' @returns An dataframe of ligand-receptor pairs ordered by priority score
 #' @export
-prioritize_lr <- function(lrs, adj, infMat, metadata, parallel=TRUE, outfile="6.priority.csv"){
+prioritize_lr <- function(lrs, adj, infMat, metadata, parallel=TRUE, cl=NULL, outfile="6.priority.csv"){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
   cells <- dplyr::filter(metadata, sample != "gene")$cell
 
   if(parallel){
-    cl <- parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")
+    if(is.null(cl)){
+      cl <- parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")
+    }
     doParallel::registerDoParallel(cl)
     parallel::clusterExport(cl, c("process_transition", "score_hypercom", "fast_div", "fast_mult"), envir=environment())
   } else{
