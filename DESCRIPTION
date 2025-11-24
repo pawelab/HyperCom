@@ -2,10 +2,10 @@ Package: HyperCom
 Title: A hypergraph method to understand cell-cell communication
 Version: 0.0.0.9000
 Authors@R: 
-    person("Justin", "Moy", , "jmmoy@bu.edu", role = c("aut", "cre"),
+    c(person("Justin", "Moy", , "jmmoy@bu.edu", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7566-2215")),
     person("Pawel", "Przytycki", , "pawel@bu.edu", role = c("aut", "ths"),
-           comment = c(ORCID = "0000-0002-3360-6936"))
+           comment = c(ORCID = "0000-0002-3360-6936")))
 Description: A hypergraph based method to understand cell-cell communication.
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
