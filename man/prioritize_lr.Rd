@@ -32,7 +32,7 @@ interactions with only interactions present in the counts matrix}
 \item{outfile}{A string naming the output file}
 }
 \value{
-An dataframe of ligand-receptor pairs ordered by priority score
+A dataframe of ligand-receptor pairs ordered by priority score
 }
 \description{
 \code{prioritize_lr} returns an ordered list of ligand-receptor pairs

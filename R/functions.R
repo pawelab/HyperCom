@@ -366,7 +366,7 @@ score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A compute cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
 #' @param outfile A string naming the output file
-#' @returns An dataframe of ligand-receptor pairs ordered by priority score
+#' @returns A dataframe of ligand-receptor pairs ordered by priority score
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, parallel=TRUE, cl=NULL, outfile="6.priority.csv"){
   num.groups <- length(unique(metadata$group)) - 1

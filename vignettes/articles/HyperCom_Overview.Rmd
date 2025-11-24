@@ -32,15 +32,15 @@ HyperCom requires three inputs:
   + CellChat mouse `cellchat.mm.lrdb`
 
 In this vignette we will use a 1000 cell subset of heart failure from [Alexanian et al, 2021](https://doi.org/10.1038/s41586-021-03674-1).
-This subset is available on Github.
+This example subset is included in the package as `alexanian2021.counts` and `alexanian2021.metadata`.
 ```{r}
-counts <- readRDS("alexanian2021.counts.rds")
+counts <- alexanian2021.counts
 dim(counts)
 head(rownames(counts))
 head(colnames(counts))
 ```
 ```{r}
-meta.data <- read.csv("alexanian2021.metadata.csv", row.names = 1)
+meta.data <- alexanian2021.metadata
 sample.column <- "sample"
 group.column <- "condition"
 head(meta.data)
@@ -141,7 +141,7 @@ We can also identify important LR pairs by using HyperCom scoring on LR pairs.
 This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
 The `prioritize_lr` function can be run sequentially or parallelly. The parallel implementation uses the `parallelly` package.
 ```{r}
-priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, parallel=TRUE, outfile=NULL)
+priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, parallel=TRUE, cl=NULL, outfile=NULL)
 head(priority)
 ```
 
