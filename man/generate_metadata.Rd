@@ -22,7 +22,7 @@ generate_metadata(
 
 \item{group}{A string that is the column name for group in the provided metadata}
 
-\item{keep}{A vector of strings that are column names to keep}
+\item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
 
 \item{outfile}{A string naming the output file}
 }

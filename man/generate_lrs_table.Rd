@@ -7,7 +7,7 @@
 generate_lrs_table(counts, lrdb, outfile = "1.lrs.csv")
 }
 \arguments{
-\item{counts}{A filtered dense matrix with row names being genes and column names being cells}
+\item{counts}{A filtered matrix with row names being genes and column names being cells}
 
 \item{lrdb}{A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}

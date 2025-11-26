@@ -39,12 +39,14 @@ dim(counts)
 head(rownames(counts))
 head(colnames(counts))
 ```
+
 ```{r}
 meta.data <- alexanian2021.metadata
 sample.column <- "sample"
 group.column <- "condition"
 head(meta.data)
 ```
+
 ```{r}
 ggplot(meta.data, aes(x=UMAP_1, y=UMAP_2, colour=celltype)) +
   geom_point(size=0.5) +
@@ -60,7 +62,13 @@ dim(lrdb)
 ```{r}
 head(lrdb)
 ```
+
 ## Running HyperCom
+The standard pipeline can be run using the `HyperCom` function. This vignette details each component function of the pipeline.
+```{r, eval=FALSE}
+HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts, metadata=alexanian2021.metadata, sample="sample",
+         group="condition", keep=NULL, significance=FALSE, parallel=FALSE, cl=NULL)
+```
 
 ### Preprocessing
 In order to reduce memory usage, we first filter the counts matrix to only genes present in the LR interactions with expression greater than 0.
@@ -101,14 +109,13 @@ dim(adj)
 ### Calculating Network Connectivity
 In order to calculate the network connectivity of the hypergraph we perform a random walk on the adjacency matrix to produce an influence matrix.
 ```{r}
-infMat <- calculate_infMat(adj=adj, outfile=NULL)
+infMat <- generate_infMat(adj=adj, outfile=NULL)
 dim(infMat)
 ```
 
 ## Downstream Analysis
 To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
-Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. For this vignettes' visualization, we will also keep
-UMAP_1 and UMAP_2
+Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. For this vignettes' visualization, we will also keep UMAP_1 and UMAP_2
 ```{r}
 metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column,
                               keep=c("UMAP_1", "UMAP_2"), outfile=NULL)
@@ -140,8 +147,9 @@ ggplot(network.score, aes(x=as.numeric(UMAP_1), y=as.numeric(UMAP_2), colour=hyp
 ### Identifying Important LR Pairs
 We can also identify important LR pairs by using HyperCom scoring on LR pairs.
 This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
-A p-value can be calculated for each LR pair, but doing so will vastly increase the time to run. By default the `significance` arg is set to false.
-The `prioritize_lr` function can be run sequentially or parallelly. The parallel implementation uses the `parallelly` package.
+A p-value can be calculated for each LR pair, but doing so will vastly increase the time to run. By default the `significance` arg is FALSE.
+The `prioritize_lr` function can be run sequentially or parallelly and by default the `parallel` arg is FALSE.
+The parallel implementation uses the `parallelly` package, but the `cl` can be supplied any object of class `cluster` depending on your system's architecture.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, significance=FALSE, parallel=TRUE, cl=NULL,
                           outfile=NULL)

@@ -4,18 +4,18 @@
 #'
 #' This function takes a gene x cell counts matrix and filters it to
 #' just ligand and receptor genes with greater than 0 expression.
-#' @param counts A dense matrix with row names being genes and column names being cells
+#' @param counts A matrix with row names being genes and column names being cells
 #' @param lrdb A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
 #' @param outfile A string naming the output file
 #' @returns A dense matrix with row names being genes and column names being cells of only ligand and receptor genes with greater than 0 expression
 #' @export
 filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
-  counts <- t(counts)
+  counts <- Matrix::t(counts)
   genes <- unique(c(unlist(lrdb[,2:length(lrdb)])))
   features <- intersect(colnames(counts), genes)
   exp <- counts[, features]
-  genes.exp <- collapse::fmean(exp)
+  genes.exp <- Matrix::colMeans(exp)
   genes.filter <- names(genes.exp[genes.exp > 0])
   cc.counts <- counts[, genes.filter]
   if(!is.null(outfile)){
@@ -30,7 +30,7 @@ filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
 #'
 #' This function takes a filtered gene x cell counts matrix and table of ligand-receptors interactions to produce
 #' a table of ligand-receptors interactions in the counts matrix.
-#' @param counts A filtered dense matrix with row names being genes and column names being cells
+#' @param counts A filtered matrix with row names being genes and column names being cells
 #' @param lrdb A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
 #' @param outfile A string naming the output file
@@ -60,7 +60,7 @@ generate_lrs_table <- function(counts, lrdb, outfile="1.lrs.csv"){
 #'
 #' This function takes a filtered gene x cell counts matrix and table of ligand-receptors interactions to produce
 #' a table of ligand-receptors interactions in the counts matrix.
-#' @param counts A filtered dense matrix with row names being genes and column names being cells
+#' @param counts A filtered matrix with row names being genes and column names being cells
 #' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 #' interactions with only interactions present in the counts matrix
@@ -83,7 +83,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
       complex.size <- length(genes)
       edge.name <- paste0(genes, collapse="_")
       complex.nodes <- counts[, genes] > 0
-      complex.df <- data.frame(edge=edge.name, node=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), rowSums(complex.nodes)))
+      complex.df <- data.frame(edge=edge.name, node=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), Matrix::rowSums(complex.nodes)))
       complex.df <- dplyr::filter(complex.df, weight == complex.size)
       complex.df$weight <- 1
       lr.edges <- dplyr::bind_rows(lr.edges, complex.df)
@@ -91,7 +91,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
   }
 
   counts[counts == 0] <- NA
-  counts <- as.data.frame(counts)
+  counts <- data.frame(as.matrix(counts))
   counts$node <- row.names(counts)
   exp.edges <- tidyr::pivot_longer(counts, !node, names_to="edge", values_to="weight", values_drop_na=TRUE)
   exp.edges$weight <- 1
@@ -119,7 +119,10 @@ generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
   adj <- Matrix::tcrossprod(incidence.matrix)
   diag(adj) <- 0
 
-  adj <- as.matrix(adj)
+  rm.indices <- which(Matrix::rowSums(adj) == 0)
+  if(length(rm.indices > 0)) {
+    adj <- adj[-rm.indices, -rm.indices]
+  }
 
   if(!is.null(outfile)){
     saveRDS(adj, outfile)
@@ -129,7 +132,7 @@ generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
 
 #' Calculate influence matrix of hypergraph
 #'
-#' `calculate_infMat` returns the influence matrix of the hypergraph
+#' `generate_infMat` returns the influence matrix of the hypergraph
 #'
 #' This function takes an adjacency matrix and returns its influence matrix using heat diffusion.
 #' @param adj A named adjacency matrix
@@ -137,11 +140,7 @@ generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
 #' @param outfile A string naming the output file
 #' @returns An influence matrix
 #' @export
-calculate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds"){
-  rm.indices <- which(rowSums(adj) == 0)
-  if(length(rm.indices > 0)) {
-    adj <- adj[-rm.indices, -rm.indices]
-  }
+generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds"){
   len <- dim(adj)[1]
 
   D <- as.matrix(Matrix::Diagonal(len))
@@ -170,7 +169,7 @@ calculate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds"){
 #' @param metadata A dataframe containing cell metadata
 #' @param sample A string that is the column name for sample in the provided metadata
 #' @param group A string that is the column name for group in the provided metadata
-#' @param keep A vector of strings that are column names to keep
+#' @param keep A vector of strings that are additional column names to keep in the provided metadata
 #' @param outfile A string naming the output file
 #' @returns An influence matrix
 #' @export
@@ -411,10 +410,9 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
   gini.max <- 1-(1/num.groups)
   cells <- dplyr::filter(metadata, sample != "gene")$cell
 
-  priority <- foreach::`%dopar%`(foreach::foreach(i=1:length(lrs$ligand), .combine=c),  {
+  priority <- foreach::`%dopar%`(foreach::foreach(i=1:length(lrs$ligand), .packages=c("HyperCom", "Matrix"), .combine=c), {
     l <- lrs$ligand[i]
     rs <- stats::na.omit(unlist(lrs[i, 3:dim(lrs)[2]]))
-
     cc.score <- score_hypercom(infMat, metadata, l, rs)
     cc.score <- dplyr::left_join(cc.score, metadata, by=dplyr::join_by(cell))
 
@@ -424,10 +422,10 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
     cc.score <- cc.score[cells,]
 
     if(all(l == rs)){
-      pair.rows <- as.data.frame(adj[l, cells])
+      pair.rows <- data.frame(as.matrix(adj[l, cells]))
       colnames(pair.rows) <- l
     }else{
-      pair.rows <- as.data.frame(t(adj[c(l, rs), cells]))
+      pair.rows <- data.frame(as.matrix(Matrix::t(adj[c(l, rs), cells])))
     }
 
     cc.score$present <- do.call(pmax, pair.rows)
@@ -460,13 +458,13 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
 #' to prioritize ligand-receptor pairs.
 #' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-#' interactions with only interactions present in the counts matrix
+#' interactions with only interactions present in the counts matrix.
 #' @param adj A named adjacency matrix
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
-#' @param cl A compute cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
+#' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
 #' @param outfile A string naming the output file
 #' @returns A dataframe of ligand-receptor pairs ordered by priority score
 #' @export
@@ -477,10 +475,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, significance=FALSE, parall
 
   if(parallel){
     if(is.null(cl)){
-      cl <- parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")
+      cl <- parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd="qrsh", rshopts=c("-inherit", "-nostdin", "-V"), autoStop=TRUE, outfile="")
     }
     doParallel::registerDoParallel(cl)
-    parallel::clusterExport(cl, c("process_transition", "score_hypercom", "fast_div", "fast_mult"), envir=environment())
   } else{
     foreach::registerDoSEQ()
   }
@@ -508,4 +505,34 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, significance=FALSE, parall
     utils::write.csv(lrs, outfile, row.names = FALSE)
   }
   return(lrs)
+}
+
+#' Run the HyperCom pipeline
+#'
+#' `HyperCom` Runs the HyperCom pipeline
+#'
+#' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency-matrix`, `generate_infMat`, `generate-metadata`, and `prioritize_lr`.
+#' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions.
+#' @param adj A named adjacency matrix
+#' @param infMat A named influence matrix
+#' @param metadata A dataframe containing columns named cell, sample and group
+#' @param sample A string that is the column name for sample in the provided metadata
+#' @param group A string that is the column name for group in the provided metadata
+#' @param keep A vector of strings that are additional column names to keep in the provided metadata
+#' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
+#' @param parallel A boolean of whether to run in parallel
+#' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
+#' @param outfile A string naming the output file
+#' @returns 0 if run successfully
+#' @export
+HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, significance=FALSE, parallel=FALSE, cl=NULL){
+  counts <- filter_counts(counts, lrdb)
+  lrs <- generate_lrs_table(counts, lrdb)
+  hyperedges <- generate_hyperedges(counts, lrs)
+  adj <- generate_adjacency_matrix(hyperedges)
+  infMat <- generate_infMat(adj)
+  metadata <- generate_metadata(infMat, metadata, sample, group, keep)
+  priority <- prioritize_lr(lrs, adj, infMat, metadata, significance, parallel, cl)
+  return(0)
 }

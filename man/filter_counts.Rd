@@ -7,7 +7,7 @@
 filter_counts(counts, lrdb, outfile = "0.counts.rds")
 }
 \arguments{
-\item{counts}{A dense matrix with row names being genes and column names being cells}
+\item{counts}{A matrix with row names being genes and column names being cells}
 
 \item{lrdb}{A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}
