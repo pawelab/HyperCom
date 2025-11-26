@@ -208,6 +208,7 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
 #' This function takes two matrices and multiplies them together element-wise.
 #' @param A,B Matrices
 #' @returns A matrix
+#' @noRd
 fast_mult <- function(A, B){
   setup <- {AA <- A*1}
   return(collapse::setop(AA, "*", B))
@@ -220,6 +221,7 @@ fast_mult <- function(A, B){
 #' This function takes two matrices and divides them together element-wise.
 #' @param A,B Matrices
 #' @returns A matrix
+#' @noRd
 fast_div <- function(A, B){
   setup <- {AA <- A/1}
   return(collapse::setop(AA, "/", B))
@@ -234,6 +236,7 @@ fast_div <- function(A, B){
 #' @param trans A named matrix
 #' @param metadata A dataframe containing columns named sample and group
 #' @returns A list containing four elements: forward, backward, average, and difference vectors
+#' @noRd
 process_transition <- function(trans, metadata){
   cells.idx <- metadata$group != "gene"
   mat.names <- metadata$cell[cells.idx]
@@ -361,6 +364,7 @@ score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param count An integer of the number of interactions to generate
 #' @return A dataframe of random gene interactions
+#' @noRd
 generate_background_lrs <- function(lrs, metadata, count=1000){
   background <- data.frame(interaction_name=rep("background", count))
   nodes <- dplyr::filter(metadata, sample=="gene")$cell
@@ -382,6 +386,7 @@ generate_background_lrs <- function(lrs, metadata, count=1000){
 #' @param x A numeric
 #' @param background A numeric vector
 #' @return A numeric p-value
+#' @noRd
 permutation_test <- function(x, background){
   sum(abs(background) >= abs(x)) / length(background)
 }
@@ -400,6 +405,7 @@ permutation_test <- function(x, background){
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @return A numeric vector of priority scores
+#' @noRd
 calculate_priority <- function(lrs, adj, infMat, metadata){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
