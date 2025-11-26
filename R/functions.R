@@ -42,14 +42,14 @@ generate_lrs_table <- function(counts, lrdb, outfile="1.lrs.csv"){
   length <- dim(lrdb)[2]
   keep <- c()
   for (i in 1:dim(lrdb)[1]) {
-    lrs <- na.omit(unlist(lrdb[i, 2:length]))
+    lrs <- stats::na.omit(unlist(lrdb[i, 2:length]))
     keep <- c(keep, all(lrs %in% colnames(counts)))
   }
   lrdb <- lrdb[keep,]
   lrdb <- Filter(function(x)!all(is.na(x)), lrdb)
 
   if(!is.null(outfile)){
-    write.csv(lrdb, outfile, row.names = FALSE)
+    utils::write.csv(lrdb, outfile, row.names = FALSE)
   }
   return(lrdb)
 }
@@ -79,7 +79,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
     complexes <- complexes <- dplyr::filter(complexes, !is.na(complexes$r2))
 
     for (i in 1:dim(complexes)[1]) {
-      genes <- na.omit(unlist(complexes[i, 1:dim(complexes)[2]]))
+      genes <- stats::na.omit(unlist(complexes[i, 1:dim(complexes)[2]]))
       complex.size <- length(genes)
       edge.name <- paste0(genes, collapse="_")
       complex.nodes <- counts[, genes] > 0
@@ -100,7 +100,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
   edges <- rbind(lr.edges, gene.edges, exp.edges)
 
   if(!is.null(outfile)){
-    write.csv(edges, outfile, row.names=FALSE)
+    utils::write.csv(edges, outfile, row.names=FALSE)
   }
   return(edges)
 }
@@ -110,14 +110,15 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
 #' `generate_adjacency_matrix` returns the adjacency matrix of the hypergraph
 #'
 #' This function takes a dataframe of hyperedges and returns its adjacency matrix.
-#' @param hyperedgelist A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge
+#' @param hyperedges A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge
 #' @param outfile A string naming the output file
 #' @returns An adjacency matrix where each entry is the number of shared hyperedges between nodes
 #' @export
-generate_adjacency_matrix <- function(hyperedgelist, outfile="3.adj.rds"){
-  incidence.matrix <- xtabs(~node + edge, hyperedgelist, sparse=TRUE)
+generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
+  incidence.matrix <- stats::xtabs(~node + edge, hyperedges, sparse=TRUE)
   adj <- Matrix::tcrossprod(incidence.matrix)
   diag(adj) <- 0
+
   adj <- as.matrix(adj)
 
   if(!is.null(outfile)){
@@ -149,8 +150,7 @@ calculate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds"){
   W <- as.matrix(W)
   M <- D - W
 
-  Rcpp::cppFunction("arma::mat armaInv(const arma::mat & x) { return arma::inv(x); }", depends="RcppArmadillo")
-  infMat <- r*armaInv(M)
+  infMat <- r * Matrix::solve(M)
   rownames(infMat) <- rownames(adj)
   colnames(infMat) <- rownames(adj)
 
@@ -196,7 +196,7 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
   clean.df[is.na(clean.df)] <- "gene"
 
   if(!is.null(outfile)){
-    write.csv(clean.df, outfile, row.names = FALSE)
+    utils::write.csv(clean.df, outfile, row.names = FALSE)
   }
   return(clean.df)
 }
@@ -346,46 +346,68 @@ score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
   scores.df <- data.frame(cell=mat.names, sender=collapse::fmean(f.mat, na.rm=TRUE), receiver=collapse::fmean(b.mat, na.rm=TRUE), dif=collapse::fmean(dif.mat, na.rm=TRUE), avg=collapse::fmean(avg.mat, na.rm=TRUE))
   scores.df$hypercom <- dplyr::percent_rank(abs(scores.df$dif))
   scores.df$hypercom <- sign(scores.df$dif) * scores.df$hypercom * scores.df$avg
-  scores.df <- dplyr::arrange(scores.df, desc(hypercom))
+  scores.df <- dplyr::arrange(scores.df, dplyr::desc(hypercom))
   return(scores.df)
 }
 
-#' Order ligand receptor pairs based on signalling strength and specificity
+#' Generate a background set of random gene interactions
 #'
-#' `prioritize_lr` returns an ordered list of ligand-receptor pairs
+#' `generate_background_lrs` returns a dataframe of random gene interactions.
+#'
+#' This generates a table of random gene interactions where the number of genes in an interaction is equal to the complex size + 1.
+#' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
+#' interactions with only interactions present in the counts matrix
+#' @param metadata A dataframe containing columns named cell, sample and group
+#' @param count An integer of the number of interactions to generate
+#' @return A dataframe of random gene interactions
+generate_background_lrs <- function(lrs, metadata, count=1000){
+  background <- data.frame(interaction_name=rep("background", count))
+  nodes <- dplyr::filter(metadata, sample=="gene")$cell
+  for (i in 2:dim(lrs)[2]) {
+    col <- sample(nodes, count, replace = TRUE)
+    background <- cbind(background, col)
+  }
+
+  colnames(background) <- colnames(lrs)
+
+  return(background)
+}
+
+#' Perform a permutation test
+#'
+#' `permutation_test` returns a numeric p-value
+#'
+#' This function takes a numeric and list of numeric vector and returns how many values in the vector are less than the numeric.
+#' @param x A numeric
+#' @param background A numeric vector
+#' @return A numeric p-value
+permutation_test <- function(x, background){
+  sum(abs(background) >= abs(x)) / length(background)
+}
+
+#' Score ligand receptor pairs based on signalling strength and specificity
+#'
+#' `calculate_priority` returns an ordered list of ligand-receptor pairs
 #'
 #' This function takes list of all ligand-receptor pairs in the influence matrix,
 #' the adjacency matrix, a named influence matrix, and the corresponding metadata
-#' to prioritize ligand-receptor pairs.
+#' to score ligand-receptor pairs.
 #' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 #' interactions with only interactions present in the counts matrix
 #' @param adj A named adjacency matrix
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
-#' @param parallel A boolean of whether to run in parallel
-#' @param cl A compute cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
-#' @param outfile A string naming the output file
-#' @returns A dataframe of ligand-receptor pairs ordered by priority score
-#' @export
-prioritize_lr <- function(lrs, adj, infMat, metadata, parallel=TRUE, cl=NULL, outfile="6.priority.csv"){
+#' @return A numeric vector of priority scores
+calculate_priority <- function(lrs, adj, infMat, metadata){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
   cells <- dplyr::filter(metadata, sample != "gene")$cell
 
-  if(parallel){
-    if(is.null(cl)){
-      cl <- parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")
-    }
-    doParallel::registerDoParallel(cl)
-    parallel::clusterExport(cl, c("process_transition", "score_hypercom", "fast_div", "fast_mult"), envir=environment())
-  } else{
-    foreach::registerDoSEQ()
-  }
-
-  statistics <- foreach::`%dopar%`(foreach::foreach(i=1:length(lrs$ligand), .combine=c),  {
+  priority <- foreach::`%dopar%`(foreach::foreach(i=1:length(lrs$ligand), .combine=c),  {
     l <- lrs$ligand[i]
-    rs <- na.omit(unlist(lrs[i, 3:dim(lrs)[2]]))
+    rs <- stats::na.omit(unlist(lrs[i, 3:dim(lrs)[2]]))
 
     cc.score <- score_hypercom(infMat, metadata, l, rs)
     cc.score <- dplyr::left_join(cc.score, metadata, by=dplyr::join_by(cell))
@@ -420,16 +442,64 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, parallel=TRUE, cl=NULL, ou
     score
   })
 
+  return(priority)
+}
+
+#' Order ligand receptor pairs based on signalling strength and specificity
+#'
+#' `prioritize_lr` returns an ordered list of ligand-receptor pairs
+#'
+#' This function takes list of all ligand-receptor pairs in the influence matrix,
+#' the adjacency matrix, a named influence matrix, and the corresponding metadata
+#' to prioritize ligand-receptor pairs.
+#' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
+#' interactions with only interactions present in the counts matrix
+#' @param adj A named adjacency matrix
+#' @param infMat A named influence matrix
+#' @param metadata A dataframe containing columns named cell, sample and group
+#' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
+#' @param parallel A boolean of whether to run in parallel
+#' @param cl A compute cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
+#' @param outfile A string naming the output file
+#' @returns A dataframe of ligand-receptor pairs ordered by priority score
+#' @export
+prioritize_lr <- function(lrs, adj, infMat, metadata, significance=FALSE, parallel=FALSE, cl=NULL, outfile="6.priority.csv"){
+  if(significance){
+    background.lrs <- generate_background_lrs(lrs, metadata)
+  }
+
+  if(parallel){
+    if(is.null(cl)){
+      cl <- parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")
+    }
+    doParallel::registerDoParallel(cl)
+    parallel::clusterExport(cl, c("process_transition", "score_hypercom", "fast_div", "fast_mult"), envir=environment())
+  } else{
+    foreach::registerDoSEQ()
+  }
+
+  priority <- calculate_priority(lrs, adj, infMat, metadata)
+
+  if(significance){
+    background.priority <- calculate_priority(background.lrs, adj, infMat, metadata)
+  }
+
   if(parallel){
     parallel::stopCluster(cl)
     gc()
   }
 
-lrs$priority <- statistics
-lrs <- dplyr::arrange(lrs, dplyr::desc(priority))
+  lrs$priority <- priority
+  lrs <- dplyr::arrange(lrs, dplyr::desc(priority))
 
-if(!is.null(outfile)){
-  write.csv(lrs, outfile, row.names = FALSE)
-}
-return(lrs)
+  if(significance){
+    lrs$p <- as.numeric(lapply(lrs$priority, FUN=permutation_test, background=background.priority))
+    lrs$p.adj <- stats::p.adjust(lrs$p, method = "BH")
+  }
+
+  if(!is.null(outfile)){
+    utils::write.csv(lrs, outfile, row.names = FALSE)
+  }
+  return(lrs)
 }

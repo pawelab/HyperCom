@@ -4,10 +4,10 @@
 \alias{generate_adjacency_matrix}
 \title{Generate adjacency matrix of hypergraph}
 \usage{
-generate_adjacency_matrix(hyperedgelist, outfile = "3.adj.rds")
+generate_adjacency_matrix(hyperedges, outfile = "3.adj.rds")
 }
 \arguments{
-\item{hyperedgelist}{A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge}
+\item{hyperedges}{A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge}
 
 \item{outfile}{A string naming the output file}
 }

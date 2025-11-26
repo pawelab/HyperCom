@@ -19,10 +19,10 @@ Imports:
   mltools,
   parallel,
   parallelly,
-  Rcpp,
-  RcppArmadillo,
   Rfast,
-  tidyr
+  stats,
+  tidyr,
+  utils
 Config/Needs/website: rmarkdown
 Depends: 
     R (>= 2.10)

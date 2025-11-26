@@ -27,9 +27,9 @@ HyperCom requires three inputs:
 
 3. A dataframe of ligand-receptor (LR) interactions. HyperCom contains 2 built in LR databases formatted properly:
 
-  + CellChat human `cellchat.hs.lrdb`
+    + CellChat human `cellchat.hs.lrdb`
   
-  + CellChat mouse `cellchat.mm.lrdb`
+    + CellChat mouse `cellchat.mm.lrdb`
 
 In this vignette we will use a 1000 cell subset of heart failure from [Alexanian et al, 2021](https://doi.org/10.1038/s41586-021-03674-1).
 This example subset is included in the package as `alexanian2021.counts` and `alexanian2021.metadata`.
@@ -87,14 +87,14 @@ To generate the hyperedges, which are edges that contain multiple nodes, we use 
 
 HyperCom represents these hyperedges as a dataframe with an edge and node column where the node belongs to the edge. The weight is set to 1 for each edge. 
 ```{r}
-hyperedgelist <- generate_hyperedges(counts=lr.counts, lrs=lrs, outfile=NULL)
-head(hyperedgelist)
+hyperedges <- generate_hyperedges(counts=lr.counts, lrs=lrs, outfile=NULL)
+head(hyperedges)
 ```
 
 We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
 Each entry is the number hyperedges shared by nodes.
 ```{r}
-adj <- generate_adjacency_matrix(hyperedgelist=hyperedgelist, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges=hyperedges, outfile=NULL)
 dim(adj)
 ```
 
@@ -110,7 +110,8 @@ To account for genes now being present in the matrices, we then process the meta
 Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. For this vignettes' visualization, we will also keep
 UMAP_1 and UMAP_2
 ```{r}
-metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column, keep=c("UMAP_1", "UMAP_2"), outfile=NULL)
+metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column,
+                              keep=c("UMAP_1", "UMAP_2"), outfile=NULL)
 head(metadata)
 ```
 
@@ -139,9 +140,11 @@ ggplot(network.score, aes(x=as.numeric(UMAP_1), y=as.numeric(UMAP_2), colour=hyp
 ### Identifying Important LR Pairs
 We can also identify important LR pairs by using HyperCom scoring on LR pairs.
 This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
+A p-value can be calculated for each LR pair, but doing so will vastly increase the time to run. By default the `significance` arg is set to false.
 The `prioritize_lr` function can be run sequentially or parallelly. The parallel implementation uses the `parallelly` package.
 ```{r}
-priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, parallel=TRUE, cl=NULL, outfile=NULL)
+priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, significance=FALSE, parallel=TRUE, cl=NULL,
+                          outfile=NULL)
 head(priority)
 ```
 

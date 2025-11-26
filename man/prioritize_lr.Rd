@@ -9,7 +9,8 @@ prioritize_lr(
   adj,
   infMat,
   metadata,
-  parallel = TRUE,
+  significance = FALSE,
+  parallel = FALSE,
   cl = NULL,
   outfile = "6.priority.csv"
 )
@@ -24,6 +25,8 @@ interactions with only interactions present in the counts matrix}
 \item{infMat}{A named influence matrix}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
+
+\item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel}
 
