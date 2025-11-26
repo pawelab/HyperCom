@@ -72,7 +72,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
   lr.edges$weight <- 1
   colnames(lr.edges) <- c("edge", "node", "weight")
 
-  gene.edges <- data.frame(edge=colnames(counts), node=colnames(counts), weight=1)
+  gene.edges <- data.frame(edge=colnames(counts), node=colnames(counts), weight=1, check.names=FALSE)
 
   if("r2" %in% colnames(lrs)){
     complexes <- unique(dplyr::select(lrs, 3:length(lrs)))
@@ -83,7 +83,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
       complex.size <- length(genes)
       edge.name <- paste0(genes, collapse="_")
       complex.nodes <- counts[, genes] > 0
-      complex.df <- data.frame(edge=edge.name, node=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), Matrix::rowSums(complex.nodes)))
+      complex.df <- data.frame(edge=edge.name, node=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), Matrix::rowSums(complex.nodes)), check.names=FALSE)
       complex.df <- dplyr::filter(complex.df, weight == complex.size)
       complex.df$weight <- 1
       lr.edges <- dplyr::bind_rows(lr.edges, complex.df)
@@ -91,7 +91,7 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
   }
 
   counts[counts == 0] <- NA
-  counts <- data.frame(as.matrix(counts))
+  counts <- data.frame(as.matrix(counts), check.names=FALSE)
   counts$node <- row.names(counts)
   exp.edges <- tidyr::pivot_longer(counts, !node, names_to="edge", values_to="weight", values_drop_na=TRUE)
   exp.edges$weight <- 1
@@ -174,10 +174,10 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds"){
 #' @returns An influence matrix
 #' @export
 generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
-  index <- data.frame(cell = row.names(infMat))
+  index <- data.frame(cell = row.names(infMat), check.names=FALSE)
   metadata$cell <- rownames(metadata)
 
-  clean.df <- data.frame(cell=metadata$cell, sample=as.character(metadata[, sample]), group=as.character(metadata[, group]))
+  clean.df <- data.frame(cell=metadata$cell, sample=as.character(metadata[, sample]), group=as.character(metadata[, group]), check.names=FALSE)
   clean.df$sample <- factor(clean.df$sample, levels=c(unique(clean.df$sample), "gene"))
   if(is.null(group)){
     clean.df$group <- "none"
@@ -345,7 +345,7 @@ score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
   avg.mat <- matrix(complex.avg.vec, nrow=length, ncol=length, byrow=TRUE)
   dif.mat <- matrix(complex.dif.vec, nrow=length, ncol=length, byrow=TRUE)
 
-  scores.df <- data.frame(cell=mat.names, sender=collapse::fmean(f.mat, na.rm=TRUE), receiver=collapse::fmean(b.mat, na.rm=TRUE), dif=collapse::fmean(dif.mat, na.rm=TRUE), avg=collapse::fmean(avg.mat, na.rm=TRUE))
+  scores.df <- data.frame(cell=mat.names, sender=collapse::fmean(f.mat, na.rm=TRUE), receiver=collapse::fmean(b.mat, na.rm=TRUE), dif=collapse::fmean(dif.mat, na.rm=TRUE), avg=collapse::fmean(avg.mat, na.rm=TRUE), check.names=FALSE)
   scores.df$hypercom <- dplyr::percent_rank(abs(scores.df$dif))
   scores.df$hypercom <- sign(scores.df$dif) * scores.df$hypercom * scores.df$avg
   scores.df <- dplyr::arrange(scores.df, dplyr::desc(hypercom))
@@ -365,7 +365,7 @@ score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
 #' @return A dataframe of random gene interactions
 #' @noRd
 generate_background_lrs <- function(lrs, metadata, count=1000){
-  background <- data.frame(interaction_name=rep("background", count))
+  background <- data.frame(interaction_name=rep("background", count), check.names=FALSE)
   nodes <- dplyr::filter(metadata, sample=="gene")$cell
   for (i in 2:dim(lrs)[2]) {
     col <- sample(nodes, count, replace = TRUE)
@@ -422,10 +422,10 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
     cc.score <- cc.score[cells,]
 
     if(all(l == rs)){
-      pair.rows <- data.frame(as.matrix(adj[l, cells]))
+      pair.rows <- data.frame(as.matrix(adj[l, cells]), check.names=FALSE)
       colnames(pair.rows) <- l
     }else{
-      pair.rows <- data.frame(as.matrix(Matrix::t(adj[c(l, rs), cells])))
+      pair.rows <- data.frame(as.matrix(Matrix::t(adj[c(l, rs), cells])), check.names=FALSE)
     }
 
     cc.score$present <- do.call(pmax, pair.rows)
