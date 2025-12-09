@@ -428,7 +428,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
       pair.rows <- data.frame(as.matrix(Matrix::t(adj[c(l, rs), cells])), check.names=FALSE)
     }
 
-    cc.score$present <- do.call(pmax, pair.rows)
+    cc.score$present <- as.logical(do.call(pmax, pair.rows))
     pct.min <- min(colSums(pair.rows) / length(cells))
 
     cc.expressed <- dplyr::filter(cc.score, present > 0)
