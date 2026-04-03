@@ -9,6 +9,7 @@ prioritize_lr(
   adj,
   infMat,
   metadata,
+  weight = 1,
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
@@ -25,6 +26,8 @@ interactions with only interactions present in the counts matrix.}
 \item{infMat}{A named influence matrix}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
+
+\item{weight}{a value between 0 to 1 for the importance of number of cells involved in an interaction}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 

@@ -403,9 +403,10 @@ permutation_test <- function(x, background){
 #' @param adj A named adjacency matrix
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
+#' @param weight a value between 0 to 1 for the importance of number of cells involved in an interaction
 #' @return A numeric vector of priority scores
 #' @noRd
-calculate_priority <- function(lrs, adj, infMat, metadata){
+calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
   cells <- dplyr::filter(metadata, sample != "gene")$cell
@@ -442,7 +443,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
 
     balance <- mltools::gini_impurity(cc.expressed$type) / 0.5
 
-    score <- (pct.min * frac * max * balance * purity) ^ (1/5)
+    score <- exp(weighted.mean(log(c(frac, pct.min, max, balance, purity)), c(weight, rep(1, 4))))
     score
   })
 
@@ -462,13 +463,14 @@ calculate_priority <- function(lrs, adj, infMat, metadata){
 #' @param adj A named adjacency matrix
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
+#' @param weight a value between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
 #' @param outfile A string naming the output file
 #' @returns A dataframe of ligand-receptor pairs ordered by priority score
 #' @export
-prioritize_lr <- function(lrs, adj, infMat, metadata, significance=FALSE, parallel=FALSE, cl=NULL, outfile="6.priority.csv"){
+prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FALSE, parallel=FALSE, cl=NULL, outfile="6.priority.csv"){
   if(significance){
     background.lrs <- generate_background_lrs(lrs, metadata)
   }
@@ -482,10 +484,10 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, significance=FALSE, parall
     foreach::registerDoSEQ()
   }
 
-  priority <- calculate_priority(lrs, adj, infMat, metadata)
+  priority <- calculate_priority(lrs, adj, infMat, metadata, weight)
 
   if(significance){
-    background.priority <- calculate_priority(background.lrs, adj, infMat, metadata)
+    background.priority <- calculate_priority(background.lrs, adj, infMat, metadata, weight)
   }
 
   if(parallel){
