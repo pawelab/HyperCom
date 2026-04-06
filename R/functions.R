@@ -506,7 +506,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
     lrs$p.adj <- stats::p.adjust(lrs$p, method = "BH")
   }
 
-  if(!is.null(outfile)){
+  if(!is.null(outdir)){
     dir.create(file.path(outdir), showWarnings = FALSE)
     outfile <- paste0(outdir, "/priority.", weight, ".csv")
     utils::write.csv(lrs, outfile, row.names = FALSE)
