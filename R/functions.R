@@ -414,6 +414,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
   priority <- foreach::`%dopar%`(foreach::foreach(i=1:length(lrs$ligand), .packages=c("HyperCom", "Matrix"), .combine=c), {
     l <- lrs$ligand[i]
     rs <- stats::na.omit(unlist(lrs[i, 3:dim(lrs)[2]]))
+    title <- paste(c(l, rs), collapse = "_")
     cc.score <- score_hypercom(infMat, metadata, l, rs)
     cc.score <- dplyr::left_join(cc.score, metadata, by=dplyr::join_by(cell))
 
@@ -444,6 +445,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
     balance <- mltools::gini_impurity(cc.expressed$type) / 0.5
 
     score <- exp(weighted.mean(log(c(frac, pct.min, max, balance, purity)), c(weight, rep(1, 4))))
+    print(paste0(title, ",", score))
     score
   })
 
@@ -472,7 +474,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FALSE, parallel=FALSE, cl=NULL, outfile="6.priority.csv"){
   if(significance){
-    background.lrs <- generate_background_lrs(lrs, metadata)
+    background.lrs <- HyperCom:::generate_background_lrs(lrs, metadata)
   }
 
   if(parallel){
@@ -488,6 +490,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
 
   if(significance){
     background.priority <- calculate_priority(background.lrs, adj, infMat, metadata, weight)
+    background.lrs$priority <- background.priority
   }
 
   if(parallel){
@@ -499,7 +502,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
   lrs <- dplyr::arrange(lrs, dplyr::desc(priority))
 
   if(significance){
-    lrs$p <- as.numeric(lapply(lrs$priority, FUN=permutation_test, background=background.priority))
+    lrs$p <- as.numeric(lapply(lrs$priority, FUN=HyperCom:::permutation_test, background=background.priority))
     lrs$p.adj <- stats::p.adjust(lrs$p, method = "BH")
   }
 
