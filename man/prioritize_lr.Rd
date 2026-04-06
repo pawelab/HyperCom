@@ -13,7 +13,7 @@ prioritize_lr(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outfile = "6.priority.csv"
+  outdir = "6.priority"
 )
 }
 \arguments{
@@ -35,7 +35,7 @@ interactions with only interactions present in the counts matrix.}
 
 \item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
 
-\item{outfile}{A string naming the output file}
+\item{outdir}{A string naming the output directory}
 }
 \value{
 A dataframe of ligand-receptor pairs ordered by priority score

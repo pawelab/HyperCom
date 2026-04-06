@@ -469,10 +469,10 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
-#' @param outfile A string naming the output file
+#' @param outdir A string naming the output directory
 #' @returns A dataframe of ligand-receptor pairs ordered by priority score
 #' @export
-prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FALSE, parallel=FALSE, cl=NULL, outfile="6.priority.csv"){
+prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FALSE, parallel=FALSE, cl=NULL, outdir="6.priority"){
   if(significance){
     background.lrs <- HyperCom:::generate_background_lrs(lrs, metadata)
   }
@@ -507,6 +507,8 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
   }
 
   if(!is.null(outfile)){
+    dir.create(file.path(outdir), showWarnings = FALSE)
+    outfile <- paste0(outdir, "/priority.", weight, ".csv")
     utils::write.csv(lrs, outfile, row.names = FALSE)
   }
   return(lrs)
