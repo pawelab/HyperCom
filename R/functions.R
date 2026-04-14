@@ -527,19 +527,19 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
 #' @param sample A string that is the column name for sample in the provided metadata
 #' @param group A string that is the column name for group in the provided metadata
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata
+#' @param weight a value between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
-#' @param outfile A string naming the output file
 #' @returns 0 if run successfully
 #' @export
-HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, significance=FALSE, parallel=FALSE, cl=NULL){
+HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weight=1, significance=FALSE, parallel=FALSE, cl=NULL){
   counts <- filter_counts(counts, lrdb)
   lrs <- generate_lrs_table(counts, lrdb)
   hyperedges <- generate_hyperedges(counts, lrs)
   adj <- generate_adjacency_matrix(hyperedges)
   infMat <- generate_infMat(adj)
   metadata <- generate_metadata(infMat, metadata, sample, group, keep)
-  priority <- prioritize_lr(lrs, adj, infMat, metadata, significance, parallel, cl)
+  priority <- prioritize_lr(lrs, adj, infMat, metadata, weight=1, significance, parallel, cl)
   return(0)
 }

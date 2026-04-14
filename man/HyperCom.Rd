@@ -11,6 +11,7 @@ HyperCom(
   sample,
   group = NULL,
   keep = NULL,
+  weight = 1,
   significance = FALSE,
   parallel = FALSE,
   cl = NULL
@@ -25,6 +26,8 @@ HyperCom(
 
 \item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
 
+\item{weight}{a value between 0 to 1 for the importance of number of cells involved in an interaction}
+
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel}
@@ -37,8 +40,6 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 \item{adj}{A named adjacency matrix}
 
 \item{infMat}{A named influence matrix}
-
-\item{outfile}{A string naming the output file}
 }
 \value{
 0 if run successfully
