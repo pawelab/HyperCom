@@ -10,13 +10,11 @@ knitr::opts_chunk$set(
 )
 ```
 
-```{r setup}
+```{r setup, message=FALSE}
 library(HyperCom)
-```
-
-```{r}
 library(dplyr)
 library(ggplot2)
+library(Matrix)
 ```
 
 ## Load in example data
@@ -61,14 +59,16 @@ dim(lrdb)
 ```
 
 ```{r}
-head(lrdb)
+head(lrdb, 2)
 ```
 
 ## Running HyperCom
 The standard pipeline can be run using the `HyperCom` function. This vignette details each component function of the pipeline.
 ```{r, eval=FALSE}
-HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts, metadata=alexanian2021.metadata, sample="sample",
-         group="condition", keep=NULL, significance=FALSE, parallel=FALSE, cl=NULL)
+HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
+         metadata=alexanian2021.metadata, sample="sample",
+         group="condition", keep=NULL,
+         significance=FALSE, parallel=FALSE, cl=NULL)
 ```
 
 ### Preprocessing
@@ -97,7 +97,7 @@ To generate the hyperedges, which are edges that contain multiple nodes, we use 
 HyperCom represents these hyperedges as a dataframe with an edge and node column where the node belongs to the edge. The weight is set to 1 for each edge. 
 ```{r}
 hyperedges <- generate_hyperedges(counts=lr.counts, lrs=lrs, outfile=NULL)
-head(hyperedges)
+head(hyperedges, 2)
 ```
 
 We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
@@ -118,7 +118,8 @@ dim(infMat)
 To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
 Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. For this vignettes' visualization, we will also keep UMAP_1 and UMAP_2
 ```{r}
-metadata <- generate_metadata(infMat=infMat, metadata=meta.data, sample=sample.column, group=group.column,
+metadata <- generate_metadata(infMat=infMat, metadata=meta.data,
+                              sample=sample.column, group=group.column,
                               keep=c("UMAP_1", "UMAP_2"), outfile=NULL)
 head(metadata)
 ```
@@ -128,7 +129,7 @@ We can score network activity using the influence matrix to understand globally 
 HyperCom scoring generates a sender and receiver score based on a given matrix and uses both to create a composite HyperCom score. This HyperCom score ranges from -1 to 1 going from better senders to better receivers.
 ```{r}
 network.score <- score_hypercom(infMat=infMat, metadata=metadata)
-head(network.score)
+head(network.score[, c(1, 2, 3, 6, 7)])
 ```
 
 Here we can see that globally, communication is higher in TAC.
@@ -152,16 +153,17 @@ A p-value can be calculated for each LR pair, but doing so will vastly increase 
 The `prioritize_lr` function can be run sequentially or parallelly and by default the `parallel` arg is FALSE.
 The parallel implementation uses the `parallelly` package, but the `cl` can be supplied any object of class `cluster` depending on your system's architecture.
 ```{r}
-priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, significance=FALSE, parallel=TRUE, cl=NULL,
-                          outdir=NULL)
+priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,
+                          significance=FALSE, parallel=TRUE, cl=NULL, outdir=NULL)
 head(priority)
 ```
 
 We see that Thbs1 Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair.
 As a note, the `score_hypercom` function can also take a vector of receptor genes if the receptor is a complex.
 ```{r}
-Thbs1_Sdc4 <- score_hypercom(infMat=infMat, metadata=metadata, ligand="Thbs1", receptors="Sdc4")
-head(Thbs1_Sdc4)
+Thbs1_Sdc4 <- score_hypercom(infMat=infMat, metadata=metadata, ligand="Thbs1",
+                             receptors="Sdc4")
+head(Thbs1_Sdc4[, c(1, 2, 3, 6, 7)])
 ```
 
 If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.
