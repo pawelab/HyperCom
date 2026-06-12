@@ -1,5 +1,6 @@
 ---
 title: "HyperCom Overview"
+output: pdf_document
 ---
 
 ```{r, include = FALSE}
@@ -152,7 +153,7 @@ The `prioritize_lr` function can be run sequentially or parallelly and by defaul
 The parallel implementation uses the `parallelly` package, but the `cl` can be supplied any object of class `cluster` depending on your system's architecture.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata, significance=FALSE, parallel=TRUE, cl=NULL,
-                          outfile=NULL)
+                          outdir=NULL)
 head(priority)
 ```
 
@@ -168,43 +169,5 @@ If we plot the sender and receiver score we see both higher densities of sender 
 Thbs1_Sdc4 <- left_join(Thbs1_Sdc4, metadata, by=join_by(cell))
 ggplot(Thbs1_Sdc4, aes(x=sender, y=receiver, colour=group)) +
   geom_density_2d() +
-  theme_classic()
-```
-
-### Side Note: Communication Clusters
-Although clustering is not necessary for any step in HyperCom, it may be useful to conceptualize how groups of cells are communicating.
-We can cluster the influence matrix to generate communication clusters. Here we use Seurat's implementation of Louvain clustering.
-```{r}
-library(Seurat)
-generate_com_clusters <- function(infMat, metadata){
-  com.seurat <- CreateSeuratObject(t(infMat), meta.data = metadata, project="communication")
-  com.seurat <- NormalizeData(com.seurat, verbose=FALSE)
-  com.seurat <- FindVariableFeatures(com.seurat, selection.method = "vst", nfeatures = 2000, verbose=FALSE)
-  all.genes <- rownames(com.seurat)
-  com.seurat <- ScaleData(com.seurat, features = all.genes, verbose=FALSE)
-  com.seurat <- RunPCA(com.seurat, features = VariableFeatures(object = com.seurat), verbose=FALSE)
-  com.seurat <- FindNeighbors(com.seurat, dims = 1:10, verbose=FALSE)
-  com.seurat <- FindClusters(com.seurat, resolution = 0.5, cluster.name = "com_clusters", verbose=FALSE)
-  com.seurat <- RunUMAP(com.seurat, dims = 1:10, verbose=FALSE)
-  
-  hyper.com_clusters <- dplyr::select(com.seurat@meta.data, cell, com_clusters)
-  metadata <- left_join(metadata, hyper.com_clusters, by=join_by(cell))
-  metadata$com_clusters <- factor(metadata$com_clusters)
-  
-  return(metadata)
-}
-```
-
-We can see that communication clusters do not necessarily line up with the annotated cell types.
-```{r}
-com_clusters <- generate_com_clusters(infMat=infMat, metadata=metadata)
-
-annotations <- select(meta.data, celltype)
-annotations$cell <- rownames(annotations)
-com_clusters <- left_join(com_clusters, annotations, by=join_by(cell))
-com_clusters <- filter(com_clusters, group != "gene")
-
-ggplot(com_clusters, aes(x=com_clusters, fill=celltype)) +
-  geom_bar() +
   theme_classic()
 ```

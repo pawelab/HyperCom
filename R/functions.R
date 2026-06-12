@@ -228,39 +228,51 @@ fast_div <- function(A, B){
 
 #' Calculate vectors used in HyperCom scoring
 #'
-#' `process_transition` returns a list of four vectors used by HyperCom scoring
+#' `score_sr` returns a dataframe of sender and receiver scores use by HyperCom scoring
 #'
-#' This function takes a named matrix and returns four vectors, a forward vector, a backward vector,
-#' an element wise average of those vectors, and an element wise difference of those two vectors.
-#' @param trans A named matrix
+#' This function takes a named matrix and a 2 column dataframe with the sender and receiver score. If ligand and receptor args are NULL calculates network score.
+#' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named sample and group
-#' @returns A list containing four elements: forward, backward, average, and difference vectors
+#' @param ligand A string of the ligand name
+#' @param receptor A string of the ligand name
+#' @returns A dataframe with the sender and receiver score
 #' @noRd
-process_transition <- function(trans, metadata){
+score_sr <- function(infMat, metadata, ligand=NULL, receptor=NULL){
   cells.idx <- metadata$group != "gene"
   mat.names <- metadata$cell[cells.idx]
   samples <- as.numeric(factor(metadata$sample[cells.idx]))
   length <- length(mat.names)
 
+  infMat.cells <- infMat[cells.idx, cells.idx]
+
+  if(!is.null(ligand) & !is.null(receptor)){
+    idx.1 <- which(metadata$cell == ligand)
+    idx.2 <- which(metadata$cell == receptor)
+
+    m <- matrix(infMat[,idx.1])
+    n <- matrix(infMat[idx.2,])
+    trans <- Rfast::Tcrossprod(m, n)
+
+    trans <- trans[cells.idx, cells.idx]
+    trans <- fast_div(trans, infMat.cells)
+  } else {
+    trans <- infMat.cells
+  }
+
   same.sample <- matrix(Rfast::Outer(samples, samples,"/"), nrow=length, ncol=length) == 1
   trans <- fast_mult(trans, same.sample)
+  diag(trans) <- 0
+  trans[trans == 0] <- NA
 
-  tri <- upper.tri(trans, diag=TRUE)
-  forward.trans <- fast_mult(trans, tri)
-  diag(tri) <- FALSE
-  backward.trans <- fast_mult(trans, !tri)
-  backward.trans <- Rfast::transpose(backward.trans)
+  trans <- dplyr::percent_rank(as.vector(trans))
+  trans <- matrix(trans, nrow=length, ncol=length, byrow=TRUE)
 
-  forward.trans[forward.trans == 0] <- NA
-  backward.trans[backward.trans == 0] <- NA
+  sender <- colMeans(trans, na.rm = TRUE)
+  receiver <- rowMeans(trans, na.rm = TRUE)
 
-  forward.vec <- dplyr::percent_rank(c(forward.trans))
-  backward.vec <- dplyr::percent_rank(c(backward.trans))
-  avg.vec <- (forward.vec + backward.vec) / 2
-  dif.vec <- backward.vec - forward.vec
+  df <- data.frame(cell=mat.names, sender=sender, receiver=receiver)
 
-  vecs <- list(forward=forward.vec, backward=backward.vec, avg=avg.vec, dif=dif.vec)
-  return(vecs)
+  return(df)
 }
 
 #' Calculate the HyperCom score for each cell
@@ -277,79 +289,37 @@ process_transition <- function(trans, metadata){
 #' @returns A dataframe containing the sender score, receiver score, avg, dif, and HyperCom score
 #' @export
 score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
-  cells.idx <- metadata$group != "gene"
-  mat.names <- metadata$cell[cells.idx]
-  length <- length(mat.names)
-
-  complex.forward.vec <- c()
-  complex.backward.vec <- c()
-  complex.avg.vec <- c()
-  complex.dif.vec <- c()
-
-  if(is.null(ligand) & is.null(receptors)){
-    trans <- infMat[cells.idx, cells.idx]
-
-    vecs <- process_transition(trans, metadata)
-
-    complex.forward.vec <- vecs$forward
-    complex.backward.vec <- vecs$backward
-
-    complex.avg.vec <- vecs$avg
-    complex.dif.vec <- vecs$dif
-  }
-  else{
-    complex.size <- length(receptors)
-    idx.1 <- which(metadata$cell == ligand)
-
-    for (receptor in receptors){
-      idx.2 <- which(metadata$cell == receptor)
-
-      m <- matrix(infMat[,idx.1])
-      n <- matrix(infMat[idx.2,])
-      trans <- Rfast::Tcrossprod(m, n)
-
-      trans <- trans[cells.idx, cells.idx]
-      infMat.cells <- infMat[cells.idx, cells.idx]
-
-      trans <- fast_div(trans, infMat.cells)
-
-      vecs <- process_transition(trans, metadata)
-
-      forward.vec <- vecs$forward
-      backward.vec <- vecs$backward
-      avg.vec <- vecs$avg
-      dif.vec <- vecs$dif
-
-      if(length(complex.avg.vec) == 0){
-        complex.forward.vec <- forward.vec
-        complex.backward.vec <- backward.vec
-        complex.avg.vec <- avg.vec
-        complex.dif.vec <- dif.vec
-      }
-      else{
-        complex.forward.vec <- complex.forward.vec + forward.vec
-        complex.backward.vec <- complex.backward.vec + backward.vec
-        complex.avg.vec <- complex.avg.vec + avg.vec
-        complex.dif.vec <- complex.dif.vec + dif.vec
+  complex.size <- length(receptors)
+  if(complex.size > 1){
+    ss <- c()
+    rs <- c()
+    for(receptor in receptors){
+      sr <- score_sr(infMat, metadata, ligand, receptor)
+      if(length(ss) == 0){
+        ss <- sr$sender
+        rs <- sr$receiver
+      } else {
+        ss <- ss + sr$sender
+        rs <- rs + sr$receiver
       }
     }
-
-    complex.forward.vec <- complex.forward.vec / complex.size
-    complex.backward.vec <- complex.backward.vec / complex.size
-    complex.avg.vec <- complex.avg.vec / complex.size
-    complex.dif.vec <- complex.dif.vec / complex.size
+    sr$sender <- ss / complex.size
+    sr$receiver <- rs / complex.size
+  } else {
+    sr <- score_sr(infMat, metadata, ligand, receptors)
   }
+  if(all(ligand == receptors) & !is.null(receptors)){
+    sr$dif <- 0
+  } else {
+    sr$dif <- sr$receiver - sr$sender
+  }
+  sr$avg <- (sr$receiver + sr$sender) / 2
+  sr$max <- pmax(sr$sender, sr$receiver)
+  sr$hypercom <- dplyr::percent_rank(abs(sr$dif))
+  sr$hypercom <- sign(sr$dif) * sr$hypercom * sr$avg
+  sr <- dplyr::arrange(sr, dplyr::desc(hypercom))
 
-  f.mat <- matrix(complex.forward.vec, nrow=length, ncol=length, byrow=TRUE)
-  b.mat <- matrix(complex.backward.vec, nrow=length, ncol=length, byrow=TRUE)
-  avg.mat <- matrix(complex.avg.vec, nrow=length, ncol=length, byrow=TRUE)
-  dif.mat <- matrix(complex.dif.vec, nrow=length, ncol=length, byrow=TRUE)
-
-  scores.df <- data.frame(cell=mat.names, sender=collapse::fmean(f.mat, na.rm=TRUE), receiver=collapse::fmean(b.mat, na.rm=TRUE), dif=collapse::fmean(dif.mat, na.rm=TRUE), avg=collapse::fmean(avg.mat, na.rm=TRUE), check.names=FALSE)
-  scores.df$hypercom <- dplyr::percent_rank(abs(scores.df$dif))
-  scores.df$hypercom <- sign(scores.df$dif) * scores.df$hypercom * scores.df$avg
-  scores.df <- dplyr::arrange(scores.df, dplyr::desc(hypercom))
-  return(scores.df)
+  return(sr)
 }
 
 #' Generate a background set of random gene interactions
