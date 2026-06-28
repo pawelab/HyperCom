@@ -74,22 +74,6 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
 
   gene.edges <- data.frame(edge=colnames(counts), node=colnames(counts), weight=1, check.names=FALSE)
 
-  if("r2" %in% colnames(lrs)){
-    complexes <- unique(dplyr::select(lrs, 3:length(lrs)))
-    complexes <- complexes <- dplyr::filter(complexes, !is.na(complexes$r2))
-
-    for (i in 1:dim(complexes)[1]) {
-      genes <- stats::na.omit(unlist(complexes[i, 1:dim(complexes)[2]]))
-      complex.size <- length(genes)
-      edge.name <- paste0(genes, collapse="_")
-      complex.nodes <- counts[, genes] > 0
-      complex.df <- data.frame(edge=edge.name, node=c(genes, rownames(counts)), weight=c(rep(complex.size, complex.size), Matrix::rowSums(complex.nodes)), check.names=FALSE)
-      complex.df <- dplyr::filter(complex.df, weight == complex.size)
-      complex.df$weight <- 1
-      lr.edges <- dplyr::bind_rows(lr.edges, complex.df)
-    }
-  }
-
   counts[counts == 0] <- NA
   counts <- data.frame(as.matrix(counts), check.names=FALSE)
   counts$node <- row.names(counts)
