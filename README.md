@@ -4,11 +4,9 @@ HyperCom is the R package implementation of the method described in [Moy and Prz
 
 HyperCom provides the following hypergraph based features described in the [overview vignette](vignettes/articles/HyperCom_Overview.pdf):
 
-1. Per Cell Network Scoring
+1. Per Cell Ligand-Receptor Pair Scoring
 
-2. Per Cell Ligand-Receptor Pair Scoring
-
-3. Per Dataset Ligand-Receptor Pair Prioritization
+2. Per Dataset Ligand-Receptor Pair Prioritization
 
 ## Installation
 ```r
