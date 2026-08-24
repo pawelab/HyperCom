@@ -1,26 +1,24 @@
 ---
 title: "HyperCom Overview"
-output: pdf_document
+author: "Justin K. Moy & Pawel F. Przytycki"
+output: html_document
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>"
-)
-```
+#### Last Updated: `r Sys.Date()`
 
 ```{r setup, message=FALSE}
 library(HyperCom)
 library(dplyr)
 library(ggplot2)
+library(ggridges)
 library(Matrix)
+library(tidyr)
 ```
 
 ## Load in example data
 HyperCom requires three inputs:
 
-1. A dense gene x cell matrix with genes as row names and cells as column names
+1. A gene x cell matrix with genes as row names and cells as column names
 
 2. A dataframe of cell metadata containing sample and optionally group columns which need to be specified as variables
 
@@ -51,6 +49,8 @@ ggplot(meta.data, aes(x=UMAP_1, y=UMAP_2, colour=celltype)) +
   geom_point(size=0.5) +
   theme_classic()
 ```
+
+{{< pagebreak >}}
 
 For the LR interactions we will use the CellChat murine database.
 ```{r}
@@ -85,14 +85,14 @@ lrs <- generate_lrs_table(counts=lr.counts, lrdb=lrdb, outfile=NULL)
 dim(lrs)
 ```
 
+{{< pagebreak >}}
+
 ### Generating Hypergraph
-To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix LR interaction to create 3 types of hyperedges:
+To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix LR interaction to create 2 types of hyperedges:
 
 1. expression edges - edges containing cells that express a given ligand or receptor
 
-2. complex edges - edges containing the genes that comprise a receptor complex
-
-3. interaction edges - edges containing the genes that comprise an LR interaction
+2. interaction edges - edges containing the genes that comprise an LR interaction
 
 HyperCom represents these hyperedges as a dataframe with an edge and node column where the node belongs to the edge. The weight is set to 1 for each edge. 
 ```{r}
@@ -116,34 +116,12 @@ dim(infMat)
 
 ## Downstream Analysis
 To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
-Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. For this vignettes' visualization, we will also keep UMAP_1 and UMAP_2
+Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. Optionally other metadata columns can be kept.
 ```{r}
 metadata <- generate_metadata(infMat=infMat, metadata=meta.data,
                               sample=sample.column, group=group.column,
-                              keep=c("UMAP_1", "UMAP_2"), outfile=NULL)
+                              keep=c(), outfile=NULL)
 head(metadata)
-```
-
-### Scoring Network Activity
-We can score network activity using the influence matrix to understand globally if cells are sending or receiving signals.
-HyperCom scoring generates a sender and receiver score based on a given matrix and uses both to create a composite HyperCom score. This HyperCom score ranges from -1 to 1 going from better senders to better receivers.
-```{r}
-network.score <- score_hypercom(infMat=infMat, metadata=metadata)
-head(network.score[, c(1, 2, 3, 6, 7)])
-```
-
-Here we can see that globally, communication is higher in TAC.
-```{r}
-network.score <- left_join(network.score, metadata, by=join_by(cell))
-
-transparent <- rgb(255, 255, 255, max=255, alpha = 0)
-ggplot(network.score, aes(x=as.numeric(UMAP_1), y=as.numeric(UMAP_2), colour=hypercom)) +
-  geom_point(size=0.5) +
-  scale_color_gradient2(low="blue", mid=transparent, high="red", limits=c(-1,1)) +
-  facet_wrap(vars(group)) +
-  xlab("UMAP_1") +
-  ylab("UMAP_2") +
-  theme_classic()
 ```
 
 ### Identifying Important LR Pairs
@@ -158,7 +136,7 @@ priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,
 head(priority)
 ```
 
-We see that Thbs1 Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair.
+We see that Thbs1-Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair.
 As a note, the `score_hypercom` function can also take a vector of receptor genes if the receptor is a complex.
 ```{r}
 Thbs1_Sdc4 <- score_hypercom(infMat=infMat, metadata=metadata, ligand="Thbs1",
@@ -167,9 +145,21 @@ head(Thbs1_Sdc4[, c(1, 2, 3, 6, 7)])
 ```
 
 If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.
-```{r}
+```{r, warning=FALSE}
 Thbs1_Sdc4 <- left_join(Thbs1_Sdc4, metadata, by=join_by(cell))
-ggplot(Thbs1_Sdc4, aes(x=sender, y=receiver, colour=group)) +
-  geom_density_2d() +
-  theme_classic()
+melt.Thbs1_Sdc4 <- pivot_longer(dplyr::select(Thbs1_Sdc4, c(cell, group, sender, receiver)), !c(cell, group), names_to = "type", values_to = "score")
+
+ggplot(melt.Thbs1_Sdc4, aes(x = score, y = type, fill=group)) +
+    geom_density_ridges(alpha=0.4) +
+    xlim(0.25, 1) +
+    xlab("Score") +
+    ylab("Score Type") +
+    ggtitle("Thbs1-Sdc4") +
+    theme_classic()
+```
+
+{{< pagebreak >}}
+
+```{r}
+sessionInfo()
 ```
