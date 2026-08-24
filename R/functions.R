@@ -40,6 +40,8 @@ filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
 #' @export
 load_seurat <- function(seurat, assay="RNA", layer="counts", lrdb, outfile="0.counts.rds"){
   counts <- seurat@assays[[assay]]@layers[[layer]]
+  rownames(counts) <- rownames(seurat)
+  colnames(counts) <- colnames(seurat)
   cc.counts <- filter_counts(counts, lrdb, outfile)
 
   return(cc.counts)
