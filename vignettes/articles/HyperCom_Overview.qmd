@@ -73,7 +73,7 @@ HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
 
 ### Preprocessing
 In order to reduce memory usage, we first filter the counts matrix to only genes present in the LR interactions with expression greater than 0.
-The function also transposes the matrix.
+The function also transposes the matrix. We can also use the `load_seurat` function to directly complete this step from a Seurat v5 object.
 ```{r}
 lr.counts <- filter_counts(counts=counts, lrdb=lrdb, outfile=NULL)
 dim(lr.counts)

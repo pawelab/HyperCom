@@ -24,6 +24,27 @@ filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
   return(cc.counts)
 }
 
+#' Load Seurat object and filter for HyperCom analysis
+#'
+#' `load_seurat` returns the count matrix with only ligand and receptor genes
+#'
+#' This function takes a Seurat object and filters it to
+#' just ligand and receptor genes with greater than 0 expression.
+#' @param seurat A seurat v5 object with a counts matrix
+#' @param lrdb A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+#' @param assay assay to get data from
+#' @param layer layer to get data from
+#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
+#' @param outfile A string naming the output file
+#' @returns A dense matrix with row names being genes and column names being cells of only ligand and receptor genes with greater than 0 expression
+#' @export
+load_seurat <- function(seurat, assay="RNA", layer="counts", lrdb, outfile="0.counts.rds"){
+  counts <- seurat@assays[[assay]]@layers[[layer]]
+  cc.counts <- filter_counts(counts, lrdb, outfile)
+
+  return(cc.counts)
+}
+
 #' Generate a table of ligand-receptor interactions present in a counts matrix
 #'
 #' `generate_lrs_table` returns dataframe of ligand-receptor interactions present in a counts matrix
