@@ -5,6 +5,7 @@
 \title{Run the HyperCom pipeline}
 \usage{
 HyperCom(
+  outdir = "HyperCom",
   lrdb,
   counts,
   metadata,
@@ -18,6 +19,8 @@ HyperCom(
 )
 }
 \arguments{
+\item{outdir}{output directory of pipeline run}
+
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
 \item{sample}{A string that is the column name for sample in the provided metadata}

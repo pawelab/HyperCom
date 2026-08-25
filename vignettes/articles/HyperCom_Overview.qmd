@@ -65,7 +65,7 @@ head(lrdb, 2)
 ## Running HyperCom
 The standard pipeline can be run using the `HyperCom` function. This vignette details each component function of the pipeline.
 ```{r, eval=FALSE}
-HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
+HyperCom(outdir="overview", lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
          metadata=alexanian2021.metadata, sample="sample",
          group="condition", keep=NULL,
          significance=FALSE, parallel=FALSE, cl=NULL)
@@ -127,12 +127,14 @@ head(metadata)
 ### Identifying Important LR Pairs
 We can also identify important LR pairs by using HyperCom scoring on LR pairs.
 This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
+By default gene expression is weighted at 1 for recovery mode, but a vector of any number of values between 0 and 1 can be supplied 
 A p-value can be calculated for each LR pair, but doing so will vastly increase the time to run. By default the `significance` arg is FALSE.
 The `prioritize_lr` function can be run sequentially or parallelly and by default the `parallel` arg is FALSE.
 The parallel implementation uses the `parallelly` package, but the `cl` can be supplied any object of class `cluster` depending on your system's architecture.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,
-                          significance=FALSE, parallel=TRUE, cl=NULL, outdir=NULL)
+                          weights = c(1), significance=FALSE, parallel=FALSE,
+                          cl=NULL, outdir=NULL)
 head(priority)
 ```
 

@@ -471,9 +471,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     priority <- calculate_priority(lrs, adj, infMat, metadata, weight)
 
     current.lrs <- lrs
-    current.background <- background.lrs
 
     if(significance){
+      current.background <- background.lrs
       background.priority <- calculate_priority(current.background, adj, infMat, metadata, weight)
     }
 
@@ -509,6 +509,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' `HyperCom` Runs the HyperCom pipeline
 #'
 #' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency-matrix`, `generate_infMat`, `generate-metadata`, and `prioritize_lr`.
+#' @param outdir output directory of pipeline run
 #' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions.
 #' @param adj A named adjacency matrix
@@ -523,7 +524,12 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
 #' @returns 0 if run successfully
 #' @export
-HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=1, significance=FALSE, parallel=FALSE, cl=NULL){
+HyperCom <- function(outdir="HyperCom", lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=1, significance=FALSE, parallel=FALSE, cl=NULL){
+  if(!dir.exists(outdir)){
+    dir.create(outdir)
+  }
+  setwd(outdir)
+
   counts <- filter_counts(counts, lrdb)
   lrs <- generate_lrs_table(counts, lrdb)
   hyperedges <- generate_hyperedges(counts, lrs)
@@ -531,5 +537,6 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   infMat <- generate_infMat(adj)
   metadata <- generate_metadata(infMat, metadata, sample, group, keep)
   priority <- prioritize_lr(lrs, adj, infMat, metadata, weights, significance, parallel, cl)
+
   return(0)
 }
