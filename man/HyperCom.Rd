@@ -26,7 +26,7 @@ HyperCom(
 
 \item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
 
-\item{weight}{a value between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{weight}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
