@@ -442,14 +442,14 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
 #' @param adj A named adjacency matrix
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
-#' @param weight a value between 0 to 1 for the importance of number of cells involved in an interaction
+#' @param weight a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
 #' @param outdir A string naming the output directory
-#' @returns A dataframe of ligand-receptor pairs ordered by priority score
+#' @returns A dataframe of ligand-receptor pairs ordered by priority score for each weight
 #' @export
-prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FALSE, parallel=FALSE, cl=NULL, outdir="6.priority"){
+prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="6.priority"){
   if(significance){
     background.lrs <- HyperCom:::generate_background_lrs(lrs, metadata)
   }
@@ -463,11 +463,35 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
     foreach::registerDoSEQ()
   }
 
-  priority <- calculate_priority(lrs, adj, infMat, metadata, weight)
+  lrs.list <- list()
 
-  if(significance){
-    background.priority <- calculate_priority(background.lrs, adj, infMat, metadata, weight)
-    background.lrs$priority <- background.priority
+  for(i in seq(1, length(weights))){
+    weight <- weights[i]
+    print(weight)
+    priority <- calculate_priority(lrs, adj, infMat, metadata, weight)
+
+    current.lrs <- lrs
+    current.background <- background.lrs
+
+    if(significance){
+      background.priority <- calculate_priority(current.background, adj, infMat, metadata, weight)
+    }
+
+    current.lrs$priority <- priority
+    current.lrs <- dplyr::arrange(current.lrs, dplyr::desc(priority))
+
+    if(significance){
+      current.lrs$p <- as.numeric(lapply(current.lrs$priority, FUN=HyperCom:::permutation_test, background=background.priority))
+      current.lrs$p.adj <- stats::p.adjust(current.lrs$p, method = "BH")
+    }
+
+    if(!is.null(outdir)){
+      dir.create(file.path(outdir), showWarnings = FALSE)
+      outfile <- paste0(outdir, "/priority.", weight, ".csv")
+      utils::write.csv(current.lrs, outfile, row.names = FALSE)
+    }
+
+    lrs.list[[i]] <- current.lrs
   }
 
   if(parallel){
@@ -475,20 +499,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weight=1, significance=FAL
     gc()
   }
 
-  lrs$priority <- priority
-  lrs <- dplyr::arrange(lrs, dplyr::desc(priority))
+  names(lrs.list) <- weights
 
-  if(significance){
-    lrs$p <- as.numeric(lapply(lrs$priority, FUN=HyperCom:::permutation_test, background=background.priority))
-    lrs$p.adj <- stats::p.adjust(lrs$p, method = "BH")
-  }
-
-  if(!is.null(outdir)){
-    dir.create(file.path(outdir), showWarnings = FALSE)
-    outfile <- paste0(outdir, "/priority.", weight, ".csv")
-    utils::write.csv(lrs, outfile, row.names = FALSE)
-  }
-  return(lrs)
+  return(lrs.list)
 }
 
 #' Run the HyperCom pipeline

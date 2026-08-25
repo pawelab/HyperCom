@@ -9,7 +9,7 @@ prioritize_lr(
   adj,
   infMat,
   metadata,
-  weight = 1,
+  weights = c(1),
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
@@ -27,8 +27,6 @@ interactions with only interactions present in the counts matrix.}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
-\item{weight}{a value between 0 to 1 for the importance of number of cells involved in an interaction}
-
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel}
@@ -36,9 +34,11 @@ interactions with only interactions present in the counts matrix.}
 \item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
 
 \item{outdir}{A string naming the output directory}
+
+\item{weight}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
 }
 \value{
-A dataframe of ligand-receptor pairs ordered by priority score
+A dataframe of ligand-receptor pairs ordered by priority score for each weight
 }
 \description{
 \code{prioritize_lr} returns an ordered list of ligand-receptor pairs
