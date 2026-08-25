@@ -133,9 +133,9 @@ The `prioritize_lr` function can be run sequentially or parallelly and by defaul
 The parallel implementation uses the `parallelly` package, but the `cl` can be supplied any object of class `cluster` depending on your system's architecture.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,
-                          weights = c(1), significance=FALSE, parallel=FALSE,
+                          weights = c(1), significance=FALSE, parallel=TRUE,
                           cl=NULL, outdir=NULL)
-head(priority)
+head(priority[[1]])
 ```
 
 We see that Thbs1-Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair.

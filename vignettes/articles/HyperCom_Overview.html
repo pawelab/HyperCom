@@ -103,8 +103,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<section id="last-updated-2026-08-24" class="level4">
-<h4 class="anchored" data-anchor-id="last-updated-2026-08-24">Last Updated: 2026-08-24</h4>
+<section id="last-updated-2026-08-25" class="level4">
+<h4 class="anchored" data-anchor-id="last-updated-2026-08-25">Last Updated: 2026-08-25</h4>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(HyperCom)</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
@@ -192,7 +192,7 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <h2 class="anchored" data-anchor-id="running-hypercom">Running HyperCom</h2>
 <p>The standard pipeline can be run using the <code>HyperCom</code> function. This vignette details each component function of the pipeline.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">HyperCom</span>(<span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">counts=</span>alexanian2021.counts,</span>
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">HyperCom</span>(<span class="at">outdir=</span><span class="st">"overview"</span>, <span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">counts=</span>alexanian2021.counts,</span>
 <span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>         <span class="at">metadata=</span>alexanian2021.metadata, <span class="at">sample=</span><span class="st">"sample"</span>,</span>
 <span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>         <span class="at">group=</span><span class="st">"condition"</span>, <span class="at">keep=</span><span class="cn">NULL</span>,</span>
 <span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>         <span class="at">significance=</span><span class="cn">FALSE</span>, <span class="at">parallel=</span><span class="cn">FALSE</span>, <span class="at">cl=</span><span class="cn">NULL</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
@@ -277,11 +277,15 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 </div>
 <section id="identifying-important-lr-pairs" class="level3">
 <h3 class="anchored" data-anchor-id="identifying-important-lr-pairs">Identifying Important LR Pairs</h3>
-<p>We can also identify important LR pairs by using HyperCom scoring on LR pairs. This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific. A p-value can be calculated for each LR pair, but doing so will vastly increase the time to run. By default the <code>significance</code> arg is FALSE. The <code>prioritize_lr</code> function can be run sequentially or parallelly and by default the <code>parallel</code> arg is FALSE. The parallel implementation uses the <code>parallelly</code> package, but the <code>cl</code> can be supplied any object of class <code>cluster</code> depending on your system’s architecture.</p>
+<p>We can also identify important LR pairs by using HyperCom scoring on LR pairs. This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific. By default gene expression is weighted at 1 for recovery mode, but a vector of any number of values between 0 and 1 can be supplied A p-value can be calculated for each LR pair, but doing so will vastly increase the time to run. By default the <code>significance</code> arg is FALSE. The <code>prioritize_lr</code> function can be run sequentially or parallelly and by default the <code>parallel</code> arg is FALSE. The parallel implementation uses the <code>parallelly</code> package, but the <code>cl</code> can be supplied any object of class <code>cluster</code> depending on your system’s architecture.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>priority <span class="ot">&lt;-</span> <span class="fu">prioritize_lr</span>(<span class="at">lrs=</span>lrs, <span class="at">adj=</span>adj, <span class="at">infMat=</span>infMat, <span class="at">metadata=</span>metadata,</span>
-<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>                          <span class="at">significance=</span><span class="cn">FALSE</span>, <span class="at">parallel=</span><span class="cn">TRUE</span>, <span class="at">cl=</span><span class="cn">NULL</span>, <span class="at">outdir=</span><span class="cn">NULL</span>)</span>
-<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(priority)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>                          <span class="at">weights =</span> <span class="fu">c</span>(<span class="dv">1</span>), <span class="at">significance=</span><span class="cn">FALSE</span>, <span class="at">parallel=</span><span class="cn">TRUE</span>,</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>                          <span class="at">cl=</span><span class="cn">NULL</span>, <span class="at">outdir=</span><span class="cn">NULL</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 1</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(priority[[<span class="dv">1</span>]])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>        interaction ligand    r1    r2   r3  priority
 1        THBS1_SDC4  Thbs1  Sdc4  &lt;NA&gt; &lt;NA&gt; 0.3313764
@@ -294,9 +298,9 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 </div>
 <p>We see that Thbs1-Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair. As a note, the <code>score_hypercom</code> function can also take a vector of receptor genes if the receptor is a complex.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">score_hypercom</span>(<span class="at">infMat=</span>infMat, <span class="at">metadata=</span>metadata, <span class="at">ligand=</span><span class="st">"Thbs1"</span>,</span>
-<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>                             <span class="at">receptors=</span><span class="st">"Sdc4"</span>)</span>
-<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(Thbs1_Sdc4[, <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">6</span>, <span class="dv">7</span>)])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">score_hypercom</span>(<span class="at">infMat=</span>infMat, <span class="at">metadata=</span>metadata, <span class="at">ligand=</span><span class="st">"Thbs1"</span>,</span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>                             <span class="at">receptors=</span><span class="st">"Sdc4"</span>)</span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(Thbs1_Sdc4[, <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">6</span>, <span class="dv">7</span>)])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>                cell    sender  receiver       max  hypercom
 1 ATTATCCAGCTACCGC-3 0.4554808 0.9505336 0.9505336 0.6882292
@@ -309,16 +313,16 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 </div>
 <p>If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">left_join</span>(Thbs1_Sdc4, metadata, <span class="at">by=</span><span class="fu">join_by</span>(cell))</span>
-<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>melt.Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">pivot_longer</span>(dplyr<span class="sc">::</span><span class="fu">select</span>(Thbs1_Sdc4, <span class="fu">c</span>(cell, group, sender, receiver)), <span class="sc">!</span><span class="fu">c</span>(cell, group), <span class="at">names_to =</span> <span class="st">"type"</span>, <span class="at">values_to =</span> <span class="st">"score"</span>)</span>
-<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(melt.Thbs1_Sdc4, <span class="fu">aes</span>(<span class="at">x =</span> score, <span class="at">y =</span> type, <span class="at">fill=</span>group)) <span class="sc">+</span></span>
-<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_density_ridges</span>(<span class="at">alpha=</span><span class="fl">0.4</span>) <span class="sc">+</span></span>
-<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">xlim</span>(<span class="fl">0.25</span>, <span class="dv">1</span>) <span class="sc">+</span></span>
-<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">xlab</span>(<span class="st">"Score"</span>) <span class="sc">+</span></span>
-<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ylab</span>(<span class="st">"Score Type"</span>) <span class="sc">+</span></span>
-<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggtitle</span>(<span class="st">"Thbs1-Sdc4"</span>) <span class="sc">+</span></span>
-<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a>Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">left_join</span>(Thbs1_Sdc4, metadata, <span class="at">by=</span><span class="fu">join_by</span>(cell))</span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>melt.Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">pivot_longer</span>(dplyr<span class="sc">::</span><span class="fu">select</span>(Thbs1_Sdc4, <span class="fu">c</span>(cell, group, sender, receiver)), <span class="sc">!</span><span class="fu">c</span>(cell, group), <span class="at">names_to =</span> <span class="st">"type"</span>, <span class="at">values_to =</span> <span class="st">"score"</span>)</span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb34-4"><a href="#cb34-4" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(melt.Thbs1_Sdc4, <span class="fu">aes</span>(<span class="at">x =</span> score, <span class="at">y =</span> type, <span class="at">fill=</span>group)) <span class="sc">+</span></span>
+<span id="cb34-5"><a href="#cb34-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_density_ridges</span>(<span class="at">alpha=</span><span class="fl">0.4</span>) <span class="sc">+</span></span>
+<span id="cb34-6"><a href="#cb34-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">xlim</span>(<span class="fl">0.25</span>, <span class="dv">1</span>) <span class="sc">+</span></span>
+<span id="cb34-7"><a href="#cb34-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">xlab</span>(<span class="st">"Score"</span>) <span class="sc">+</span></span>
+<span id="cb34-8"><a href="#cb34-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ylab</span>(<span class="st">"Score Type"</span>) <span class="sc">+</span></span>
+<span id="cb34-9"><a href="#cb34-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">ggtitle</span>(<span class="st">"Thbs1-Sdc4"</span>) <span class="sc">+</span></span>
+<span id="cb34-10"><a href="#cb34-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_classic</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>Picking joint bandwidth of 0.0387</code></pre>
 </div>
@@ -332,7 +336,7 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 </div>
 <div style="page-break-after: always;"></div>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>R version 4.4.0 (2024-04-24)
 Platform: x86_64-pc-linux-gnu
@@ -357,25 +361,21 @@ attached base packages:
 
 other attached packages:
 [1] tidyr_1.3.2         Matrix_1.7-0        ggridges_0.5.7     
-[4] ggplot2_4.0.0       dplyr_1.1.4         HyperCom_0.0.0.9000
+[4] ggplot2_4.0.0       dplyr_1.2.1         HyperCom_0.0.0.9000
 
 loaded via a namespace (and not attached):
- [1] gtable_0.3.6          jsonlite_2.0.0        compiler_4.4.0       
- [4] Rcpp_1.1.0            tidyselect_1.2.1      collapse_2.1.7       
- [7] parallel_4.4.0        dichromat_2.0-0.1     scales_1.4.0         
-[10] yaml_2.3.10           fastmap_1.2.0         lattice_0.22-6       
-[13] R6_2.6.1              labeling_0.4.3        generics_0.1.4       
-[16] knitr_1.50            iterators_1.0.14      htmlwidgets_1.6.4    
-[19] tibble_3.3.1          zigg_0.0.2            pillar_1.11.1        
-[22] RColorBrewer_1.1-3    rlang_1.1.6           utf8_1.2.6           
-[25] xfun_0.52             S7_0.2.0              RcppParallel_5.1.11-2
-[28] doParallel_1.0.17     cli_3.6.5             withr_3.0.2          
-[31] magrittr_2.0.5        foreach_1.5.2         digest_0.6.37        
-[34] grid_4.4.0            rstudioapi_0.17.1     lifecycle_1.0.5      
-[37] vctrs_0.6.5           Rfast_2.1.5.2         evaluate_1.0.5       
-[40] glue_1.8.1            farver_2.1.2          codetools_0.2-20     
-[43] parallelly_1.46.1     rmarkdown_2.31        purrr_1.2.0          
-[46] tools_4.4.0           pkgconfig_2.0.3       htmltools_0.5.8.1    </code></pre>
+ [1] gtable_0.3.6       jsonlite_2.0.0     compiler_4.4.0     Rcpp_1.1.2        
+ [5] tidyselect_1.2.1   collapse_2.1.7     parallel_4.4.0     dichromat_2.0-0.1 
+ [9] scales_1.4.0       yaml_2.3.10        fastmap_1.2.0      lattice_0.22-6    
+[13] R6_2.6.1           labeling_0.4.3     generics_0.1.4     knitr_1.50        
+[17] iterators_1.0.14   htmlwidgets_1.6.4  tibble_3.3.1       zigg_0.0.2        
+[21] pillar_1.11.1      RColorBrewer_1.1-3 rlang_1.3.0        utf8_1.2.6        
+[25] xfun_0.52          S7_0.2.0           RcppParallel_6.2.0 doParallel_1.0.17 
+[29] cli_3.6.6          withr_3.0.3        magrittr_2.0.5     foreach_1.5.2     
+[33] digest_0.6.37      grid_4.4.0         rstudioapi_0.17.1  lifecycle_1.0.5   
+[37] vctrs_0.7.3        Rfast_2.1.5.2      evaluate_1.0.5     glue_1.8.1        
+[41] farver_2.1.2       codetools_0.2-20   parallelly_1.48.0  rmarkdown_2.31    
+[45] purrr_1.2.2        tools_4.4.0        pkgconfig_2.0.3    htmltools_0.5.8.1 </code></pre>
 </div>
 </div>
 </section>
