@@ -91,8 +91,6 @@ lrs <- generate_lrs_table(counts=lr.counts, lrdb=lrdb, outfile=NULL)
 dim(lrs)
 ```
 
-{{< pagebreak >}}
-
 ### Generating Hypergraph
 To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix LR interaction to create 2 types of hyperedges:
 

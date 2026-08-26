@@ -536,7 +536,7 @@ get_seurat_counts <- function(seurat, assay = "RNA", layer = "counts") {
   if (!inherits(a, "Assay5")) {
     if (!layer %in% c("counts", "data", "scale.data"))
       stop("v3 assay has only counts/data/scale.data; got '", layer, "'")
-    return(slot(a, layer))
+    return(methods::slot(a, layer))
   }
 
   nms  <- names(a@layers)
