@@ -16,7 +16,6 @@ Imports:
   dplyr,
   foreach,
   Matrix,
-  methods,
   mltools,
   parallel,
   parallelly,

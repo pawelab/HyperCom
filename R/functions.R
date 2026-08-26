@@ -522,7 +522,7 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
 
 #' Get matrix with dimnames for given layer and slot
 #'
-#' `get_seurat_counts` returns the matrix with dimnames for given layer and slot
+#' `get_seurat_layer` returns the matrix with dimnames for given layer and slot
 #'
 #' This function takes a Seurat object and filters it to
 #' just ligand and receptor genes with greater than 0 expression.
@@ -530,73 +530,26 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
 #' @param assay assay to get data from
 #' @param layer layer to get data from
 #' @returns A matrix with dimnames for given layer and slot
-get_seurat_counts <- function(seurat, assay = "RNA", layer = "counts") {
-  a <- seurat@assays[[assay]]
+get_seurat_layer <- function(seurat, assay = "RNA", layer = "counts") {
+  a <- seurat[[assay]]
 
+  # legacy v3/v4: slot-based storage, use the long-standing accessor
   if (!inherits(a, "Assay5")) {
-    if (!layer %in% c("counts", "data", "scale.data"))
-      stop("v3 assay has only counts/data/scale.data; got '", layer, "'")
-    return(methods::slot(a, layer))
+    m <- SeuratObject::GetAssayData(a, layer = layer)
+    if (!length(m))
+      stop("layer '", layer, "' is empty or absent in assay '", assay, "'")
+    return(m)
   }
 
-  nms  <- names(a@layers)
-  lyrs <- if (layer %in% nms) layer
-  else grep(paste0("^", layer, "(\\.|$)"), nms, value = TRUE)
+  lyrs <- SeuratObject::Layers(a, search = layer)
   if (!length(lyrs))
     stop("no layer matching '", layer, "' in assay '", assay,
-         "'; available: ", paste(nms, collapse = ", "))
+         "'; available: ", paste(SeuratObject::Layers(a), collapse = ", "))
 
-  fmap <- unclass(a@features)
-  cmap <- unclass(a@cells)
+  if (length(lyrs) == 1L)
+    return(SeuratObject::LayerData(a, layer = lyrs))
 
-  named <- lapply(lyrs, function(l) {
-    m  <- a@layers[[l]]
-    fn <- rownames(fmap)[which(fmap[, l])]
-    cn <- rownames(cmap)[which(cmap[, l])]
-
-    if (is.null(rownames(m))) {
-      if (nrow(m) != length(fn))
-        stop("layer '", l, "' has ", nrow(m), " rows but LogMap lists ",
-             length(fn), " features")
-      rownames(m) <- fn
-    }
-    if (is.null(colnames(m))) {
-      if (ncol(m) != length(cn))
-        stop("layer '", l, "' has ", ncol(m), " cols but LogMap lists ",
-             length(cn), " cells")
-      colnames(m) <- cn
-    }
-    m
-  })
-
-  if (length(named) == 1L) {
-    out <- named[[1L]]
-  } else {
-    f <- Reduce(union, lapply(named, rownames))
-
-    aligned <- lapply(named, function(m) {
-      idx <- match(f, rownames(m))
-      hit <- !is.na(idx)
-      x <- if (all(hit)) {
-        m[idx, , drop = FALSE]
-      } else {
-        z <- if (inherits(m, "sparseMatrix"))
-          Matrix::sparseMatrix(i = integer(0), j = integer(0),
-                               x = numeric(0), dims = c(length(f), ncol(m)))
-        else matrix(0, length(f), ncol(m))
-        z[hit, ] <- m[idx[hit], , drop = FALSE]
-        z
-      }
-      dimnames(x) <- list(f, colnames(m))
-      x
-    })
-
-    out <- do.call(cbind, aligned)
-    dimnames(out) <- list(f, unlist(lapply(aligned, colnames), use.names = FALSE))
-  }
-
-  stopifnot(!is.null(rownames(out)), !is.null(colnames(out)))
-  return(out)
+  return(SeuratObject::LayerData(SeuratObject::JoinLayers(a), layer = layer))
 }
 
 #' Run the HyperCom pipeline on a seurat object
@@ -620,7 +573,7 @@ get_seurat_counts <- function(seurat, assay = "RNA", layer = "counts") {
 #' @returns 0 if run successfully
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="HyperCom"){
-  counts <- get_seurat_counts(seurat, assay, layer)
+  counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat@meta.data
 
   status <- HyperCom(lrdb, counts, metadata, sample, group, keep, weights, significance, parallel, cl, outdir)
