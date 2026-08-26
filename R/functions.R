@@ -24,29 +24,6 @@ filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
   return(cc.counts)
 }
 
-#' Load Seurat object and filter for HyperCom analysis
-#'
-#' `load_seurat` returns the count matrix with only ligand and receptor genes
-#'
-#' This function takes a Seurat object and filters it to
-#' just ligand and receptor genes with greater than 0 expression.
-#' @param seurat A seurat v5 object with a counts matrix
-#' @param lrdb A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
-#' @param assay assay to get data from
-#' @param layer layer to get data from
-#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
-#' @param outfile A string naming the output file
-#' @returns A dense matrix with row names being genes and column names being cells of only ligand and receptor genes with greater than 0 expression
-#' @export
-load_seurat <- function(seurat, assay="RNA", layer="counts", lrdb, outfile="0.counts.rds"){
-  counts <- seurat@assays[[assay]]@layers[[layer]]
-  rownames(counts) <- rownames(seurat)
-  colnames(counts) <- colnames(seurat)
-  cc.counts <- filter_counts(counts, lrdb, outfile)
-
-  return(cc.counts)
-}
-
 #' Generate a table of ligand-receptor interactions present in a counts matrix
 #'
 #' `generate_lrs_table` returns dataframe of ligand-receptor interactions present in a counts matrix
@@ -184,14 +161,16 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
   index <- data.frame(cell = row.names(infMat), check.names=FALSE)
   metadata$cell <- rownames(metadata)
 
-  clean.df <- data.frame(cell=metadata$cell, sample=as.character(metadata[, sample]), group=as.character(metadata[, group]), check.names=FALSE)
-  clean.df$sample <- factor(clean.df$sample, levels=c(unique(clean.df$sample), "gene"))
   if(is.null(group)){
-    clean.df$group <- "none"
+    group.vals <- "none"
   }
   else{
-    clean.df$group <- factor(clean.df$group, levels=c(unique(clean.df$group), "gene"))
+    group.vals <- as.character(metadata[, group])
   }
+
+  clean.df <- data.frame(cell=metadata$cell, sample=as.character(metadata[, sample]), group=group.vals, check.names=FALSE)
+  clean.df$sample <- factor(clean.df$sample, levels=c(unique(clean.df$sample), "gene"))
+  clean.df$group <- factor(clean.df$group, levels=c(unique(clean.df$group), "gene"))
 
   if(!is.null(keep)){
     additional <- metadata[, keep]
@@ -204,6 +183,7 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
   if(!is.null(outfile)){
     utils::write.csv(clean.df, outfile, row.names = FALSE)
   }
+
   return(clean.df)
 }
 
@@ -509,11 +489,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' `HyperCom` Runs the HyperCom pipeline
 #'
 #' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency-matrix`, `generate_infMat`, `generate-metadata`, and `prioritize_lr`.
-#' @param outdir output directory of pipeline run
-#' @param lrs A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
-#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions.
-#' @param adj A named adjacency matrix
-#' @param infMat A named influence matrix
+#' @param lrdb A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
+#' @param counts A matrix with row names being genes and column names being cells
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param sample A string that is the column name for sample in the provided metadata
 #' @param group A string that is the column name for group in the provided metadata
@@ -522,9 +500,10 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
+#' @param outdir output directory of pipeline run
 #' @returns 0 if run successfully
 #' @export
-HyperCom <- function(outdir="HyperCom", lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=1, significance=FALSE, parallel=FALSE, cl=NULL){
+HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="HyperCom"){
   if(!dir.exists(outdir)){
     dir.create(outdir)
   }
@@ -539,4 +518,112 @@ HyperCom <- function(outdir="HyperCom", lrdb, counts, metadata, sample, group=NU
   priority <- prioritize_lr(lrs, adj, infMat, metadata, weights, significance, parallel, cl)
 
   return(0)
+}
+
+#' Get matrix with dimnames for given layer and slot
+#'
+#' `get_seurat_counts` returns the matrix with dimnames for given layer and slot
+#'
+#' This function takes a Seurat object and filters it to
+#' just ligand and receptor genes with greater than 0 expression.
+#' @param seurat A seurat object
+#' @param assay assay to get data from
+#' @param layer layer to get data from
+#' @returns A matrix with dimnames for given layer and slot
+get_seurat_counts <- function(seurat, assay = "RNA", layer = "counts") {
+  a <- seurat@assays[[assay]]
+
+  if (!inherits(a, "Assay5")) {
+    if (!layer %in% c("counts", "data", "scale.data"))
+      stop("v3 assay has only counts/data/scale.data; got '", layer, "'")
+    return(slot(a, layer))
+  }
+
+  nms  <- names(a@layers)
+  lyrs <- if (layer %in% nms) layer
+  else grep(paste0("^", layer, "(\\.|$)"), nms, value = TRUE)
+  if (!length(lyrs))
+    stop("no layer matching '", layer, "' in assay '", assay,
+         "'; available: ", paste(nms, collapse = ", "))
+
+  fmap <- unclass(a@features)
+  cmap <- unclass(a@cells)
+
+  named <- lapply(lyrs, function(l) {
+    m  <- a@layers[[l]]
+    fn <- rownames(fmap)[which(fmap[, l])]
+    cn <- rownames(cmap)[which(cmap[, l])]
+
+    if (is.null(rownames(m))) {
+      if (nrow(m) != length(fn))
+        stop("layer '", l, "' has ", nrow(m), " rows but LogMap lists ",
+             length(fn), " features")
+      rownames(m) <- fn
+    }
+    if (is.null(colnames(m))) {
+      if (ncol(m) != length(cn))
+        stop("layer '", l, "' has ", ncol(m), " cols but LogMap lists ",
+             length(cn), " cells")
+      colnames(m) <- cn
+    }
+    m
+  })
+
+  if (length(named) == 1L) {
+    out <- named[[1L]]
+  } else {
+    f <- Reduce(union, lapply(named, rownames))
+
+    aligned <- lapply(named, function(m) {
+      idx <- match(f, rownames(m))
+      hit <- !is.na(idx)
+      x <- if (all(hit)) {
+        m[idx, , drop = FALSE]
+      } else {
+        z <- if (inherits(m, "sparseMatrix"))
+          Matrix::sparseMatrix(i = integer(0), j = integer(0),
+                               x = numeric(0), dims = c(length(f), ncol(m)))
+        else matrix(0, length(f), ncol(m))
+        z[hit, ] <- m[idx[hit], , drop = FALSE]
+        z
+      }
+      dimnames(x) <- list(f, colnames(m))
+      x
+    })
+
+    out <- do.call(cbind, aligned)
+    dimnames(out) <- list(f, unlist(lapply(aligned, colnames), use.names = FALSE))
+  }
+
+  stopifnot(!is.null(rownames(out)), !is.null(colnames(out)))
+  return(out)
+}
+
+#' Run the HyperCom pipeline on a seurat object
+#'
+#' `HyperCom_seurat` Runs the HyperCom pipeline on a seurat object
+#'
+#' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency-matrix`, `generate_infMat`, `generate-metadata`, and `prioritize_lr`.
+#' @param seurat A seurat object
+#' @param lrdb A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+#' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
+#' @param sample A string that is the column name for sample in the provided metadata
+#' @param assay assay to get data from
+#' @param layer layer to get data from
+#' @param group A string that is the column name for group in the provided metadata
+#' @param keep A vector of strings that are additional column names to keep in the provided metadata
+#' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
+#' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
+#' @param parallel A boolean of whether to run in parallel
+#' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
+#' @param outdir output directory of pipeline run
+#' @returns 0 if run successfully
+#' @export
+HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="HyperCom"){
+  counts <- get_seurat_counts(seurat, assay, layer)
+  metadata <- seurat@meta.data
+
+  status <- HyperCom(lrdb, counts, metadata, sample, group, keep, weights, significance, parallel, cl, outdir)
+
+  return(status)
 }

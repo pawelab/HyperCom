@@ -63,12 +63,18 @@ head(lrdb, 2)
 ```
 
 ## Running HyperCom
-The standard pipeline can be run using the `HyperCom` function. This vignette details each component function of the pipeline.
+The standard pipeline can be run using the `HyperCom` or for a seurat object the `HyperCom_seurat` function.
+This vignette details each component function of the pipeline.
 ```{r, eval=FALSE}
-HyperCom(outdir="overview", lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
+HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
          metadata=alexanian2021.metadata, sample="sample",
          group="condition", keep=NULL,
-         significance=FALSE, parallel=FALSE, cl=NULL)
+         significance=FALSE, parallel=FALSE, cl=NULL, outdir="overview")
+
+HyperCom_seurat(seurat=seurat_object, lrdb=cellchat.mm.lrdb, sample="sample",
+                assay="RNA", layer="counts"
+                group="condition", keep=NULL,
+                significance=FALSE, parallel=FALSE, cl=NULL, outdir="overview")
 ```
 
 ### Preprocessing

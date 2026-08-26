@@ -16,15 +16,17 @@ Imports:
   dplyr,
   foreach,
   Matrix,
+  methods,
   mltools,
   parallel,
   parallelly,
   Rfast,
+  SeuratObject,
   stats,
   tidyr,
   utils
 Config/Needs/website: rmarkdown
 Depends: 
-    R (>= 2.10)
+    R (>= 4.1)
 LazyData: true
 License: MIT + file LICENSE
