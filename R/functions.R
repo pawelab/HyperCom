@@ -422,7 +422,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
 #' @param adj A named adjacency matrix
 #' @param infMat A named influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
-#' @param weight a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
+#' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object. Default if parallel: `parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")`
