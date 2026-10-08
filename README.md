@@ -14,4 +14,4 @@ devtools::install_github("pawelab/HyperCom")
 ```
 
 ## Method Overview
-![HyperCom Overview](images/MethodOverview.png)
+![HyperCom Overview](images/MethodOverview.jpg)
