@@ -13,7 +13,12 @@ prioritize_lr(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "6.priority"
+  outdir = "6.priority",
+  infMat.cell = NULL,
+  cell.info = NULL,
+  cores = if (parallel) as.integer(parallelly::availableCores()) else 1L,
+  workers = 1L,
+  grid.mem.gb = 1
 )
 }
 \arguments{
@@ -27,15 +32,28 @@ interactions with only interactions present in the counts matrix.}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
+\item{weights}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel}
+\item{parallel}{A boolean of whether to run in parallel (sets the default of \code{cores})}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{No longer used; kept so existing calls do not break (a warning is given if supplied)}
 
 \item{outdir}{A string naming the output directory}
 
-\item{weight}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{infMat.cell}{Ignored (kept so existing calls work)}
+
+\item{cell.info}{Optional list from \code{generate_cell_info(metadata)}; built here if NULL}
+
+\item{cores}{Total cores for the per-grid work. Defaults to the cores this R session was granted
+(\code{parallelly::availableCores()}) when parallel = TRUE, else 1.}
+
+\item{workers}{Forked workers. 1 (default) scores one grid at a time on \code{cores} threads; k > 1
+scores k grids at once on one thread each (needs k * grid.mem.gb).}
+
+\item{grid.mem.gb}{Memory budget per grid in GB. Smaller budgets mean more passes over infMat
+per grid, not different results.}
 }
 \value{
 A dataframe of ligand-receptor pairs ordered by priority score for each weight

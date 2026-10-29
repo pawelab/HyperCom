@@ -4,12 +4,21 @@
 \alias{generate_adjacency_matrix}
 \title{Generate adjacency matrix of hypergraph}
 \usage{
-generate_adjacency_matrix(hyperedges, outfile = "3.adj.rds")
+generate_adjacency_matrix(
+  hyperedges,
+  outfile = "3.adj.rds",
+  sort = FALSE,
+  counts = NULL
+)
 }
 \arguments{
 \item{hyperedges}{A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge}
 
 \item{outfile}{A string naming the output file}
+
+\item{sort}{A boolean; if TRUE, reorders adj so all genes come first, then all cells}
+
+\item{counts}{A matrix with row names being genes and column names being cells; required only if sort=TRUE}
 }
 \value{
 An adjacency matrix where each entry is the number of shared hyperedges between nodes

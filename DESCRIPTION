@@ -1,6 +1,6 @@
 Package: HyperCom
 Title: A hypergraph method to understand cell-cell communication
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R: 
     c(person("Justin", "Moy", , "jmmoy@bu.edu", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7566-2215")),
@@ -9,7 +9,7 @@ Authors@R:
 Description: A hypergraph based method to understand cell-cell communication.
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.3
 Imports:
   collapse,
   doParallel,
@@ -19,11 +19,14 @@ Imports:
   mltools,
   parallel,
   parallelly,
+  Rcpp,
   Rfast,
   SeuratObject,
   stats,
   tidyr,
   utils
+LinkingTo:
+  Rcpp
 Config/Needs/website: rmarkdown
 Depends: 
     R (>= 4.1)

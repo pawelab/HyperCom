@@ -16,7 +16,13 @@ HyperCom_seurat(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "HyperCom"
+  outdir = "HyperCom",
+  coords = NULL,
+  spatial.mode = 3,
+  spatial.radius = 100,
+  spatial.nugget = 10,
+  spatial.target = 0.01,
+  spatial.floor = 0.001
 )
 }
 \arguments{
@@ -39,11 +45,15 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel}
+\item{parallel}{A boolean of whether to run in parallel (forked workers; see \code{prioritize_lr})}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{No longer used (kept so existing calls do not break)}
 
 \item{outdir}{output directory of pipeline run}
+
+\item{coords}{Optional cell coordinates, rownames = cell IDs (colnames of the Seurat object); NULL = non-spatial. See \code{HyperCom}.}
+
+\item{spatial.mode, spatial.radius, spatial.nugget, spatial.target, spatial.floor}{Decay kernel settings; see \code{HyperCom}}
 }
 \value{
 0 if run successfully

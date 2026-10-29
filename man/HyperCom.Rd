@@ -15,7 +15,17 @@ HyperCom(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "HyperCom"
+  outdir = "HyperCom",
+  coords = NULL,
+  spatial.mode = 3,
+  spatial.radius = 100,
+  spatial.nugget = 10,
+  spatial.target = 0.01,
+  spatial.floor = 0.001,
+  infmat.method = "auto",
+  cores = if (parallel) as.integer(parallelly::availableCores()) else 1L,
+  workers = 1L,
+  grid.mem.gb = 1
 )
 }
 \arguments{
@@ -36,11 +46,32 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel}
+\item{parallel}{A boolean of whether to run in parallel (forked workers; see \code{prioritize_lr})}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{No longer used (kept so existing calls do not break); parallelism is set by \code{parallel}}
 
 \item{outdir}{output directory of pipeline run}
+
+\item{coords}{Optional matrix/data.frame of cell coordinates: rownames = cell IDs (colnames of counts),
+two columns (x, y), same units as spatial.radius / spatial.nugget (e.g. microns). NULL = non-spatial run.}
+
+\item{spatial.mode}{Decay kernel (see \code{score_spatial_decay}): 1 = binary cutoff, 2 = exponential with floor, 3 = nugget + exponential}
+
+\item{spatial.radius}{Distance at which the decay reaches spatial.target (also the cutoff for mode 1)}
+
+\item{spatial.nugget}{Distance below which the weight is held at 1 (mode 3 only)}
+
+\item{spatial.target}{Weight the decay reaches at spatial.radius (modes 2, 3)}
+
+\item{spatial.floor}{Weights below this are set to 0 (mode 2 only)}
+
+\item{infmat.method}{Inversion method for \code{generate_infMat}: "auto", "chol" or "lu"}
+
+\item{cores}{Cores used for the inversion (BLAS threads) and the LR scoring (see \code{prioritize_lr})}
+
+\item{workers}{Forked workers for the LR scoring; 1 = one grid at a time on \code{cores} threads}
+
+\item{grid.mem.gb}{Memory budget in GB per grid for the LR scoring (see \code{prioritize_lr})}
 }
 \value{
 0 if run successfully

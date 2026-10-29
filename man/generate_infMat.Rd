@@ -4,7 +4,19 @@
 \alias{generate_infMat}
 \title{Calculate influence matrix of hypergraph}
 \usage{
-generate_infMat(adj, r = 0.5, outfile = "4.infMat.rds")
+generate_infMat(
+  adj,
+  r = 0.5,
+  outfile = "4.infMat.rds",
+  coords = NULL,
+  spatial.mode = 1,
+  spatial.radius = 100,
+  spatial.nugget = 10,
+  spatial.target = 0.01,
+  spatial.floor = 0.001,
+  method = c("auto", "chol", "lu"),
+  threads = as.integer(parallelly::availableCores())
+)
 }
 \arguments{
 \item{adj}{A named adjacency matrix}
@@ -12,6 +24,13 @@ generate_infMat(adj, r = 0.5, outfile = "4.infMat.rds")
 \item{r}{A double between 0 and 1 representing the restart probability}
 
 \item{outfile}{A string naming the output file}
+
+\item{coords, spatial.mode, spatial.radius, spatial.nugget, spatial.target, spatial.floor}{Optional spatial
+decay applied to adj first; see \code{score_spatial_decay}}
+
+\item{method}{"auto" (Cholesky if adj is symmetric, else LU), "chol", or "lu" (the original computation)}
+
+\item{threads}{BLAS threads used for the inversion; default all cores granted to this session}
 }
 \value{
 An influence matrix

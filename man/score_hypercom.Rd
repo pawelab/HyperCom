@@ -4,16 +4,30 @@
 \alias{score_hypercom}
 \title{Calculate the HyperCom score for each cell}
 \usage{
-score_hypercom(infMat, metadata, ligand = NULL, receptors = NULL)
+score_hypercom(
+  infMat,
+  metadata,
+  ligand = NULL,
+  receptors = NULL,
+  infMat.cell = NULL,
+  cell.info = NULL,
+  subunit.scores = NULL
+)
 }
 \arguments{
-\item{infMat}{A named influence matrix}
+\item{infMat}{A named influence matrix (may be NULL when subunit.scores is given)}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
 \item{ligand}{A string of the ligand name}
 
 \item{receptors}{A vector containing string elements of the receptor names}
+
+\item{infMat.cell}{Ignored (kept so existing calls work)}
+
+\item{cell.info}{Optional list from \code{generate_cell_info}; built if NULL}
+
+\item{subunit.scores}{Optional named list from the internal \code{score_subunits}; when given, no grid is computed here}
 }
 \value{
 A dataframe containing the sender score, receiver score, avg, dif, and HyperCom score
