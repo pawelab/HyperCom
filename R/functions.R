@@ -89,12 +89,6 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
   return(edges)
 }
 
-####################################################################################################
-############################################## START ###############################################
-####################################################################################################
-
-# FLAG:MODIFIED_20261016
-# introduces a parameter to sort the matrix by genes and then cells
 #' Generate adjacency matrix of hypergraph
 #'
 #' `generate_adjacency_matrix` returns the adjacency matrix of the hypergraph
@@ -107,79 +101,44 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
 #' @returns An adjacency matrix where each entry is the number of shared hyperedges between nodes
 #' @export
 generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds", sort=FALSE, counts=NULL){
-  print(sprintf("<generate_adjacency_matrix> step 1 done: input hyperedges has %d rows, %d unique nodes, %d unique edges",
-                nrow(hyperedges), length(unique(hyperedges$node)), length(unique(hyperedges$edge))))
-
+  
   incidence.matrix <- stats::xtabs(~node + edge, hyperedges, sparse=TRUE)
-  print(sprintf("<generate_adjacency_matrix> step 2 done: incidence.matrix built, dim=[%d, %d], nnz=%d",
-                nrow(incidence.matrix), ncol(incidence.matrix), Matrix::nnzero(incidence.matrix)))
-
   adj <- Matrix::tcrossprod(incidence.matrix)
-  print(sprintf("<generate_adjacency_matrix> step 3 done: tcrossprod adj built, dim=[%d, %d], class=%s, nnz=%d",
-                nrow(adj), ncol(adj), class(adj)[1], Matrix::nnzero(adj)))
-
   diag(adj) <- 0
-  print(sprintf("<generate_adjacency_matrix> step 4 done: diagonal zeroed, nnz now=%d", Matrix::nnzero(adj)))
-
   rm.indices <- which(Matrix::rowSums(adj) == 0)
-  print(sprintf("<generate_adjacency_matrix> step 5 done: found %d zero-degree nodes to remove", length(rm.indices)))
-
+  
   if(length(rm.indices) > 0) {
     adj <- adj[-rm.indices, -rm.indices]
-    print(sprintf("<generate_adjacency_matrix> step 6 done: removed zero-degree nodes, new dim=[%d, %d]",
-                  nrow(adj), ncol(adj)))
-  } else {
-    print("<generate_adjacency_matrix> step 6 done: no zero-degree nodes found, skipping removal")
   }
 
   if(sort){
-    print("<generate_adjacency_matrix> step 7 started: sort=TRUE, entering sort block")
-
     if(is.null(counts)){
       stop("counts must be provided (rownames=genes, colnames=cells) when sort=TRUE")
     }
     cell.ids <- colnames(counts)
     node.ids <- rownames(adj)
     is.cell <- node.ids %in% cell.ids
-    print(sprintf("<generate_adjacency_matrix> step 7 done: n.cell.ids=%d, n.node.ids=%d, n.matched.cells=%d, n.genes=%d",
-                  length(cell.ids), length(node.ids), sum(is.cell), sum(!is.cell)))
-
+    
     # sanity check: gene/cell namespaces should never collide
     if(any(node.ids[!is.cell] %in% cell.ids)){
       warning("some node names classified as genes also match cell names; check for ID collisions")
     }
-    print(sprintf("<generate_adjacency_matrix> step 8 done: collision check complete, any.collision=%s",
-                  any(node.ids[!is.cell] %in% cell.ids)))
-
+    
     # genes first (FALSE), cells last (TRUE); alphabetical within each group for determinism
     ord <- order(is.cell, node.ids)
-    print(sprintf("<generate_adjacency_matrix> step 9 done: sort order computed, length(ord)=%d, first=%s, last=%s",
-                  length(ord), node.ids[ord[1]], node.ids[ord[length(ord)]]))
-
     adj <- adj[ord, ord]
-    print(sprintf("<generate_adjacency_matrix> step 10 done: adj reordered, dim=[%d, %d]", nrow(adj), ncol(adj)))
-  } else {
-    print("<generate_adjacency_matrix> step 7 done: sort=FALSE, skipping sort block")
-  }
+  } 
 
   if(!is.null(outfile)){
     saveRDS(adj, outfile)
-    print(sprintf("<generate_adjacency_matrix> step 11 done: saved adj to outfile=%s", outfile))
-  } else {
-    print("<generate_adjacency_matrix> step 11 done: outfile=NULL, skipping save")
   }
 
-  print(sprintf("<generate_adjacency_matrix> step 12 done: returning adj, dim=[%d, %d], class=%s",
-                nrow(adj), ncol(adj), class(adj)[1]))
   return(adj)
 }
 
-# FLAG:NEW_20261016
-# spatial decay function with 
 #' Apply spatial decay to the cell-cell block of a sorted adjacency matrix
 #'
-#' `score_spatial_decay` reweights the cell-cell (A4) block of a gene-then-cell
-#' sorted adjacency matrix by physical distance, leaving A1/A2/A3 untouched.
+#' `score_spatial_decay` reweights the cell-cell block of a sorted adjacency matrix by physical distance.
 #' @param adj A sorted adjacency matrix (genes first, then cells; see generate_adjacency_matrix(sort=TRUE))
 #' @param coords A matrix/data.frame of cell coordinates, rownames = cell IDs, two columns (x, y), same units as radius/nugget (e.g. microns)
 #' @param mode 1 = binary threshold, 2 = exponential with a small-value floor, 3 = exponential with a flat nugget region
@@ -188,29 +147,21 @@ generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds", sort=FALS
 #' @param target Weight value decay should reach at `radius` (modes 2, 3)
 #' @param floor Weights below this value are snapped to 0 (mode 2 only)
 #' @param outfile A string naming the output file
-#' @returns The adjacency matrix with A4 spatially reweighted
+#' @returns The adjacency matrix A with cell-cell block (A4) spatially reweighted
 #' @export
 score_spatial_decay <- function(adj, coords, mode=1, radius=100, nugget=10, target=0.01, floor=1e-3, outfile=NULL){
-  print(sprintf("<score_spatial_decay> step 1 started: adj dim=[%d, %d], nrow(coords)=%d, mode=%d, radius=%s, nugget=%s, target=%s, floor=%s",
-                nrow(adj), ncol(adj), nrow(coords), mode, radius, nugget, target, floor))
-
   node.ids <- rownames(adj)
   stopifnot(identical(node.ids, colnames(adj)))
-  print(sprintf("<score_spatial_decay> step 1 done: node.ids extracted, length=%d, rownames==colnames confirmed",
-                length(node.ids)))
-
+  
   cell.ids <- rownames(coords)
   is.cell <- node.ids %in% cell.ids
   n.cell <- sum(is.cell)
   n.total <- length(node.ids)
-  print(sprintf("<score_spatial_decay> step 2 done: n.total=%d, n.cell(matched)=%d, n.cell.ids(coords)=%d",
-                n.total, n.cell, length(cell.ids)))
-
+  
   # must be sorted: all cell nodes occupy the trailing block, in this exact order
   expected.pos <- (n.total - n.cell + 1):n.total
   is.sorted <- identical(which(is.cell), expected.pos)
-  print(sprintf("<score_spatial_decay> step 3 done: expected.pos range=[%d, %d], is.sorted=%s",
-                expected.pos[1], expected.pos[length(expected.pos)], is.sorted))
+  
   if(!is.sorted){
     stop("adj is not sorted gene-then-cell; run generate_adjacency_matrix(..., sort=TRUE) first")
   }
@@ -218,99 +169,194 @@ score_spatial_decay <- function(adj, coords, mode=1, radius=100, nugget=10, targ
   cell.idx <- expected.pos
   cell.names <- node.ids[cell.idx]
   coords <- coords[cell.names, , drop=FALSE]  # align coords to adj's cell order
-  print(sprintf("<score_spatial_decay> step 4 done: cell.idx length=%d, coords realigned, nrow(coords)=%d, first.cell=%s, last.cell=%s",
-                length(cell.idx), nrow(coords), cell.names[1], cell.names[length(cell.names)]))
-
+  
+  # A4 refers to cell-cell block of adjacency matrix A
   A4 <- adj[cell.idx, cell.idx]
-  print(sprintf("<score_spatial_decay> step 5 done: A4 extracted, dim=[%d, %d], nnz=%d",
-                nrow(A4), ncol(A4), Matrix::nnzero(A4)))
-
+  
   # force full (non-symmetric-class) storage so both (i,j) and (j,i) are explicit triplets
   A4 <- as(as(A4, "generalMatrix"), "CsparseMatrix")
   A4.t <- as(A4, "TsparseMatrix")
-  print(sprintf("<score_spatial_decay> step 6 done: A4 coerced to generalMatrix/CsparseMatrix then TsparseMatrix, class=%s, nnz=%d",
-                class(A4.t)[1], length(A4.t@x)))
-
+  
   i <- A4.t@i + 1
   j <- A4.t@j + 1
   x <- A4.t@x
-  print(sprintf("<score_spatial_decay> step 7 done: triplets extracted, length(i)=%d, length(j)=%d, length(x)=%d",
-                length(i), length(j), length(x)))
-
+  
   keep <- (x > 0) & (i != j)
   i <- i[keep]; j <- j[keep]; x <- x[keep]
-  print(sprintf("<score_spatial_decay> step 8 done: filtered to positive off-diagonal entries, kept=%d of %d (%.1f%%)",
-                sum(keep), length(keep), 100 * sum(keep) / length(keep)))
-
+  
   d <- sqrt((coords[i, 1] - coords[j, 1])^2 + (coords[i, 2] - coords[j, 2])^2)
-  print(sprintf("<score_spatial_decay> step 9 done: pairwise distances computed, n=%d, min=%.3f, median=%.3f, max=%.3f",
-                length(d), min(d), stats::median(d), max(d)))
-
+  
+  # FLAG:TBD collapse 2&3 as one, and add gaussian decay. and also consider other spatial decay functions
   w <- switch(mode,
     `1` = {
+      # spatial mode 1: binary classification with threshold parameter r
       wt <- as.numeric(d <= radius)
-      print(sprintf("<score_spatial_decay> step 10 done: mode=1 binary threshold applied, radius=%s, frac.kept=%.3f",
-                    radius, mean(wt > 0)))
       wt
     },
     `2` = {
+      # spatial mode 2: exponential decay with threshold parameter r
       lambda <- -log(target) / radius
       wt <- exp(-lambda * d)
-      n.below.floor <- sum(wt < floor)
-      wt[wt < floor] <- 0
-      print(sprintf("<score_spatial_decay> step 10 done: mode=2 exponential applied, lambda=%.5f, n.snapped.to.zero=%d, min.w=%.5f, max.w=%.5f",
-                    lambda, n.below.floor, min(wt), max(wt)))
+      wt[d > radius] <- 0
       wt
     },
     `3` = {
+      # spatial mode 3: exponential decay with threshold parameter r 
       lambda <- -log(target) / (radius - nugget)
       wt <- ifelse(d <= nugget, 1, exp(-lambda * (d - nugget)))
-      print(sprintf("<score_spatial_decay> step 10 done: mode=3 nugget+exponential applied, lambda=%.5f, n.in.nugget=%d, min.w=%.5f, max.w=%.5f",
-                    lambda, sum(d <= nugget), min(wt), max(wt)))
+      wt[d > radius] <- 0
       wt
     },
     stop("mode must be 1, 2, or 3")
   )
 
   A4.new <- Matrix::sparseMatrix(i=i, j=j, x=x*w, dims=dim(A4), dimnames=dimnames(A4))
-  print(sprintf("<score_spatial_decay> step 11 done: A4.new built, dim=[%d, %d], nnz=%d",
-                nrow(A4.new), ncol(A4.new), Matrix::nnzero(A4.new)))
-
+  
   adj[cell.idx, cell.idx] <- A4.new
-  print(sprintf("<score_spatial_decay> step 12 done: A4 block written back into adj, adj dim=[%d, %d]",
-                nrow(adj), ncol(adj)))
-
+  
   if(!is.null(outfile)){
-    saveRDS(adj, outfile)
-    print(sprintf("<score_spatial_decay> step 13 done: saved adj to outfile=%s", outfile))
-  } else {
-    print("<score_spatial_decay> step 13 done: outfile=NULL, skipping save")
+    saveRDS(adj, outfile)  
   }
 
-  print(sprintf("<score_spatial_decay> step 14 done: returning adj, dim=[%d, %d]", nrow(adj), ncol(adj)))
   return(adj)
 }
 
-# FLAG:MODIFIED_20261016
+# FLAG:MODIFIED_20261025 (v1-fast)
 # ----------------------------------------------------------------------------------------------
-# CHANGES 20261016 (HyperCom)
-#   1. cell.info and infMat.cell are defined once, right after generate_metadata(), and given
-#      to prioritize_lr(). 
-#   2. prioritize_lr() has new arguments (infMat.cell, cell.info, cores) which are appended at 
-#      the end of its signature, so old positional calls still work.
-#   3. With parallel = TRUE, the work is now spread over forked workers inside prioritize_lr()
-#      (cores = parallelly::availableCores(), i.e. NSLOTS on SGE). `cl` is no longer used; it is
-#      still forwarded so that prioritize_lr() can warn if one is supplied.
-#   4. `coords` is now an argument. 
-#   5. generate_adjacency_matrix(sort=TRUE, counts=) needs the ORIGINAL genes x cells
-#      matrix to tell cell nodes from gene nodes, but `counts` had already been overwritten by
-#      filter_counts(), which returns CELLS x genes. colnames(counts) were therefore the genes, the
-#      sort put genes last, and score_spatial_decay() stopped with "adj is not sorted". The
-#      original matrix is now kept as counts.raw and passed to the sort.
-#   5. Input check: every cell in counts must have a row in coords. A cell without coordinates
-#      would give NaN distances and NaN weights for all its edges, and fail much later in
-#      Matrix::solve() with an error that does not point back to the cause.
+# CHANGES 20261025 (generate_infMat)
+#   The influence matrix is the same F = r (I - (1 - r) W)^-1, W = D^-1 A. What changed is how the
+#   inverse is computed:
+#   1. Fewer dense L x L copies. The old code held a dense identity D, the dense W, M = D - W,
+#      solve()'s identity right-hand side, its LU copy and the result (~6 L^2 doubles, ~20 GB at
+#      L = 20k). Both methods below build M straight from the sparse adjacency and scale in place
+#      (collapse::setop), peaking at ~3 L^2 ("lu") or ~2 L^2 ("chol").
+#   2. method = "chol" (default when adj is symmetric, which it always is for HyperCom: adj is
+#      B B^T, and the spatial kernel is symmetric). M is similar to the symmetric positive definite
+#      S = D^1/2 M D^-1/2 = I - (1 - r) D^-1/2 A D^-1/2 (eigenvalues in [r, 2 - r]), so
+#      F = r D^-1/2 S^-1 D^1/2, with S^-1 from a Cholesky factorisation: ~L^3 flops instead of
+#      the ~8/3 L^3 of an LU-based full inverse. S has condition number <= (2 - r) / r (3 at
+#      r = 0.5), so the result matches "lu" to ~1e-15 relative, but not bit for bit.
+#   3. method = "lu" is the old computation (same M, same LAPACK call), only without the extra
+#      copies: with the same BLAS it reproduces the old infMat bit for bit.
+#   4. `threads`: BLAS threads for the inversion (default: the cores this session was granted).
+#      On the SCC, R uses FlexiBLAS; its default NETLIB backend is single-threaded reference BLAS
+#      (~1 GFLOP/s), which is what made the 20k inversion take hours. Start R with
+#      FLEXIBLAS=OpenBLASOpenMP (or MklOpenMP) to get an optimised, multithreaded backend.
 # ----------------------------------------------------------------------------------------------
+#' Calculate influence matrix of hypergraph
+#'
+#' `generate_infMat` returns the influence matrix of the hypergraph
+#'
+#' This function takes an adjacency matrix and returns its influence matrix using heat diffusion.
+#' @param adj A named adjacency matrix
+#' @param r A double between 0 and 1 representing the restart probability
+#' @param outfile A string naming the output file
+#' @param coords,spatial.mode,spatial.radius,spatial.nugget,spatial.target,spatial.floor Optional spatial
+#' decay applied to adj first; see `score_spatial_decay`
+#' @param method "auto" (Cholesky if adj is symmetric, else LU), "chol", or "lu" (the original computation)
+#' @param threads BLAS threads used for the inversion; default all cores granted to this session
+#' @returns An influence matrix
+#' @export
+generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds",
+                            coords=NULL, spatial.mode=1, spatial.radius=100,
+                            spatial.nugget=10, spatial.target=0.01, spatial.floor=1e-3,
+                            method=c("auto", "chol", "lu"),
+                            threads=as.integer(parallelly::availableCores())){
+  method <- match.arg(method)
+
+  if(!is.null(coords)){
+    adj <- score_spatial_decay(adj, coords, mode=spatial.mode, radius=spatial.radius,
+                               nugget=spatial.nugget, target=spatial.target,
+                               floor=spatial.floor, outfile=NULL)
+  }
+  len <- dim(adj)[1]
+  node.names <- rownames(adj)
+
+  if(method == "auto"){
+    method <- if(Matrix::isSymmetric(adj)) "chol" else "lu"
+  }
+
+  old.threads <- blas_threads_cpp(as.integer(threads))
+  if(old.threads > 0){
+    on.exit(blas_threads_cpp(old.threads), add = TRUE)
+  }
+  diag.idx <- seq.int(1, as.numeric(len) * len, by = len + 1)
+  d <- Matrix::rowSums(adj)
+
+  if(method == "lu"){
+    # identical operations to the old D - (1 - r) * W, without the dense D
+    M <- as.matrix(-((1 - r) * (adj / d)))
+    M[diag.idx] <- M[diag.idx] + 1
+    infMat <- solve(M)
+    rm(M)
+    collapse::setop(infMat, "*", r)
+  } else {
+    # S = I - (1 - r) D^-1/2 A D^-1/2, symmetric positive definite
+    s <- 1 / sqrt(d)
+    S <- as.matrix(Matrix::Diagonal(x = s) %*% adj %*% Matrix::Diagonal(x = s))
+    collapse::setop(S, "*", -(1 - r))
+    S[diag.idx] <- S[diag.idx] + 1
+    U <- chol(S)
+    rm(S)
+    infMat <- chol2inv(U)
+    rm(U)
+    # F = r D^-1/2 S^-1 D^1/2: scale row i by r s_i, column j by 1 / s_j, in place
+    collapse::setop(infMat, "*", r * s)
+    collapse::setop(infMat, "*", 1 / s, rowwise = TRUE)
+  }
+
+  dimnames(infMat) <- list(node.names, node.names)
+
+  if(!is.null(outfile)){
+    saveRDS(infMat, outfile)
+  }
+  return(infMat)
+}
+
+#' Generate cleaned metadata table
+#'
+#' `generate_metadata` returns a minimal metadata dataframe
+#'
+#' This function takes an influence matrix and metadata table and creates a metadata data table containing the
+#' node name, sample, and group. If group is unspecified, it is assumed all nodes are part of the same group.
+#' @param infMat A named influence matrix
+#' @param metadata A dataframe containing cell metadata
+#' @param sample A string that is the column name for sample in the provided metadata
+#' @param group A string that is the column name for group in the provided metadata
+#' @param keep A vector of strings that are additional column names to keep in the provided metadata
+#' @param outfile A string naming the output file
+#' @returns An influence matrix
+#' @export
+generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
+  index <- data.frame(cell = row.names(infMat), check.names=FALSE)
+  metadata$cell <- rownames(metadata)
+
+  if(is.null(group)){
+    group.vals <- "none"
+  }
+  else{
+    group.vals <- as.character(metadata[, group])
+  }
+
+  clean.df <- data.frame(cell=metadata$cell, sample=as.character(metadata[, sample]), group=group.vals, check.names=FALSE)
+  clean.df$sample <- factor(clean.df$sample, levels=c(unique(clean.df$sample), "gene"))
+  clean.df$group <- factor(clean.df$group, levels=c(unique(clean.df$group), "gene"))
+
+  if(!is.null(keep)){
+    additional <- metadata[, keep]
+    clean.df <- cbind(clean.df, additional)
+  }
+
+  clean.df <- dplyr::left_join(index, clean.df, by=dplyr::join_by(cell))
+  clean.df[is.na(clean.df)] <- "gene"
+
+  if(!is.null(outfile)){
+    utils::write.csv(clean.df, outfile, row.names = FALSE)
+  }
+
+  return(clean.df)
+}
+
 #' Run the HyperCom pipeline
 #'
 #' `HyperCom` Runs the HyperCom pipeline
@@ -406,145 +452,8 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   return(0)
 }
 
-# FLAG:MODIFIED_20261025 (v1-fast)
-# ----------------------------------------------------------------------------------------------
-# CHANGES 20261025 (generate_infMat)
-#   The influence matrix is the same F = r (I - (1 - r) W)^-1, W = D^-1 A. What changed is how the
-#   inverse is computed:
-#   1. Fewer dense L x L copies. The old code held a dense identity D, the dense W, M = D - W,
-#      solve()'s identity right-hand side, its LU copy and the result (~6 L^2 doubles, ~20 GB at
-#      L = 20k). Both methods below build M straight from the sparse adjacency and scale in place
-#      (collapse::setop), peaking at ~3 L^2 ("lu") or ~2 L^2 ("chol").
-#   2. method = "chol" (default when adj is symmetric, which it always is for HyperCom: adj is
-#      B B^T, and the spatial kernel is symmetric). M is similar to the symmetric positive definite
-#      S = D^1/2 M D^-1/2 = I - (1 - r) D^-1/2 A D^-1/2 (eigenvalues in [r, 2 - r]), so
-#      F = r D^-1/2 S^-1 D^1/2, with S^-1 from a Cholesky factorisation: ~L^3 flops instead of
-#      the ~8/3 L^3 of an LU-based full inverse. S has condition number <= (2 - r) / r (3 at
-#      r = 0.5), so the result matches "lu" to ~1e-15 relative, but not bit for bit.
-#   3. method = "lu" is the old computation (same M, same LAPACK call), only without the extra
-#      copies: with the same BLAS it reproduces the old infMat bit for bit.
-#   4. `threads`: BLAS threads for the inversion (default: the cores this session was granted).
-#      On the SCC, R uses FlexiBLAS; its default NETLIB backend is single-threaded reference BLAS
-#      (~1 GFLOP/s), which is what made the 20k inversion take hours. Start R with
-#      FLEXIBLAS=OpenBLASOpenMP (or MklOpenMP) to get an optimised, multithreaded backend.
-# ----------------------------------------------------------------------------------------------
-#' Calculate influence matrix of hypergraph
-#'
-#' `generate_infMat` returns the influence matrix of the hypergraph
-#'
-#' This function takes an adjacency matrix and returns its influence matrix using heat diffusion.
-#' @param adj A named adjacency matrix
-#' @param r A double between 0 and 1 representing the restart probability
-#' @param outfile A string naming the output file
-#' @param coords,spatial.mode,spatial.radius,spatial.nugget,spatial.target,spatial.floor Optional spatial
-#' decay applied to adj first; see `score_spatial_decay`
-#' @param method "auto" (Cholesky if adj is symmetric, else LU), "chol", or "lu" (the original computation)
-#' @param threads BLAS threads used for the inversion; default all cores granted to this session
-#' @returns An influence matrix
-#' @export
-generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds",
-                            coords=NULL, spatial.mode=1, spatial.radius=100,
-                            spatial.nugget=10, spatial.target=0.01, spatial.floor=1e-3,
-                            method=c("auto", "chol", "lu"),
-                            threads=as.integer(parallelly::availableCores())){
-  method <- match.arg(method)
 
-  if(!is.null(coords)){
-    adj <- score_spatial_decay(adj, coords, mode=spatial.mode, radius=spatial.radius,
-                               nugget=spatial.nugget, target=spatial.target,
-                               floor=spatial.floor, outfile=NULL)
-  }
-  len <- dim(adj)[1]
-  node.names <- rownames(adj)
 
-  if(method == "auto"){
-    method <- if(Matrix::isSymmetric(adj)) "chol" else "lu"
-  }
-
-  old.threads <- blas_threads_cpp(as.integer(threads))
-  if(old.threads > 0){
-    on.exit(blas_threads_cpp(old.threads), add = TRUE)
-  }
-  diag.idx <- seq.int(1, as.numeric(len) * len, by = len + 1)
-  d <- Matrix::rowSums(adj)
-
-  if(method == "lu"){
-    # identical operations to the old D - (1 - r) * W, without the dense D
-    M <- as.matrix(-((1 - r) * (adj / d)))
-    M[diag.idx] <- M[diag.idx] + 1
-    infMat <- solve(M)
-    rm(M)
-    collapse::setop(infMat, "*", r)
-  } else {
-    # S = I - (1 - r) D^-1/2 A D^-1/2, symmetric positive definite
-    s <- 1 / sqrt(d)
-    S <- as.matrix(Matrix::Diagonal(x = s) %*% adj %*% Matrix::Diagonal(x = s))
-    collapse::setop(S, "*", -(1 - r))
-    S[diag.idx] <- S[diag.idx] + 1
-    U <- chol(S)
-    rm(S)
-    infMat <- chol2inv(U)
-    rm(U)
-    # F = r D^-1/2 S^-1 D^1/2: scale row i by r s_i, column j by 1 / s_j, in place
-    collapse::setop(infMat, "*", r * s)
-    collapse::setop(infMat, "*", 1 / s, rowwise = TRUE)
-  }
-
-  dimnames(infMat) <- list(node.names, node.names)
-
-  if(!is.null(outfile)){
-    saveRDS(infMat, outfile)
-  }
-  return(infMat)
-}
-
-####################################################################################################
-############################################### END ################################################
-####################################################################################################
-
-#' Generate cleaned metadata table
-#'
-#' `generate_metadata` returns a minimal metadata dataframe
-#'
-#' This function takes an influence matrix and metadata table and creates a metadata data table containing the
-#' node name, sample, and group. If group is unspecified, it is assumed all nodes are part of the same group.
-#' @param infMat A named influence matrix
-#' @param metadata A dataframe containing cell metadata
-#' @param sample A string that is the column name for sample in the provided metadata
-#' @param group A string that is the column name for group in the provided metadata
-#' @param keep A vector of strings that are additional column names to keep in the provided metadata
-#' @param outfile A string naming the output file
-#' @returns An influence matrix
-#' @export
-generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
-  index <- data.frame(cell = row.names(infMat), check.names=FALSE)
-  metadata$cell <- rownames(metadata)
-
-  if(is.null(group)){
-    group.vals <- "none"
-  }
-  else{
-    group.vals <- as.character(metadata[, group])
-  }
-
-  clean.df <- data.frame(cell=metadata$cell, sample=as.character(metadata[, sample]), group=group.vals, check.names=FALSE)
-  clean.df$sample <- factor(clean.df$sample, levels=c(unique(clean.df$sample), "gene"))
-  clean.df$group <- factor(clean.df$group, levels=c(unique(clean.df$group), "gene"))
-
-  if(!is.null(keep)){
-    additional <- metadata[, keep]
-    clean.df <- cbind(clean.df, additional)
-  }
-
-  clean.df <- dplyr::left_join(index, clean.df, by=dplyr::join_by(cell))
-  clean.df[is.na(clean.df)] <- "gene"
-
-  if(!is.null(outfile)){
-    utils::write.csv(clean.df, outfile, row.names = FALSE)
-  }
-
-  return(clean.df)
-}
 
 #' Perform element wise multiplication of two matrices
 #'
@@ -572,82 +481,6 @@ fast_div <- function(A, B){
   return(collapse::setop(AA, "/", B))
 }
 
-####################################################################################################
-######################################## START 20261016 ############################################
-####################################################################################################
-#
-# SPEED-UP OF prioritize_lr() (20261016), ported from 20261013_investigation_v1.Rmd, section 2.2.
-#
-# Notation (as in the Rmd, section 4). F = infMat (L x L, L = cells + gene nodes), C = F[cells, cells]
-# (n x n), and for ligand l and ONE receptor subunit r, over cells i, j:
-#     a_i = F[i, l],   b_j = F[r, j],   Q_ij = a_i * b_j / C_ij * 1[sample_i == sample_j]
-# Q off the diagonal and nonzero is percent-ranked globally (dplyr::percent_rank: ties -> min
-# rank), and sender_i / receiver_j are the row / column means of the ranks. A receptor COMPLEX
-# averages sender and receiver over its subunits.
-#
-# What the old code did per receptor SUBUNIT (one score_sr() call each), and what changed:
-#
-#   step                                   old                          new
-#   ------------------------------------   --------------------------   ---------------------------
-#   C = infMat[cells, cells]               copied every call (n^2)      once per run (HyperCom /
-#                                                                       prioritize_lr), passed down
-#   same-sample mask                       built every call (2 x n^2)   once per run, and skipped
-#                                                                       entirely with one sample
-#   outer product a b^T                    over ALL L nodes, then cut   over cells only (n^2)
-#                                          to cells (L^2 + n^2 copy)
-#   ligand column / receptor row           read from infMat each call   read once for all pairs
-#   (ligand, subunit) grids shared by      recomputed for every pair    computed ONCE, reused by
-#   several pairs                                                       every pair that needs it
-#   zeros -> NA                            trans[trans == 0] <- NA      collapse::setv, in place
-#                                          (+ an n^2 logical)
-#   diagonal                               diag(trans) <- 0 (diag<- is  linear index, in place
-#                                          an R closure: n^2 copy)
-#   percent rank                           dplyr::percent_rank          data.table::frankv, same
-#                                          (single-threaded)            min-rank ties, multithreaded
-#   byrow = TRUE refill + colMeans         n^2 transpose copy           rowMeans / colMeans on the
-#                                                                       untransposed ranks
-#   parallelism                            foreach + PSOCK cluster      forked workers (mclapply):
-#                                          (ships infMat to each)       infMat / C shared, not copied
-#
-# Result: same priority table as the original (verified at tol = 0 in the Rmd, section 2.3).
-# Nothing about the scoring algorithm changed; only how the same numbers are computed.
-#
-# Memory per worker per grid (n cells, 8-byte doubles):
-#   old 2.2 version as tested : ~28 n^2 bytes (two hidden n^2 copies, see rank_grid())
-#   this version              : ~12 n^2 bytes  (20k cells: ~4.8 GB per worker, plus the shared C)
-#
-# Package dependencies used here: data.table (frankv, setattr, setDTthreads), collapse (setop,
-# setv, fnobs), Rfast (Tcrossprod, Outer), parallel (mclapply), parallelly (availableCores).
-# data.table and parallel must be listed under Imports in DESCRIPTION.
-####################################################################################################
-
-
-####################################################################################################
-# CHANGES 20261025 (v1-fast), on top of 20261016
-#
-#   The per-grid work (build Q, mask, percent rank, row / column means) moved into one C++ kernel,
-#   rank_grid_cpp() (src/rank_grid.cpp). It computes Q on the fly from infMat and never stores the
-#   n x n grid, its sort keys or its ranks. It histograms the values, then sorts them one
-#   value-range chunk at a time, so a grid's memory is `grid.mem.gb` (default 1 GB) instead of
-#   ~12 n^2 bytes (4.8 GB at 20k cells).
-#
-#   memory at 20k cells, 8 cores        20261016                         20261025
-#   ---------------------------------   ------------------------------   --------------------------
-#   infMat.cell (dense n x n copy)      3.1 GB                           none (read in place)
-#   same-sample mask (n x n logical)    1.6 GB                           n integers
-#   per grid                            ~4.8 GB, x 8 forked workers      grid.mem.gb, one grid at a
-#                                                                        time on 8 threads (default)
-#
-#   Parallelism: by default (workers = 1) one grid at a time, its passes and sorts spread over
-#   `cores` OpenMP threads, so memory does not grow with the core count. workers > 1 forks that
-#   many workers (one thread each), each holding its own grid.mem.gb.
-#
-#   Numbers: same Q values and the same min ranks as before. Rank sums are exact 64-bit integers
-#   and the means are taken once in long double, so sender / receiver agree with 20261016 to
-#   ~1e-16 relative instead of bit for bit.
-####################################################################################################
-
-# FLAG:MODIFIED_20261025
 #' Pre-compute the cell-level information used by every LR pair
 #'
 #' `generate_cell_info` returns everything in HyperCom scoring that depends only on metadata.
@@ -670,7 +503,6 @@ generate_cell_info <- function(metadata){
   list(cells.idx=cells.idx, mat.names=mat.names, n=n, sample.id=sample.id)
 }
 
-# FLAG:NEW_20261016
 #' Receptor subunits of one row of the LR table
 #'
 #' `pair_receptors` returns the receptor subunits of row i, read exactly as `calculate_priority`
@@ -1095,7 +927,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
                           infMat.cell=NULL, cell.info=NULL,
                           cores=if(parallel) as.integer(parallelly::availableCores()) else 1L,
                           workers=1L, grid.mem.gb=1){
-  # ---- [20261016] once-per-run inputs, built here if the caller did not supply them -----------
+
   if(is.null(cell.info)){
     cell.info <- generate_cell_info(metadata)
   }
@@ -1106,7 +938,6 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     message("prioritize_lr: infMat.cell is no longer used; the cell block is read from infMat in place")
   }
 
-  # ---- [20261016] parallel settings ---------------------------------------------------------------
   if(!is.null(cl)){
     warning("prioritize_lr: `cl` is no longer used; parallelism is set with `cores` / `workers`")
   }
@@ -1169,10 +1000,6 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
   return(lrs.list)
 }
 
-####################################################################################################
-######################################### END 20261016 #############################################
-####################################################################################################
-
 #' Get matrix with dimnames for given layer and slot
 #'
 #' `get_seurat_layer` returns the matrix with dimnames for given layer and slot
@@ -1205,14 +1032,6 @@ get_seurat_layer <- function(seurat, assay = "RNA", layer = "counts") {
   return(SeuratObject::LayerData(SeuratObject::JoinLayers(a), layer = layer))
 }
 
-# FLAG:MODIFIED_20261016
-# ----------------------------------------------------------------------------------------------
-# CHANGES 20261016 (HyperCom_seurat)
-#   - coords and spatial.* arguments added (appended after outdir, same defaults as HyperCom) and
-#     forwarded BY NAME to HyperCom(). Before, there was no way to run the spatial kernel from a
-#     Seurat object, and HyperCom() itself failed on the undefined `coords`.
-#   - The original positional arguments are forwarded unchanged.
-# ----------------------------------------------------------------------------------------------
 #' Run the HyperCom pipeline on a seurat object
 #'
 #' `HyperCom_seurat` Runs the HyperCom pipeline on a seurat object
