@@ -229,7 +229,8 @@ score_spatial_decay <- function(adj, coords, mode=1, radius=100, nugget=10, targ
 #   1. Fewer dense L x L copies. The old code held a dense identity D, the dense W, M = D - W,
 #      solve()'s identity right-hand side, its LU copy and the result (~6 L^2 doubles, ~20 GB at
 #      L = 20k). Both methods below build M straight from the sparse adjacency and scale in place
-#      (collapse::setop), peaking at ~3 L^2 ("lu") or ~2 L^2 ("chol").
+#      (in place, C++: scale_inplace_cpp / scale_rows_cols_inplace_cpp, which unlike collapse::setop
+#      accept matrices of more than 2^31 - 1 elements), peaking at ~3 L^2 ("lu") or ~2 L^2 ("chol").
 #   2. method = "chol" (default when adj is symmetric, which it always is for HyperCom: adj is
 #      B B^T, and the spatial kernel is symmetric). M is similar to the symmetric positive definite
 #      S = D^1/2 M D^-1/2 = I - (1 - r) D^-1/2 A D^-1/2 (eigenvalues in [r, 2 - r]), so
@@ -289,20 +290,19 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds",
     M[diag.idx] <- M[diag.idx] + 1
     infMat <- solve(M)
     rm(M)
-    collapse::setop(infMat, "*", r)
+    scale_inplace_cpp(infMat, r, as.integer(threads))          # in place, any size (collapse::setop refuses > 2^31 elements)
   } else {
     # S = I - (1 - r) D^-1/2 A D^-1/2, symmetric positive definite
     s <- 1 / sqrt(d)
     S <- as.matrix(Matrix::Diagonal(x = s) %*% adj %*% Matrix::Diagonal(x = s))
-    collapse::setop(S, "*", -(1 - r))
+    scale_inplace_cpp(S, -(1 - r), as.integer(threads))
     S[diag.idx] <- S[diag.idx] + 1
     U <- chol(S)
     rm(S)
     infMat <- chol2inv(U)
     rm(U)
     # F = r D^-1/2 S^-1 D^1/2: scale row i by r s_i, column j by 1 / s_j, in place
-    collapse::setop(infMat, "*", r * s)
-    collapse::setop(infMat, "*", 1 / s, rowwise = TRUE)
+    scale_rows_cols_inplace_cpp(infMat, r * s, 1 / s, as.integer(threads))
   }
 
   dimnames(infMat) <- list(node.names, node.names)

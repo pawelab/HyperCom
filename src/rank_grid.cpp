@@ -327,3 +327,36 @@ int blas_threads_cpp(int n = -1) {
   (void) n;
   return -1;
 }
+
+// --------------------------------------------------------------------------------------------
+// In-place scalings of a dense matrix of any size, used by generate_infMat(). collapse::setop()
+// did this before, but it refuses R "long vectors" (more than 2^31 - 1 elements, i.e. 46,341
+// nodes and up: 49,898 nodes at 50k cells). Both loop over R_xlen_t and modify the matrix in
+// place, as setop did; the caller must own the matrix (no other R reference to it).
+
+// x <- x * a
+// [[Rcpp::export]]
+void scale_inplace_cpp(NumericMatrix x, double a, int nthreads = 1) {
+  const R_xlen_t n = (R_xlen_t) x.nrow() * (R_xlen_t) x.ncol();
+  double *p = REAL(x);
+  if (nthreads < 1) nthreads = 1;
+  #pragma omp parallel for num_threads(nthreads) if(nthreads > 1) schedule(static)
+  for (R_xlen_t k = 0; k < n; ++k) p[k] *= a;
+}
+
+// x[i, j] <- (x[i, j] * row[i]) * col[j], the two products in that order: the same arithmetic as
+// the two successive collapse::setop() calls it replaces, so the results are bit-identical.
+// [[Rcpp::export]]
+void scale_rows_cols_inplace_cpp(NumericMatrix x, NumericVector row, NumericVector col, int nthreads = 1) {
+  const R_xlen_t nr = x.nrow(), nc = x.ncol();
+  if (row.size() != nr || col.size() != nc) stop("scale_rows_cols_inplace_cpp: row must have nrow(x) values and col ncol(x)");
+  double *p = REAL(x);
+  const double *r = REAL(row), *c = REAL(col);
+  if (nthreads < 1) nthreads = 1;
+  #pragma omp parallel for num_threads(nthreads) if(nthreads > 1) schedule(static)
+  for (R_xlen_t j = 0; j < nc; ++j) {
+    double *pj = p + j * nr;
+    const double cj = c[j];
+    for (R_xlen_t i = 0; i < nr; ++i) pj[i] = (pj[i] * r[i]) * cj;
+  }
+}

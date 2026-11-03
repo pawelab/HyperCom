@@ -9,3 +9,11 @@ blas_threads_cpp <- function(n = -1L) {
     .Call(`_HyperCom_blas_threads_cpp`, n)
 }
 
+scale_inplace_cpp <- function(x, a, nthreads = 1L) {
+    invisible(.Call(`_HyperCom_scale_inplace_cpp`, x, a, nthreads))
+}
+
+scale_rows_cols_inplace_cpp <- function(x, row, col, nthreads = 1L) {
+    invisible(.Call(`_HyperCom_scale_rows_cols_inplace_cpp`, x, row, col, nthreads))
+}
+

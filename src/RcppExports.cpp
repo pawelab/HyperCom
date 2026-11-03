@@ -38,10 +38,37 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// scale_inplace_cpp
+void scale_inplace_cpp(NumericMatrix x, double a, int nthreads);
+RcppExport SEXP _HyperCom_scale_inplace_cpp(SEXP xSEXP, SEXP aSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type x(xSEXP);
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< int >::type nthreads(nthreadsSEXP);
+    scale_inplace_cpp(x, a, nthreads);
+    return R_NilValue;
+END_RCPP
+}
+// scale_rows_cols_inplace_cpp
+void scale_rows_cols_inplace_cpp(NumericMatrix x, NumericVector row, NumericVector col, int nthreads);
+RcppExport SEXP _HyperCom_scale_rows_cols_inplace_cpp(SEXP xSEXP, SEXP rowSEXP, SEXP colSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type x(xSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type row(rowSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type col(colSEXP);
+    Rcpp::traits::input_parameter< int >::type nthreads(nthreadsSEXP);
+    scale_rows_cols_inplace_cpp(x, row, col, nthreads);
+    return R_NilValue;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_rank_grid_cpp", (DL_FUNC) &_HyperCom_rank_grid_cpp, 7},
     {"_HyperCom_blas_threads_cpp", (DL_FUNC) &_HyperCom_blas_threads_cpp, 1},
+    {"_HyperCom_scale_inplace_cpp", (DL_FUNC) &_HyperCom_scale_inplace_cpp, 3},
+    {"_HyperCom_scale_rows_cols_inplace_cpp", (DL_FUNC) &_HyperCom_scale_rows_cols_inplace_cpp, 4},
     {NULL, NULL, 0}
 };
 
