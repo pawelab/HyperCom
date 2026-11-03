@@ -230,7 +230,8 @@ score_spatial_decay <- function(adj, coords, mode=1, radius=100, nugget=10, targ
 #      solve()'s identity right-hand side, its LU copy and the result (~6 L^2 doubles, ~20 GB at
 #      L = 20k). Both methods below build M straight from the sparse adjacency and scale in place
 #      (in place, C++: scale_inplace_cpp / scale_rows_cols_inplace_cpp, which unlike collapse::setop
-#      accept matrices of more than 2^31 - 1 elements), peaking at ~3 L^2 ("lu") or ~2 L^2 ("chol").
+#      accept matrices of more than 2^31 - 1 elements), and the Cholesky inverse is taken in place
+#      (chol_inverse_inplace_cpp): peak ~3 L^2 for "lu", ~1 L^2 for "chol".
 #   2. method = "chol" (default when adj is symmetric, which it always is for HyperCom: adj is
 #      B B^T, and the spatial kernel is symmetric). M is similar to the symmetric positive definite
 #      S = D^1/2 M D^-1/2 = I - (1 - r) D^-1/2 A D^-1/2 (eigenvalues in [r, 2 - r]), so
@@ -297,10 +298,12 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds",
     S <- as.matrix(Matrix::Diagonal(x = s) %*% adj %*% Matrix::Diagonal(x = s))
     scale_inplace_cpp(S, -(1 - r), as.integer(threads))
     S[diag.idx] <- S[diag.idx] + 1
-    U <- chol(S)
+    # S^-1 in place: LAPACK dpotrf + dpotri on the one buffer (src/infmat_lapack.cpp), the same
+    # routines chol() + chol2inv() call on copies -- one dense L x L copy alive instead of two,
+    # bit-identical result
+    chol_inverse_inplace_cpp(S, as.integer(threads))
+    infMat <- S
     rm(S)
-    infMat <- chol2inv(U)
-    rm(U)
     # F = r D^-1/2 S^-1 D^1/2: scale row i by r s_i, column j by 1 / s_j, in place
     scale_rows_cols_inplace_cpp(infMat, r * s, 1 / s, as.integer(threads))
   }

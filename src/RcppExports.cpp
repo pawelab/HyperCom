@@ -10,6 +10,17 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// chol_inverse_inplace_cpp
+void chol_inverse_inplace_cpp(NumericMatrix S, int nthreads);
+RcppExport SEXP _HyperCom_chol_inverse_inplace_cpp(SEXP SSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type S(SSEXP);
+    Rcpp::traits::input_parameter< int >::type nthreads(nthreadsSEXP);
+    chol_inverse_inplace_cpp(S, nthreads);
+    return R_NilValue;
+END_RCPP
+}
 // rank_grid_cpp
 List rank_grid_cpp(NumericMatrix F, IntegerVector cell_idx, Nullable<NumericVector> a, Nullable<NumericVector> b, Nullable<IntegerVector> sample_id, int nthreads, double budget_bytes);
 RcppExport SEXP _HyperCom_rank_grid_cpp(SEXP FSEXP, SEXP cell_idxSEXP, SEXP aSEXP, SEXP bSEXP, SEXP sample_idSEXP, SEXP nthreadsSEXP, SEXP budget_bytesSEXP) {
@@ -65,6 +76,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_HyperCom_chol_inverse_inplace_cpp", (DL_FUNC) &_HyperCom_chol_inverse_inplace_cpp, 2},
     {"_HyperCom_rank_grid_cpp", (DL_FUNC) &_HyperCom_rank_grid_cpp, 7},
     {"_HyperCom_blas_threads_cpp", (DL_FUNC) &_HyperCom_blas_threads_cpp, 1},
     {"_HyperCom_scale_inplace_cpp", (DL_FUNC) &_HyperCom_scale_inplace_cpp, 3},

@@ -33,7 +33,7 @@ library(HyperCom)
 
 | | Release (0.0.0.9000) | v1-fast (0.1.0) |
 |---|---|---|
-| Influence matrix | dense LU via `solve()` on whatever BLAS R links; ~6 dense L×L copies | Cholesky of the symmetrised matrix (`method = "chol"`, the default for a symmetric adjacency; `"lu"` reproduces the release), ~2 copies, BLAS threads set at run time |
+| Influence matrix | dense LU via `solve()` on whatever BLAS R links; ~6 dense L×L copies | Cholesky of the symmetrised matrix (`method = "chol"`, the default for a symmetric adjacency; `"lu"` reproduces the release), taken in place with LAPACK so one dense L×L copy is alive, BLAS threads set at run time |
 | Per-LR scoring | the cell×cell grid, its ranks and a same-sample mask built as dense n×n matrices, once per receptor subunit; PSOCK cluster that copies the influence matrix to every worker | one C++ kernel (`src/rank_grid.cpp`) computes the grid on the fly, ranks it by histogram + chunked counting sort with exact integer rank sums, and reads the influence matrix in place; each unique (ligand, subunit) grid is scored once; OpenMP threads within a grid (memory independent of the core count), or forked workers |
 | Results | | bit-identical LR priorities (5k: all 914 pairs; 20k: the tested subset) |
 

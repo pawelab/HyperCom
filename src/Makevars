@@ -1,4 +1,4 @@
 # OpenMP for rank_grid.cpp. On a compiler without OpenMP (e.g. Apple clang) these expand to
 # nothing and the kernel runs on one thread; results are the same.
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS)
-PKG_LIBS = $(SHLIB_OPENMP_CXXFLAGS) -ldl
+PKG_LIBS = $(SHLIB_OPENMP_CXXFLAGS) -ldl $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
