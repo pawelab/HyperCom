@@ -50,6 +50,7 @@ Measured on the SCC (Xeon E5-2660 v3, 8 cores), Xenium ovarian data:
 ```r
 # Start R with FLEXIBLAS=MklOpenMP on the SCC (or any optimised BLAS elsewhere): the NETLIB
 # reference BLAS that R links by default is single-threaded and ~16x slower for the inversion.
+# How to check which BLAS you have, install one, and choose it: see BLAS.md.
 infMat   <- generate_infMat(adj, method = "chol", threads = 8)
 priority <- prioritize_lr(lrs, adj, infMat, metadata, cores = 8, workers = 1, grid.mem.gb = 8)
 # whole pipeline
