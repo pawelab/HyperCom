@@ -18,7 +18,7 @@ devtools::install_github("pawelab/HyperCom")
 
 ---
 
-## Branch `v1-fast` (version 0.1.0)
+## Branch `v1-fast` (version 0.1.1)
 
 This branch is the same package and method with the same outputs, computed faster and in less
 memory. It installs as `HyperCom` and replaces the release; to compare the two side by side,
@@ -70,5 +70,30 @@ New arguments (all optional; old calls run unchanged):
 - `generate_cell_info()` and `score_spatial_decay()` are exported.
 
 Rules of thumb: time ≈ 1.8 h × (n / 20k)² on 8 cores for the scoring, memory ≈ 8·L² + `grid.mem.gb`
-(L = cells + genes). Everything in `R/functions.R` that changed carries a `FLAG:MODIFIED_20261025`
+(L = cells + genes).
+
+### 0.1.1: runs past 40k cells in one call
+
+Measured on 50k cells (16 cores, Xeon E5-2660 v3): inverse 5.6 min, scoring of 918 pairs 6.5 h,
+peak 68 GB. What 0.1.1 adds so that `HyperCom()` itself does this, with the same numbers as 0.1.0:
+
+- **Spatial adjacency built directly.** With `coords`, `generate_adjacency_matrix(..., coords = )`
+  (called by `HyperCom()`) forms cell–cell pairs only within `spatial.radius`, tile by tile
+  (`generate_spatial_adjacency_matrix()`). The former route built B Bᵀ first, whose cell–cell
+  block is nearly dense (76% at 20k cells) and passes R's sparse-matrix limit near 40k cells.
+  `3.adj.rds` is now the decayed matrix. Same entries as `generate_adjacency_matrix(sort = TRUE)`
+  followed by `score_spatial_decay()`.
+- **One dense copy for the inverse.** The matrix to factorise is written straight from the sparse
+  adjacency; the sparse→dense conversion used to hold two copies (38 GB instead of 19 GB at 50k).
+  `4.infMat.rds` is saved uncompressed (8·L² bytes: 20 GB at 50k, 80 GB at 100k).
+- **`grid.mem.gb = "auto"`** (new default): one pass per grid (16·n² bytes) when it fits in 40% of
+  the available memory, else that 40%. A number still sets it by hand.
+- **Resume.** `prioritize_lr()` saves every finished grid under `6.priority/grids/` (removed at the
+  end), and `HyperCom(resume = TRUE)` (default) reuses `3.adj.rds` / `4.infMat.rds` when the
+  inputs and settings are the same, so a run stopped by a time limit continues with the same call.
+- **Progress.** About once a minute: grids done, seconds per grid, hours left.
+- `HyperCom()` restores the caller's working directory.
+
+Note on the kernels: in this branch every `spatial.mode` is 0 beyond `spatial.radius`, and
+`spatial.floor` is not used (mode 2 of the release instead dropped weights below `floor`). Everything in `R/functions.R` that changed carries a `FLAG:MODIFIED_20261025`
 or `FLAG:NEW_20261025` comment block explaining why.

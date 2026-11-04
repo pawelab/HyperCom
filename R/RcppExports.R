@@ -5,6 +5,10 @@ chol_inverse_inplace_cpp <- function(S, nthreads = 1L) {
     invisible(.Call(`_HyperCom_chol_inverse_inplace_cpp`, S, nthreads))
 }
 
+fill_scaled_sparse_cpp <- function(S, p, i, x, s, alpha, nthreads = 1L) {
+    invisible(.Call(`_HyperCom_fill_scaled_sparse_cpp`, S, p, i, x, s, alpha, nthreads))
+}
+
 rank_grid_cpp <- function(F, cell_idx, a = NULL, b = NULL, sample_id = NULL, nthreads = 1L, budget_bytes = 1e9) {
     .Call(`_HyperCom_rank_grid_cpp`, F, cell_idx, a, b, sample_id, nthreads, budget_bytes)
 }

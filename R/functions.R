@@ -98,10 +98,34 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
 #' @param outfile A string naming the output file
 #' @param sort A boolean; if TRUE, reorders adj so all genes come first, then all cells
 #' @param counts A matrix with row names being genes and column names being cells; required only if sort=TRUE
+#' (or coords is given)
+#' @param coords Optional cell coordinates (rownames = cell IDs, first two columns x, y). When given, the
+#' spatially decayed adjacency is built directly and returned sorted (genes first, then cells): the same
+#' matrix as `generate_adjacency_matrix(sort = TRUE)` followed by `score_spatial_decay()`, without the
+#' nearly dense cell-cell block those form first (see `generate_spatial_adjacency_matrix`). Needed past
+#' ~40k cells, where that block exceeds R's sparse-matrix limits.
+#' @param spatial.mode,spatial.radius,spatial.nugget,spatial.target,spatial.floor Kernel settings, as in
+#' `score_spatial_decay` (used only with coords)
 #' @returns An adjacency matrix where each entry is the number of shared hyperedges between nodes
+#' (times the spatial weight for cell pairs when coords is given)
 #' @export
-generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds", sort=FALSE, counts=NULL){
-  
+generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds", sort=FALSE, counts=NULL,
+                                      coords=NULL, spatial.mode=1, spatial.radius=100, spatial.nugget=10,
+                                      spatial.target=0.01, spatial.floor=1e-3){
+  # [20261104] spatial: the decayed matrix, built tile by tile (R/spatial_adjacency.R)
+  if(!is.null(coords)){
+    if(is.null(counts)){
+      stop("counts must be provided (rownames=genes, colnames=cells) when coords is given")
+    }
+    adj <- generate_spatial_adjacency_matrix(hyperedges, cell.ids=colnames(counts), coords=coords,
+                                             mode=spatial.mode, radius=spatial.radius, nugget=spatial.nugget,
+                                             target=spatial.target, floor=spatial.floor)
+    if(!is.null(outfile)){
+      saveRDS(adj, outfile)
+    }
+    return(adj)
+  }
+
   incidence.matrix <- stats::xtabs(~node + edge, hyperedges, sparse=TRUE)
   adj <- Matrix::tcrossprod(incidence.matrix)
   diag(adj) <- 0
@@ -185,30 +209,10 @@ score_spatial_decay <- function(adj, coords, mode=1, radius=100, nugget=10, targ
   i <- i[keep]; j <- j[keep]; x <- x[keep]
   
   d <- sqrt((coords[i, 1] - coords[j, 1])^2 + (coords[i, 2] - coords[j, 2])^2)
-  
-  # FLAG:TBD collapse 2&3 as one, and add gaussian decay. and also consider other spatial decay functions
-  w <- switch(mode,
-    `1` = {
-      # spatial mode 1: binary classification with threshold parameter r
-      wt <- as.numeric(d <= radius)
-      wt
-    },
-    `2` = {
-      # spatial mode 2: exponential decay with threshold parameter r
-      lambda <- -log(target) / radius
-      wt <- exp(-lambda * d)
-      wt[d > radius] <- 0
-      wt
-    },
-    `3` = {
-      # spatial mode 3: exponential decay with threshold parameter r 
-      lambda <- -log(target) / (radius - nugget)
-      wt <- ifelse(d <= nugget, 1, exp(-lambda * (d - nugget)))
-      wt[d > radius] <- 0
-      wt
-    },
-    stop("mode must be 1, 2, or 3")
-  )
+
+  # [20261104] the kernel itself is spatial_weights() (R/spatial_adjacency.R), shared with the
+  # tiled construction of generate_adjacency_matrix(coords = ), so both use one formula
+  w <- spatial_weights(d, mode=mode, radius=radius, nugget=nugget, target=target, floor=floor)
 
   A4.new <- Matrix::sparseMatrix(i=i, j=j, x=x*w, dims=dim(A4), dimnames=dimnames(A4))
   
@@ -295,9 +299,14 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds",
   } else {
     # S = I - (1 - r) D^-1/2 A D^-1/2, symmetric positive definite
     s <- 1 / sqrt(d)
-    S <- as.matrix(Matrix::Diagonal(x = s) %*% adj %*% Matrix::Diagonal(x = s))
-    scale_inplace_cpp(S, -(1 - r), as.integer(threads))
-    S[diag.idx] <- S[diag.idx] + 1
+    # [20261104] S is written straight from the sparse adjacency into one zero-filled dense
+    # matrix (fill_scaled_sparse_cpp, src/infmat_lapack.cpp), same arithmetic as the former
+    # as.matrix(Diagonal(s) %*% adj %*% Diagonal(s)) * -(1 - r) + I, whose sparse -> dense
+    # coercion briefly held two dense copies (38 GB instead of 19 GB at 50k cells)
+    A <- as(as(as(adj, "dMatrix"), "generalMatrix"), "CsparseMatrix")
+    S <- matrix(0, len, len)
+    fill_scaled_sparse_cpp(S, A@p, A@i, A@x, s, -(1 - r), as.integer(threads))
+    rm(A)
     # S^-1 in place: LAPACK dpotrf + dpotri on the one buffer (src/infmat_lapack.cpp), the same
     # routines chol() + chol2inv() call on copies -- one dense L x L copy alive instead of two,
     # bit-identical result
@@ -311,7 +320,9 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds",
   dimnames(infMat) <- list(node.names, node.names)
 
   if(!is.null(outfile)){
-    saveRDS(infMat, outfile)
+    # [20261104] uncompressed: an influence matrix barely compresses, and gzip on one core takes
+    # longer than the inverse itself at 50k+ cells (8 L^2 bytes: 20 GB at 50k, 80 GB at 100k)
+    saveRDS(infMat, outfile, compress = FALSE)
   }
   return(infMat)
 }
@@ -387,7 +398,11 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
 #' @param infmat.method Inversion method for `generate_infMat`: "auto", "chol" or "lu"
 #' @param cores Cores used for the inversion (BLAS threads) and the LR scoring (see `prioritize_lr`)
 #' @param workers Forked workers for the LR scoring; 1 = one grid at a time on `cores` threads
-#' @param grid.mem.gb Memory budget in GB per grid for the LR scoring (see `prioritize_lr`)
+#' @param grid.mem.gb Memory budget in GB per grid for the LR scoring, or "auto" (see `prioritize_lr`)
+#' @param resume If TRUE (default), a call on the same inputs and settings as an earlier call into the
+#' same outdir reuses its adjacency and influence matrix (3.adj.rds, 4.infMat.rds) and the LR grids it
+#' had already scored, instead of recomputing them. Inputs that differ are detected, and everything is
+#' then recomputed.
 #' @returns 0 if run successfully
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="HyperCom",
@@ -395,7 +410,7 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
                      spatial.target=0.01, spatial.floor=1e-3,
                      infmat.method="auto",
                      cores=if(parallel) as.integer(parallelly::availableCores()) else 1L,
-                     workers=1L, grid.mem.gb=1){
+                     workers=1L, grid.mem.gb="auto", resume=TRUE){
   spatial <- !is.null(coords)
 
   # [20261016] NEW: check coords before any heavy work
@@ -411,30 +426,48 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   }
 
   if(!dir.exists(outdir)){
-    dir.create(outdir)
+    dir.create(outdir, recursive=TRUE)
   }
-  setwd(outdir)
+  old.wd <- setwd(outdir)
+  on.exit(setwd(old.wd), add=TRUE)                # [20261104] the caller's working directory is restored
+
+  # [20261104] resume: 3.adj.rds and 4.infMat.rds are reused only if run_inputs.rds, written after
+  # 4.infMat.rds, says they come from these inputs and settings
+  inputs <- run_fingerprint(lrdb, counts, coords, spatial.mode, spatial.radius, spatial.nugget,
+                            spatial.target, spatial.floor, infmat.method)
+  reuse <- isTRUE(resume) && all(file.exists(c("run_inputs.rds", "3.adj.rds", "4.infMat.rds"))) &&
+    identical(tryCatch(readRDS("run_inputs.rds"), error=function(e) NULL), inputs)
+  if(!reuse && file.exists("run_inputs.rds")){
+    file.remove("run_inputs.rds")
+  }
 
   # [20261016] keep the original genes x cells matrix: filter_counts() returns CELLS x genes,
   # and the sort below needs the cell IDs, i.e. colnames of the ORIGINAL orientation
   counts.raw <- counts
   counts <- filter_counts(counts, lrdb)
   lrs <- generate_lrs_table(counts, lrdb)
-  hyperedges <- generate_hyperedges(counts, lrs)
 
-  # [20261016] CHANGED: sort only when a spatial kernel will be applied (score_spatial_decay needs
-  # the cell nodes as one trailing block); with coords = NULL this is the original non-spatial
-  # call, so the node order, and therefore every number, matches the original HyperCom.
-  adj <- generate_adjacency_matrix(hyperedges, sort = spatial,
-                                   counts = if(spatial) counts.raw else NULL)
+  if(reuse){
+    message("<HyperCom> resuming: reading 3.adj.rds and 4.infMat.rds of an earlier call on the same inputs")
+    adj <- readRDS("3.adj.rds")
+    infMat <- readRDS("4.infMat.rds")
+  } else {
+    hyperedges <- generate_hyperedges(counts, lrs)
+    # [20261104] spatial: the decayed adjacency is built directly (tile by tile, see
+    # generate_spatial_adjacency_matrix); 3.adj.rds is that matrix. Same numbers as sorting, then
+    # score_spatial_decay() inside generate_infMat, without the nearly dense cell-cell block that
+    # stopped runs past ~40k cells. Non-spatial: the original call, unchanged.
+    adj <- generate_adjacency_matrix(hyperedges, sort = spatial,
+                                     counts = if(spatial) counts.raw else NULL,
+                                     coords = coords, spatial.mode = spatial.mode, spatial.radius = spatial.radius,
+                                     spatial.nugget = spatial.nugget, spatial.target = spatial.target,
+                                     spatial.floor = spatial.floor)
+    rm(hyperedges)
+    # [20261025] infmat.method / cores forwarded (Cholesky inverse, multithreaded BLAS)
+    infMat <- generate_infMat(adj, method=infmat.method, threads=cores)
+    saveRDS(inputs, "run_inputs.rds")
+  }
   rm(counts.raw)
-
-  # [20261016] CHANGED: coords and kernel settings come from the arguments (coords = NULL skips
-  # the decay inside generate_infMat)
-  # [20261025] infmat.method / cores forwarded (Cholesky inverse, multithreaded BLAS)
-  infMat <- generate_infMat(adj, coords=coords, spatial.mode=spatial.mode, spatial.radius=spatial.radius,
-                            spatial.nugget=spatial.nugget, spatial.target=spatial.target,
-                            spatial.floor=spatial.floor, method=infmat.method, threads=cores)
 
   metadata <- generate_metadata(infMat, metadata, sample, group, keep)
 
@@ -443,16 +476,29 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   #            in place, which saves a dense n x n copy (3.1 GB at 20k cells).
   cell.info <- generate_cell_info(metadata)
 
-  # [20261016] CHANGED: arguments by name; cell.info passed down.
-  # NOTE: adj here is the UNDECAYED adjacency (generate_infMat decays its own copy). That is
-  # numerically irrelevant: calculate_priority() reads only adj[genes, cells], which the kernel
-  # never touches.
+  # [20261016] CHANGED: arguments by name; cell.info passed down. calculate_priority() reads only
+  # adj[genes, cells], which the spatial kernel never changes.
+  # [20261104] checkpoint = resume: finished grids are kept under 6.priority/grids/ until the end
   priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,
                             weights=weights, significance=significance,
                             parallel=parallel, cl=cl, cell.info=cell.info,
-                            cores=cores, workers=workers, grid.mem.gb=grid.mem.gb)
+                            cores=cores, workers=workers, grid.mem.gb=grid.mem.gb,
+                            checkpoint=isTRUE(resume))
 
   return(0)
+}
+
+# [20261104] what HyperCom(resume = TRUE) compares before reusing 3.adj.rds / 4.infMat.rds:
+# the LR table, the count matrix (dimensions, names and a few sums), the coordinates of the cells
+# and every setting that changes the adjacency or the influence matrix
+run_fingerprint <- function(lrdb, counts, coords, spatial.mode, spatial.radius, spatial.nugget,
+                            spatial.target, spatial.floor, infmat.method){
+  xy <- if(is.null(coords)) NULL else unname(as.matrix(coords[colnames(counts), 1:2, drop=FALSE]))
+  list(format=1L, lrdb=as.data.frame(lrdb), dim=dim(counts), dimnames=dimnames(counts),
+       sums=c(sum(counts), sum(counts > 0), sum(Matrix::colSums(counts) * seq_len(ncol(counts)))),
+       coords=xy,
+       settings=list(spatial.mode=spatial.mode, spatial.radius=spatial.radius, spatial.nugget=spatial.nugget,
+                     spatial.target=spatial.target, spatial.floor=spatial.floor, infmat.method=infmat.method))
 }
 
 
@@ -584,9 +630,13 @@ grid_schedule <- function(cores, workers, n.grids){
 #' @param cores Total cores
 #' @param workers Forked workers (1 = serial over grids, multithreaded within each)
 #' @param grid.mem.gb Memory budget per grid, in GB
+#' @param checkpoint.dir NULL, or a directory where every finished grid is saved and from which
+#' grids already there are read instead of recomputed (see `prioritize_lr`)
+#' @param verbose Print progress (about once a minute) with an estimate of the time left
 #' @returns A named list (names from `subunit_key`) of lists with sender and receiver
 #' @noRd
-score_subunits <- function(combos, infMat, cell.info, metadata, cores=1L, workers=1L, grid.mem.gb=1){
+score_subunits <- function(combos, infMat, cell.info, metadata, cores=1L, workers=1L, grid.mem.gb=1,
+                           checkpoint.dir=NULL, verbose=TRUE){
   ligs <- unique(combos$ligand)
   recs <- unique(combos$receptor)
   idx.l <- match(ligs, metadata$cell)
@@ -603,13 +653,48 @@ score_subunits <- function(combos, infMat, cell.info, metadata, cores=1L, worker
   budget <- grid.mem.gb * 1024^3
 
   sched <- grid_schedule(cores, workers, nrow(combos))
+
+  # [20261104] checkpoints: one file per finished grid, written atomically (temporary name, then
+  # rename), so a run that is stopped (time limit, node failure) resumes where it was
+  files <- if(!is.null(checkpoint.dir)) file.path(checkpoint.dir, grid_checkpoint_name(combos$ligand, combos$receptor)) else NULL
+  done <- if(!is.null(files)) file.exists(files) else rep(FALSE, nrow(combos))
+  if(verbose && any(done)){
+    message(sprintf("<prioritize_lr> resuming: %d of %d grids already scored in %s", sum(done), length(done), checkpoint.dir))
+  }
+  t.start <- Sys.time(); t.last <- t.start; n.new <- 0L; n.todo <- sum(!done)
+
   one_grid <- function(k){
+    if(done[k]){
+      return(readRDS(files[k]))
+    }
     s <- rank_grid_cpp(infMat, cell.pos,
                        a = lig.cols[, match(combos$ligand[k], ligs)],
                        b = rec.rows[match(combos$receptor[k], recs), ],
                        sample_id = cell.info$sample.id,
                        nthreads = sched$threads, budget_bytes = budget)
-    list(sender = s$sender, receiver = s$receiver)
+    out <- list(sender = s$sender, receiver = s$receiver)
+    if(!is.null(files)){
+      tmp <- paste0(files[k], ".tmp", Sys.getpid())
+      saveRDS(out, tmp, compress = FALSE)
+      file.rename(tmp, files[k])
+    }
+    if(verbose){
+      if(sched$workers > 1){
+        message(sprintf("<prioritize_lr> [%s] grid %d of %d done (%s | %s)", format(Sys.time(), "%H:%M:%S"),
+                        k, length(done), combos$ligand[k], combos$receptor[k]))
+      } else {
+        n.new <<- n.new + 1L
+        now <- Sys.time()
+        if(n.new == n.todo || difftime(now, t.last, units = "secs") >= 60){
+          el <- as.numeric(difftime(now, t.start, units = "secs"))
+          message(sprintf("<prioritize_lr> [%s] %d of %d grids done (%d this run, %.1f s per grid), about %.1f h left",
+                          format(now, "%H:%M:%S"), sum(done) + n.new, length(done), n.new, el / n.new,
+                          (n.todo - n.new) * el / n.new / 3600))
+          t.last <<- now
+        }
+      }
+    }
+    out
   }
 
   idx <- seq_len(nrow(combos))
@@ -922,14 +1007,21 @@ calculate_priority <- function(lrs, subunit.scores, cell.info, adj, metadata, we
 #' (`parallelly::availableCores()`) when parallel = TRUE, else 1.
 #' @param workers Forked workers. 1 (default) scores one grid at a time on `cores` threads; k > 1
 #' scores k grids at once on one thread each (needs k * grid.mem.gb).
-#' @param grid.mem.gb Memory budget per grid in GB. Smaller budgets mean more passes over infMat
-#' per grid, not different results.
+#' @param grid.mem.gb Memory budget per grid in GB, or "auto" (default). Smaller budgets mean more
+#' passes over infMat per grid, not different results. A whole grid takes 16 n^2 bytes (n = cells:
+#' 6.3 GB at 20k, 39 GB at 50k, 160 GB at 100k); "auto" uses that when it fits in 40% of the memory
+#' still available (per worker), otherwise that 40% (see `auto_grid_mem_gb`).
+#' @param checkpoint If TRUE (default) and outdir is set, every finished grid is saved under
+#' `<outdir>/grids/`, and a later call with the same data reads those instead of recomputing them,
+#' so a run stopped part way (time limit, node failure) resumes where it was. The folder is removed
+#' once the priority files are written. Checkpoints made from different data are detected and
+#' discarded.
 #' @returns A dataframe of ligand-receptor pairs ordered by priority score for each weight
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="6.priority",
                           infMat.cell=NULL, cell.info=NULL,
                           cores=if(parallel) as.integer(parallelly::availableCores()) else 1L,
-                          workers=1L, grid.mem.gb=1){
+                          workers=1L, grid.mem.gb="auto", checkpoint=TRUE){
 
   if(is.null(cell.info)){
     cell.info <- generate_cell_info(metadata)
@@ -957,11 +1049,26 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
   }
   n.calls <- sum(vapply(seq_len(nrow(lrs)), function(i) length(pair_receptors(lrs, i)), integer(1)))
   sched <- grid_schedule(cores, workers, nrow(combos))
-  message(sprintf("<prioritize_lr> %d pairs, %d subunit calls -> %d unique grids, %d worker(s) x %d thread(s), %.2f GB per grid, %d cells",
-                  nrow(lrs), n.calls, nrow(combos), sched$workers, sched$threads, grid.mem.gb, cell.info$n))
+  # [20261104] "auto": one pass per grid when it fits in memory
+  if(identical(grid.mem.gb, "auto")){
+    grid.mem.gb <- auto_grid_mem_gb(cell.info$n, sched$workers)
+  }
+  if(!(is.numeric(grid.mem.gb) && length(grid.mem.gb) == 1 && is.finite(grid.mem.gb) && grid.mem.gb > 0)){
+    stop("grid.mem.gb must be a positive number of GB or \"auto\"")
+  }
+  message(sprintf("<prioritize_lr> %d pairs, %d subunit calls -> %d unique grids, %d worker(s) x %d thread(s), %.2f GB per grid (a whole grid: %.2f GB), %d cells",
+                  nrow(lrs), n.calls, nrow(combos), sched$workers, sched$threads, grid.mem.gb,
+                  16 * as.numeric(cell.info$n)^2 / 1024^3, cell.info$n))
+
+  # [20261104] checkpoints of finished grids, tied to this influence matrix and these cells
+  checkpoint.dir <- if(isTRUE(checkpoint) && !is.null(outdir)) file.path(outdir, "grids") else NULL
+  if(!is.null(checkpoint.dir)){
+    prepare_grid_checkpoints(checkpoint.dir, infMat, cell.info)
+  }
 
   subunit.scores <- score_subunits(combos, infMat, cell.info, metadata,
-                                   cores = cores, workers = workers, grid.mem.gb = grid.mem.gb)
+                                   cores = cores, workers = workers, grid.mem.gb = grid.mem.gb,
+                                   checkpoint.dir = checkpoint.dir)
 
   # ---- phase (b): per-weight scoring, unchanged apart from the calculate_priority() arguments ----
   lrs.list <- list()
@@ -993,6 +1100,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     }
 
     lrs.list[[i]] <- current.lrs
+  }
+  if(!is.null(checkpoint.dir)){
+    remove_grid_checkpoints(checkpoint.dir)          # [20261104] the priorities are written
   }
 
   # [20261016] removed: parallel::stopCluster(cl) -- there is no cluster to stop; forked workers

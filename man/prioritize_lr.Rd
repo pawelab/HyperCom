@@ -18,7 +18,8 @@ prioritize_lr(
   cell.info = NULL,
   cores = if (parallel) as.integer(parallelly::availableCores()) else 1L,
   workers = 1L,
-  grid.mem.gb = 1
+  grid.mem.gb = "auto",
+  checkpoint = TRUE
 )
 }
 \arguments{
@@ -52,8 +53,16 @@ interactions with only interactions present in the counts matrix.}
 \item{workers}{Forked workers. 1 (default) scores one grid at a time on \code{cores} threads; k > 1
 scores k grids at once on one thread each (needs k * grid.mem.gb).}
 
-\item{grid.mem.gb}{Memory budget per grid in GB. Smaller budgets mean more passes over infMat
-per grid, not different results.}
+\item{grid.mem.gb}{Memory budget per grid in GB, or "auto" (default). Smaller budgets mean more
+passes over infMat per grid, not different results. A whole grid takes 16 n^2 bytes (n = cells:
+6.3 GB at 20k, 39 GB at 50k, 160 GB at 100k); "auto" uses that when it fits in 40\% of the memory
+still available (per worker), otherwise that 40\% (see \code{auto_grid_mem_gb}).}
+
+\item{checkpoint}{If TRUE (default) and outdir is set, every finished grid is saved under
+\verb{<outdir>/grids/}, and a later call with the same data reads those instead of recomputing them,
+so a run stopped part way (time limit, node failure) resumes where it was. The folder is removed
+once the priority files are written. Checkpoints made from different data are detected and
+discarded.}
 }
 \value{
 A dataframe of ligand-receptor pairs ordered by priority score for each weight

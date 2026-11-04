@@ -25,7 +25,8 @@ HyperCom(
   infmat.method = "auto",
   cores = if (parallel) as.integer(parallelly::availableCores()) else 1L,
   workers = 1L,
-  grid.mem.gb = 1
+  grid.mem.gb = "auto",
+  resume = TRUE
 )
 }
 \arguments{
@@ -71,7 +72,12 @@ two columns (x, y), same units as spatial.radius / spatial.nugget (e.g. microns)
 
 \item{workers}{Forked workers for the LR scoring; 1 = one grid at a time on \code{cores} threads}
 
-\item{grid.mem.gb}{Memory budget in GB per grid for the LR scoring (see \code{prioritize_lr})}
+\item{grid.mem.gb}{Memory budget in GB per grid for the LR scoring, or "auto" (see \code{prioritize_lr})}
+
+\item{resume}{If TRUE (default), a call on the same inputs and settings as an earlier call into the
+same outdir reuses its adjacency and influence matrix (3.adj.rds, 4.infMat.rds) and the LR grids it
+had already scored, instead of recomputing them. Inputs that differ are detected, and everything is
+then recomputed.}
 }
 \value{
 0 if run successfully

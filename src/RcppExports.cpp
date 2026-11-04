@@ -21,6 +21,22 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// fill_scaled_sparse_cpp
+void fill_scaled_sparse_cpp(NumericMatrix S, IntegerVector p, IntegerVector i, NumericVector x, NumericVector s, double alpha, int nthreads);
+RcppExport SEXP _HyperCom_fill_scaled_sparse_cpp(SEXP SSEXP, SEXP pSEXP, SEXP iSEXP, SEXP xSEXP, SEXP sSEXP, SEXP alphaSEXP, SEXP nthreadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type S(SSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type p(pSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type i(iSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type s(sSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    Rcpp::traits::input_parameter< int >::type nthreads(nthreadsSEXP);
+    fill_scaled_sparse_cpp(S, p, i, x, s, alpha, nthreads);
+    return R_NilValue;
+END_RCPP
+}
 // rank_grid_cpp
 List rank_grid_cpp(NumericMatrix F, IntegerVector cell_idx, Nullable<NumericVector> a, Nullable<NumericVector> b, Nullable<IntegerVector> sample_id, int nthreads, double budget_bytes);
 RcppExport SEXP _HyperCom_rank_grid_cpp(SEXP FSEXP, SEXP cell_idxSEXP, SEXP aSEXP, SEXP bSEXP, SEXP sample_idSEXP, SEXP nthreadsSEXP, SEXP budget_bytesSEXP) {
@@ -77,6 +93,7 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_chol_inverse_inplace_cpp", (DL_FUNC) &_HyperCom_chol_inverse_inplace_cpp, 2},
+    {"_HyperCom_fill_scaled_sparse_cpp", (DL_FUNC) &_HyperCom_fill_scaled_sparse_cpp, 7},
     {"_HyperCom_rank_grid_cpp", (DL_FUNC) &_HyperCom_rank_grid_cpp, 7},
     {"_HyperCom_blas_threads_cpp", (DL_FUNC) &_HyperCom_blas_threads_cpp, 1},
     {"_HyperCom_scale_inplace_cpp", (DL_FUNC) &_HyperCom_scale_inplace_cpp, 3},

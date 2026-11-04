@@ -33,9 +33,8 @@ score_spatial_decay(
 \item{outfile}{A string naming the output file}
 }
 \value{
-The adjacency matrix with A4 spatially reweighted
+The adjacency matrix A with cell-cell block (A4) spatially reweighted
 }
 \description{
-\code{score_spatial_decay} reweights the cell-cell (A4) block of a gene-then-cell
-sorted adjacency matrix by physical distance, leaving A1/A2/A3 untouched.
+\code{score_spatial_decay} reweights the cell-cell block of a sorted adjacency matrix by physical distance.
 }

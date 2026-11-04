@@ -8,7 +8,13 @@ generate_adjacency_matrix(
   hyperedges,
   outfile = "3.adj.rds",
   sort = FALSE,
-  counts = NULL
+  counts = NULL,
+  coords = NULL,
+  spatial.mode = 1,
+  spatial.radius = 100,
+  spatial.nugget = 10,
+  spatial.target = 0.01,
+  spatial.floor = 0.001
 )
 }
 \arguments{
@@ -18,10 +24,21 @@ generate_adjacency_matrix(
 
 \item{sort}{A boolean; if TRUE, reorders adj so all genes come first, then all cells}
 
-\item{counts}{A matrix with row names being genes and column names being cells; required only if sort=TRUE}
+\item{counts}{A matrix with row names being genes and column names being cells; required only if sort=TRUE
+(or coords is given)}
+
+\item{coords}{Optional cell coordinates (rownames = cell IDs, first two columns x, y). When given, the
+spatially decayed adjacency is built directly and returned sorted (genes first, then cells): the same
+matrix as \code{generate_adjacency_matrix(sort = TRUE)} followed by \code{score_spatial_decay()}, without the
+nearly dense cell-cell block those form first (see \code{generate_spatial_adjacency_matrix}). Needed past
+~40k cells, where that block exceeds R's sparse-matrix limits.}
+
+\item{spatial.mode, spatial.radius, spatial.nugget, spatial.target, spatial.floor}{Kernel settings, as in
+\code{score_spatial_decay} (used only with coords)}
 }
 \value{
 An adjacency matrix where each entry is the number of shared hyperedges between nodes
+(times the spatial weight for cell pairs when coords is given)
 }
 \description{
 \code{generate_adjacency_matrix} returns the adjacency matrix of the hypergraph
