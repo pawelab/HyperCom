@@ -1,0 +1,10 @@
+# LAPACK from R's own Rlapack.dll through an import library made from Rlapack-win.def: linking -lRlapack directly takes the
+# DLL's internal name, which is not Rlapack.dll when R's LAPACK has been swapped for another build (e.g. OpenBLAS)
+PKG_LIBS = -pthread libRlapack.dll.a
+
+all: $(SHLIB)
+
+$(SHLIB): | libRlapack.dll.a
+
+libRlapack.dll.a: Rlapack-win.def
+	$(DLLTOOL) $(DLLTOOLFLAGS) --dllname Rlapack.dll --input-def Rlapack-win.def --output-lib $@

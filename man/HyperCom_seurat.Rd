@@ -16,13 +16,17 @@ HyperCom_seurat(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "HyperCom"
+  outdir = "HyperCom",
+  threads = NULL,
+  seed = NULL,
+  verbose = TRUE,
+  infmat.method = "lu"
 )
 }
 \arguments{
 \item{seurat}{A seurat object}
 
-\item{lrdb}{A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+\item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}
 
 \item{sample}{A string that is the column name for sample in the provided metadata}
@@ -39,11 +43,20 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel}
+\item{parallel}{A boolean of whether to run in parallel: threads on all available cores}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{A cluster object, kept for compatibility: only its size caps the number of threads}
 
 \item{outdir}{output directory of pipeline run}
+
+\item{threads}{An integer number of threads, overriding parallel and cl (at most the available cores)}
+
+\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
+
+\item{verbose}{A boolean of whether to print each weight and the score of each pair}
+
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "lu" (master's numbers bit for bit), "chol" or "hypergraph"
+(faster, one dense matrix instead of two, about 1e-15 apart)}
 }
 \value{
 0 if run successfully
@@ -52,5 +65,6 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 \code{HyperCom_seurat} Runs the HyperCom pipeline on a seurat object
 }
 \details{
-This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency-matrix}, \code{generate_infMat}, \code{generate-metadata}, and \code{prioritize_lr}.
+This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat},
+\code{generate_metadata}, and \code{prioritize_lr} on one assay layer and the cell metadata of a Seurat object. Needs the SeuratObject package.
 }

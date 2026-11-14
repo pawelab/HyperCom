@@ -1,0 +1,8 @@
+EXPORTS
+dgecon_
+dgesv_
+dlange_
+dlansy_
+dpocon_
+dpotrf_
+dpotri_

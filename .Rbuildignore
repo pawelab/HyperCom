@@ -3,3 +3,4 @@
 ^vignettes/articles$
 ^images$
 ^LICENSE\.md$
+^src/.*\.a$

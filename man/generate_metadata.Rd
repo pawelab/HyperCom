@@ -16,7 +16,7 @@ generate_metadata(
 \arguments{
 \item{infMat}{A named influence matrix}
 
-\item{metadata}{A dataframe containing cell metadata}
+\item{metadata}{A dataframe containing cell metadata with row names being cells}
 
 \item{sample}{A string that is the column name for sample in the provided metadata}
 
@@ -27,7 +27,7 @@ generate_metadata(
 \item{outfile}{A string naming the output file}
 }
 \value{
-An influence matrix
+A dataframe with columns cell, sample, group and the kept columns, one row per node of the influence matrix
 }
 \description{
 \code{generate_metadata} returns a minimal metadata dataframe
@@ -35,4 +35,7 @@ An influence matrix
 \details{
 This function takes an influence matrix and metadata table and creates a metadata data table containing the
 node name, sample, and group. If group is unspecified, it is assumed all nodes are part of the same group.
+Nodes of the influence matrix that are not cells of the metadata are genes: their sample, group and kept columns are "gene".
+Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and other classed columns
+other than factors become strings.
 }

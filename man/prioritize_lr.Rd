@@ -13,11 +13,14 @@ prioritize_lr(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "6.priority"
+  outdir = "6.priority",
+  threads = NULL,
+  seed = NULL,
+  verbose = TRUE
 )
 }
 \arguments{
-\item{lrs}{A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
+\item{lrs}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 interactions with only interactions present in the counts matrix.}
 
@@ -31,11 +34,17 @@ interactions with only interactions present in the counts matrix.}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel}
+\item{parallel}{A boolean of whether to run in parallel: threads on all available cores (\code{parallelly::availableCores()})}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{A cluster object, kept for compatibility: it is not used or stopped, only its size caps the number of threads}
 
 \item{outdir}{A string naming the output directory}
+
+\item{threads}{An integer number of threads, overriding parallel and cl (at most the available cores)}
+
+\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
+
+\item{verbose}{A boolean of whether to print each weight and the score of each pair}
 }
 \value{
 A dataframe of ligand-receptor pairs ordered by priority score for each weight
@@ -46,5 +55,5 @@ A dataframe of ligand-receptor pairs ordered by priority score for each weight
 \details{
 This function takes list of all ligand-receptor pairs in the influence matrix,
 the adjacency matrix, a named influence matrix, and the corresponding metadata
-to prioritize ligand-receptor pairs.
+to prioritize ligand-receptor pairs. Cell grids are scored in C++ threads, once for all weights.
 }

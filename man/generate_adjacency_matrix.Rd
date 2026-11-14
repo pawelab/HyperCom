@@ -18,5 +18,7 @@ An adjacency matrix where each entry is the number of shared hyperedges between 
 \code{generate_adjacency_matrix} returns the adjacency matrix of the hypergraph
 }
 \details{
-This function takes a dataframe of hyperedges and returns its adjacency matrix.
+This function takes a dataframe of hyperedges and returns its adjacency matrix. Nodes are ordered by their names in the C locale,
+so the order does not depend on the session's collation. Nodes that share no hyperedge with another node are dropped.
+Only the upper triangle is computed and stored.
 }
