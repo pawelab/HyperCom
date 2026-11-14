@@ -14,6 +14,10 @@
 // of a big block sum as a pipeline. Memory: 10 B per within-sample entry per team, plus 8 B per entry of samples whose
 // cells are not consecutive in F while those copies fit the cache, plus each thread's sort buffers (16 B per entry of the
 // biggest bucket it ranks, all entries of a grid whose values are all tied). Do not compile with -ffast-math.
+//
+// score_grids_cpp reads F (a dense n x n influence matrix); score_blocks_cpp is given instead every within-sample block of F
+// (made from the factored influence matrix, see influence.cpp) and F[cell, ligand] / F[receptor, cell] for the genes of the pairs,
+// so no n x n matrix exists. Both rank and average the same values the same way.
 
 #include <Rcpp.h>
 #include <algorithm>
@@ -143,9 +147,13 @@ void sort_words(uint64_t *x, uint64_t *y, size_t m, int P, int shift, size_t nb,
 }
 
 struct Cells {
-  std::vector<double> Fb;              // F[i, j] of the entries of the copied blocks, in position order
-  const double *F;
-  size_t L;
+  const double *Fb = nullptr;          // F[i, j] of the entries of the copied (or given) blocks, in position order
+  std::vector<double> Fown;            // the copies, when made here
+  const double *F = nullptr;           // the whole influence matrix (L x L), or null when every block is given
+  const double *A = nullptr;           // without F: F[cell, ligand], cells x ligands, rows in cell order
+  const double *B = nullptr;           // and F[receptor, cell], receptors x cells (nb rows)
+  size_t nb = 0;
+  size_t L = 0;
   std::vector<int> node;
   std::vector<int> out;
   std::vector<size_t> block_start;
@@ -213,7 +221,7 @@ const double *column_q_gather(const double *col, const int *node, const double *
 // node at a time
 const double *block_column(const Cells &c, size_t blk, size_t jj, size_t i0, size_t i1, const double *a, double bj, bool net, double *q){
   const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first;
-  if(c.block_fb[blk] != SIZE_MAX) return column_q(c.Fb.data() + c.block_fb[blk] + jj * s + i0, a, bj, net, i1 - i0, q);
+  if(c.block_fb[blk] != SIZE_MAX) return column_q(c.Fb + c.block_fb[blk] + jj * s + i0, a, bj, net, i1 - i0, q);
   const int *node = c.node.data() + first;
   const double *col = c.F + (size_t) node[jj] * c.L;
   if(c.block_gather[blk]) return column_q_gather(col, node + i0, a, bj, net, i1 - i0, q);
@@ -471,10 +479,25 @@ template <class K> void rank_bucket(K &keys, size_t m, size_t s0, int t, Work &w
 void prepare_ab(const Cells &c, Team &tm, size_t me){
   if(tm.l < 0) return;
   const size_t n = c.node.size(), k1 = n * (me + 1) / tm.size;
+  if(c.F == nullptr){
+    for(size_t k = n * me / tm.size; k < k1; ++k){
+      tm.a[k] = c.A[(size_t) c.out[k] + (size_t) tm.l * n];
+      tm.b[k] = c.B[(size_t) tm.r + (size_t) c.out[k] * c.nb];
+    }
+    return;
+  }
   for(size_t k = n * me / tm.size; k < k1; ++k){
     tm.a[k] = c.F[(size_t) c.node[k] + (size_t) tm.l * c.L];
     tm.b[k] = c.F[(size_t) tm.r + (size_t) c.node[k] * c.L];
   }
+}
+
+// F[i, j] of entry (ii, jj) of block blk: from the block's copy, else from F
+double block_value(const Cells &c, size_t blk, size_t ii, size_t jj){
+  const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first;
+  if(c.block_fb[blk] != SIZE_MAX) return c.Fb[c.block_fb[blk] + jj * s + ii];
+
+  return c.F[(size_t) c.node[first + ii] + (size_t) c.node[first + jj] * c.L];
 }
 
 // Member me: key range of its share of every 61st entry of each block
@@ -485,10 +508,9 @@ void sample_keys(const Cells &c, Team &tm, size_t me){
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first;
     const size_t ns = s * s > 3 ? (s * s - 4) / SAMPLE + 1 : 0, k1 = ns * (me + 1) / tm.size;
     const double *a = tm.a.data() + first, *b = tm.b.data() + first;
-    const int *node = c.node.data() + first;
     for(size_t k = ns * me / tm.size; k < k1; ++k){
       const size_t q = 3 + k * SAMPLE, jj = q / s, ii = q % s;
-      double v = c.F[(size_t) node[ii] + (size_t) node[jj] * c.L];
+      double v = block_value(c, blk, ii, jj);
       if(tm.l >= 0) v = (a[ii] * b[jj]) / v;
       if(skipped(ii, jj, v)) continue;
       lo = std::min(lo, sortable_key(v));
@@ -818,28 +840,11 @@ void run_team(const Cells &c, Team &tm, size_t me, const int *lig, const int *re
   }
 }
 
-}  // namespace
 
-// [[Rcpp::export]]
-Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig,
-                           Rcpp::IntegerVector rec, int threads){
-  const size_t L = F.nrow(), n = cell.size(), G = lig.size();
-  if((size_t) F.ncol() != L) Rcpp::stop("score_grids_cpp: the influence matrix must be square");
-  if((size_t) sample.size() != n) Rcpp::stop("score_grids_cpp: one sample per cell");
-  if((size_t) rec.size() != G) Rcpp::stop("score_grids_cpp: one receptor per ligand");
-  for(size_t k = 0; k < n; ++k){
-    if(cell[k] < 0 || (size_t) cell[k] >= L) Rcpp::stop("score_grids_cpp: cell index out of range");
-    if(sample[k] < 1 || sample[k] == NA_INTEGER) Rcpp::stop("score_grids_cpp: sample ids must be positive integers");
-  }
-  for(size_t g = 0; g < G; ++g){
-    if(lig[g] >= (int) L || rec[g] >= (int) L || (lig[g] < 0) != (rec[g] < 0)) Rcpp::stop("score_grids_cpp: bad ligand or receptor index");
-  }
-
-  Cells c;
-  c.F = REAL(F);
-  c.L = L;
+// Cells grouped into within-sample blocks: samples ascending, the cells of a sample in the given order (node = their index in F)
+void group_cells(Cells &c, const int *cell, const int *sample, size_t n){
   int n_samples = 0;
-  for(size_t k = 0; k < n; ++k) n_samples = std::max(n_samples, (int) sample[k]);
+  for(size_t k = 0; k < n; ++k) n_samples = std::max(n_samples, sample[k]);
   std::vector<std::vector<int>> members(n_samples);
   for(size_t k = 0; k < n; ++k) members[sample[k] - 1].push_back((int) k);
   c.cap = 0;
@@ -857,46 +862,15 @@ Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp
     c.cap += size * size;
     c.max_block = std::max(c.max_block, size);
   }
-  if(c.cap >= (size_t) 4294967295u) Rcpp::stop("score_grids_cpp: too many cells per sample (the sum of squared sample sizes must stay below 2^32)");
-  size_t copied = 0;
-  c.block_run.push_back(0);
-  for(size_t blk = 0; blk + 1 < c.block_start.size(); ++blk){
-    const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first;
-    const int *node = c.node.data() + first;
-    size_t runs = 1;
-    for(size_t k = 1; k < s; ++k) runs += node[k] != node[k - 1] + 1;
-    if(runs * RUN <= s){
-      c.block_fb.push_back(SIZE_MAX);
-      for(size_t k = 1; k < s; ++k){
-        if(node[k] != node[k - 1] + 1) c.run.push_back(k);
-      }
-      c.run.push_back(s);
-    } else {
-      c.block_fb.push_back(copied);
-      copied += s * s;
-    }
-    c.block_run.push_back(c.run.size());
-  }
-  const bool gather = copied * sizeof(double) > CACHE_BUDGET;
-  for(size_t &off : c.block_fb){
-    c.block_gather.push_back(gather && off != SIZE_MAX);
-    if(gather) off = SIZE_MAX;
-  }
-  if(gather) copied = 0;
-  c.Fb.resize(copied);
-  for(size_t blk = 0; blk + 1 < c.block_start.size(); ++blk){
-    if(c.block_fb[blk] == SIZE_MAX) continue;
-    const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, off = c.block_fb[blk];
-    const int *node = c.node.data() + first;
-    for(size_t jj = 0; jj < s; ++jj){
-      const double *col = c.F + (size_t) node[jj] * L;
-      for(size_t ii = 0; ii < s; ++ii) c.Fb[off + jj * s + ii] = col[node[ii]];
-    }
-  }
+  if(c.cap >= (size_t) 4294967295u) Rcpp::stop("grid scoring: too many cells per sample (the sum of squared sample sizes must stay below 2^32)");
+}
 
+// Sender and receiver scores (cell x pair) of the grids of ligands lp and receptor subunits rp (negative: the network score)
+Rcpp::List run_grids(const Cells &c, const int *lp, const int *rp, size_t G, int threads){
+  const size_t n = c.node.size();
   Rcpp::NumericMatrix sender(n, G), receiver(n, G);
   double *S = REAL(sender), *R = REAL(receiver);
-  const int *lp = INTEGER(lig), *rp = INTEGER(rec);
+
   const FpuState fpu = get_fpu();
   std::atomic<size_t> next(0);
   std::atomic<bool> failed(false);
@@ -912,7 +886,7 @@ Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp
   try {
     for(size_t k = 0; k < nteams; ++k) teams.emplace_back(new Team(c, nt / nteams + (k < nt % nteams ? 1 : 0), nt == 1));
   } catch(std::bad_alloc &){
-    Rcpp::stop("score_grids_cpp: not enough memory for the grid buffers (" + std::to_string(nteams * grid_bytes >> 20) + " MB)");
+    Rcpp::stop("grid scoring: not enough memory for the grid buffers (" + std::to_string(nteams * grid_bytes >> 20) + " MB)");
   }
   error.reserve(256);
 
@@ -948,8 +922,101 @@ Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp
     for(auto &th : pool) th.join();
     if(!started) error = "could not start threads";
   }
-  if(failed.load()) Rcpp::stop("score_grids_cpp: " + error);
+  if(failed.load()) Rcpp::stop("grid scoring: " + error);
 
   return Rcpp::List::create(Rcpp::Named("sender") = sender, Rcpp::Named("receiver") = receiver);
 }
 
+
+}  // namespace
+
+// [[Rcpp::export]]
+Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig,
+                           Rcpp::IntegerVector rec, int threads){
+  const size_t L = F.nrow(), n = cell.size(), G = lig.size();
+  if((size_t) F.ncol() != L) Rcpp::stop("score_grids_cpp: the influence matrix must be square");
+  if((size_t) sample.size() != n) Rcpp::stop("score_grids_cpp: one sample per cell");
+  if((size_t) rec.size() != G) Rcpp::stop("score_grids_cpp: one receptor per ligand");
+  for(size_t k = 0; k < n; ++k){
+    if(cell[k] < 0 || (size_t) cell[k] >= L) Rcpp::stop("score_grids_cpp: cell index out of range");
+    if(sample[k] < 1 || sample[k] == NA_INTEGER) Rcpp::stop("score_grids_cpp: sample ids must be positive integers");
+  }
+  for(size_t g = 0; g < G; ++g){
+    if(lig[g] >= (int) L || rec[g] >= (int) L || (lig[g] < 0) != (rec[g] < 0)) Rcpp::stop("score_grids_cpp: bad ligand or receptor index");
+  }
+
+  Cells c;
+  c.F = REAL(F);
+  c.L = L;
+  group_cells(c, INTEGER(cell), INTEGER(sample), n);
+  size_t copied = 0;
+  c.block_run.push_back(0);
+  for(size_t blk = 0; blk + 1 < c.block_start.size(); ++blk){
+    const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first;
+    const int *node = c.node.data() + first;
+    size_t runs = 1;
+    for(size_t k = 1; k < s; ++k) runs += node[k] != node[k - 1] + 1;
+    if(runs * RUN <= s){
+      c.block_fb.push_back(SIZE_MAX);
+      for(size_t k = 1; k < s; ++k){
+        if(node[k] != node[k - 1] + 1) c.run.push_back(k);
+      }
+      c.run.push_back(s);
+    } else {
+      c.block_fb.push_back(copied);
+      copied += s * s;
+    }
+    c.block_run.push_back(c.run.size());
+  }
+  const bool gather = copied * sizeof(double) > CACHE_BUDGET;
+  for(size_t &off : c.block_fb){
+    c.block_gather.push_back(gather && off != SIZE_MAX);
+    if(gather) off = SIZE_MAX;
+  }
+  if(gather) copied = 0;
+  c.Fown.resize(copied);
+  for(size_t blk = 0; blk + 1 < c.block_start.size(); ++blk){
+    if(c.block_fb[blk] == SIZE_MAX) continue;
+    const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, off = c.block_fb[blk];
+    const int *node = c.node.data() + first;
+    for(size_t jj = 0; jj < s; ++jj){
+      const double *col = c.F + (size_t) node[jj] * L;
+      for(size_t ii = 0; ii < s; ++ii) c.Fown[off + jj * s + ii] = col[node[ii]];
+    }
+  }
+  c.Fb = c.Fown.data();
+
+  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads);
+}
+
+// [[Rcpp::export]]
+Rcpp::List score_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample,
+                            Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads){
+  const size_t n = sample.size(), G = lig.size();
+  if((size_t) A.nrow() != n || (size_t) B.ncol() != n) Rcpp::stop("score_blocks_cpp: A needs one row and B one column per cell");
+  if((size_t) rec.size() != G) Rcpp::stop("score_blocks_cpp: one receptor per ligand");
+  for(size_t k = 0; k < n; ++k){
+    if(sample[k] < 1 || sample[k] == NA_INTEGER) Rcpp::stop("score_blocks_cpp: sample ids must be positive integers");
+  }
+  for(size_t g = 0; g < G; ++g){
+    if(lig[g] >= A.ncol() || rec[g] >= B.nrow() || (lig[g] < 0) != (rec[g] < 0)) Rcpp::stop("score_blocks_cpp: bad ligand or receptor index");
+  }
+
+  Cells c;
+  c.A = REAL(A);
+  c.B = REAL(B);
+  c.nb = B.nrow();
+  std::vector<int> cell(n);
+  for(size_t k = 0; k < n; ++k) cell[k] = (int) k;
+  group_cells(c, cell.data(), INTEGER(sample), n);
+  if((size_t) blocks.size() != c.cap) Rcpp::stop("score_blocks_cpp: the blocks must hold every within-sample entry");
+  c.Fb = REAL(blocks);
+  c.block_run.push_back(0);
+  for(size_t blk = 0; blk + 1 < c.block_start.size(); ++blk){
+    c.block_fb.push_back(c.block_off[blk]);
+    c.block_gather.push_back(false);
+    c.block_run.push_back(0);
+  }
+
+  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads);
+}

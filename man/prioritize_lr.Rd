@@ -24,9 +24,9 @@ prioritize_lr(
 and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 interactions with only interactions present in the counts matrix.}
 
-\item{adj}{A named adjacency matrix}
+\item{adj}{An adjacency from generate_adjacency_matrix, or a named adjacency matrix}
 
-\item{infMat}{A named influence matrix}
+\item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
@@ -34,7 +34,7 @@ interactions with only interactions present in the counts matrix.}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel: threads on all available cores (\code{parallelly::availableCores()})}
+\item{parallel}{A boolean of whether to run in parallel: threads on the available physical cores (\code{parallelly::availableCores(logical=FALSE)})}
 
 \item{cl}{A cluster object, kept for compatibility: it is not used or stopped, only its size caps the number of threads}
 

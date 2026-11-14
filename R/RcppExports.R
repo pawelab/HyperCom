@@ -13,11 +13,23 @@ solve_influence_chol_cpp <- function(adj, rs, r) {
     .Call(`_HyperCom_solve_influence_chol_cpp`, adj, rs, r)
 }
 
-solve_influence_hypergraph_cpp <- function(hp, hi, hx, n, rs, r, threads) {
-    .Call(`_HyperCom_solve_influence_hypergraph_cpp`, hp, hi, hx, n, rs, r, threads)
+influence_factors_cpp <- function(hp, hi, hx, n, rs, r, threads) {
+    .Call(`_HyperCom_influence_factors_cpp`, hp, hi, hx, n, rs, r, threads)
+}
+
+influence_block_cpp <- function(hp, hi, hx, n, rs, delta, Z, r, rows, cols, threads) {
+    .Call(`_HyperCom_influence_block_cpp`, hp, hi, hx, n, rs, delta, Z, r, rows, cols, threads)
+}
+
+influence_blocks_cpp <- function(hp, hi, hx, n, rs, delta, Z, r, cell, sample, threads) {
+    .Call(`_HyperCom_influence_blocks_cpp`, hp, hi, hx, n, rs, delta, Z, r, cell, sample, threads)
 }
 
 score_grids_cpp <- function(F, cell, sample, lig, rec, threads) {
     .Call(`_HyperCom_score_grids_cpp`, F, cell, sample, lig, rec, threads)
+}
+
+score_blocks_cpp <- function(blocks, A, B, sample, lig, rec, threads) {
+    .Call(`_HyperCom_score_blocks_cpp`, blocks, A, B, sample, lig, rec, threads)
 }
 

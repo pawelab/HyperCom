@@ -106,6 +106,8 @@ head(hyperedges, 2)
 
 We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
 Each entry is the number hyperedges shared by nodes.
+The matrix is not stored: `adj` keeps which nodes are in which hyperedge, which is much smaller, and works like a matrix
+(`dim(adj)`, `adj[i, j]`, `as.matrix(adj)` for the whole matrix).
 ```{r}
 adj <- generate_adjacency_matrix(hyperedges=hyperedges, outfile=NULL)
 dim(adj)
@@ -113,6 +115,10 @@ dim(adj)
 
 ### Calculating Network Connectivity
 In order to calculate the network connectivity of the hypergraph we perform a random walk on the adjacency matrix to produce an influence matrix.
+By default the influence matrix is kept as its factors through the hyperedges, so for data with many more cells than genes and
+interactions its memory grows with the number of cells instead of its square (on this small example both are about 20 MB; data with
+at least as many hyperedges as nodes get the dense matrix); `infMat[i, j]` gives entries and `as.matrix(infMat)` the whole matrix.
+`method="lu"` gives the dense matrix exactly as HyperCom 0.0.0.9000 did.
 ```{r}
 infMat <- generate_infMat(adj=adj, outfile=NULL)
 dim(infMat)
@@ -135,7 +141,7 @@ By default gene expression is weighted at 1 for recovery mode, but a vector of a
 A p-value can be calculated for each LR pair against 1000 random gene interactions, which takes about four times as long. By default the `significance` arg is FALSE;
 the `seed` arg makes the p-values reproducible.
 The `prioritize_lr` function can be run sequentially or parallelly and by default the `parallel` arg is FALSE.
-In parallel the cell grids are scored in C++ threads on the cores found by `parallelly::availableCores()`; the `threads` arg sets the number directly.
+In parallel the cell grids are scored in C++ threads, one per physical core (`parallelly::availableCores(logical=FALSE)`); the `threads` arg sets the number directly.
 A `cl` cluster is still accepted, but only its size is used.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,

@@ -1,7 +1,10 @@
 # HyperCom 0.0.0.9001 (development)
 
 Same results as 0.0.0.9000 (master b999a01) bit for bit on the bundled data: counts, LR table, hyperedges, adjacency and influence
-matrices, metadata, cell scores, priorities and seeded p-values are `identical()` to master's under the C collation.
+matrices, metadata, cell scores, priorities and seeded p-values are `identical()` to master's under the C collation. One exception
+by default: the influence matrix is now made with method `"hypergraph"`, about 1e-15 from master's (on the bundled data `HyperCom()`
+still writes master's priorities and seeded p-values); method `"lu"` gives master's numbers bit for bit. The adjacency and influence
+matrices are no longer stored as node x node matrices by default (see below).
 
 ## Speed
 
@@ -26,36 +29,66 @@ above its inputs instead of 1.37 GB), and every step is as fast or faster; outpu
 * `generate_infMat` writes the system matrix straight from the sparse adjacency and has LAPACK's `dgesv` (the routine `solve()`
   calls) factor it in place into the identity that becomes the result: at most 2 dense node x node matrices instead of 5, and faster.
   The package now links R's LAPACK (on Windows through an import library for `Rlapack.dll`).
-* `generate_adjacency_matrix` accumulates the upper triangle directly in C++ instead of `xtabs` + `tcrossprod` (whose full product,
-  diagonal reset and node removal each made a copy): the result is allocated once, master's object exactly, 4x faster.
-* `prioritize_lr` scores pairs in batches of whole ligands and keeps only one batch of cell scores, instead of the scores of every
-  grid at once (16 bytes x cells x grids); no grid is scored twice. The gene x cell counts are read from the stored triangle of the
-  adjacency instead of a full symmetric expansion.
+* When the adjacency matrix itself is made (`as.matrix(adj)`, methods `"lu"` and `"chol"`), its upper triangle is accumulated directly
+  in C++ instead of `xtabs` + `tcrossprod` (whose full product, diagonal reset and node removal each made a copy): allocated once,
+  master's object exactly, 4x faster.
+* `prioritize_lr` scores pairs in batches of whole ligands and keeps only one batch of cell scores (at most about 64 MB), instead of
+  the scores of every grid at once (16 bytes x cells x grids); no grid is scored twice. Which cells express each gene is kept as a list
+  of cells, not a cells x genes table. The gene x cell counts are read from the hyperedge incidence (or
+  the stored triangle of an adjacency matrix) instead of a full symmetric expansion.
 * `filter_counts` keeps the ligand and receptor genes before transposing, instead of transposing the whole counts matrix.
+
+## No node x node matrices
+
+The adjacency and influence matrices have as many rows and columns as nodes (cells + genes), so they grew with the square of the
+number of cells. They are now kept as their factors through the hyperedges (genes and ligand-receptor interactions), which grow with
+the number of cells; only the within-sample cell blocks the scores need are made, while pairs are scored. Small data with at least as
+many hyperedges as nodes (with the full CellChat database, roughly under 1000 cells) get the dense influence matrix as before, which is
+then no bigger than the factors. On 20,000 synthetic cells
+in 3 samples (20,653 nodes, 1641 hyperedges, 16 threads) the whole pipeline peaks at 3.65 GB instead of 9.1 GB, the adjacency takes
+0.06 s instead of 5.4 s and the influence matrix 0.4 s instead of 105 s; scores are as before.
+
+* `generate_adjacency_matrix` returns a `hypercom_adjacency`: the node x hyperedge incidence `H` (how often each node is in each
+  hyperedge); the adjacency is H H' with a zero diagonal. It works like a matrix for `dim`, `dimnames`, `rownames`, `adj[i, j]` (those
+  entries) and `as.matrix` (master's matrix exactly). `3.adj.rds` holds it.
+* `generate_infMat` on such an adjacency returns a `hypercom_influence` by default (method `"hypergraph"`): the factors of the
+  influence matrix (`H`, the row sums, `delta` and the hyperedge x node matrix `Z`), with the same methods; its entries equal the dense
+  `"hypergraph"` matrix's bit for bit. `4.infMat.rds` holds it. Methods `"lu"` and `"chol"` return the dense matrix as before; on a plain
+  adjacency matrix the default is still `"lu"`.
+* `prioritize_lr` and `score_hypercom` take either kind; with a factored influence matrix they make the within-sample cell blocks (the
+  sum of squared sample sizes of doubles) and the genes' rows and columns, and give the same scores as from its dense matrix, bit for
+  bit. `generate_metadata` reads only the node names.
+* Plain matrices, e.g. files saved by earlier versions, work everywhere as before. Code that used the adjacency or influence matrix
+  as a base matrix (`rowSums(adj)`, `Matrix` functions, heatmaps) needs `as.matrix()` first, which makes the node x node matrix
+  (`as.matrix(infMat, threads=)` makes it on several threads; indexing uses one).
+* Memory now grows with the sum of squared sample sizes (8 bytes per within-sample cell pair for the blocks, about 10 for the pair
+  being ranked) plus 8 bytes per hyperedge x node for `Z`, not with the number of nodes squared: more samples of the same size cost
+  little. On 50,000 synthetic cells in 3 samples (16 threads) the pipeline peaks at 19.0 GB; before, it needed about 46 GB.
 
 ## Influence matrix methods
 
-`generate_infMat(method=)` chooses how the inverse is taken; the default `"lu"` is master's, bit for bit. On 20,000 synthetic cells
-(20,653 nodes, 1641 hyperedges, 16 threads) the influence matrix takes 121 s with `"lu"`, 46 s with `"chol"` and 1.4 s with
-`"hypergraph"`, and the whole pipeline peaks at 7.7 GB instead of 9.1 GB with either of the new methods.
+`generate_infMat(method=)` chooses how the inverse is taken: `"hypergraph"` (the default for an adjacency from
+`generate_adjacency_matrix`), `"lu"` (master's, bit for bit; the default for an adjacency matrix) or `"chol"`. On 20,000 synthetic
+cells the dense influence matrix took 121 s with `"lu"` and 46 s with `"chol"`; the factors take 0.4 s (`"hypergraph"`).
 
 * `"chol"`: v1-fast's Cholesky inverse of the symmetric form of the system, in place: one dense node x node matrix instead of two,
   about 3/8 of the arithmetic. The same numbers as v1-fast's `method="chol"` bit for bit.
-* `"hypergraph"` (needs `hyperedges`, the table the adjacency was made from): the adjacency is the hyperedge incidence times its
-  transpose, so the inverse is a diagonal plus a term of rank at most the number of hyperedges (Woodbury identity). Work grows with
-  nodes x incidences instead of nodes cubed, the result is the only dense matrix, and it is the same at any `threads`. It checks
-  exactly that the hyperedges give the adjacency (in any node order) and stops otherwise; with at least as many hyperedges as nodes it
-  computes `"chol"`.
+* `"hypergraph"`: the adjacency is the hyperedge incidence times its transpose, so the inverse is a diagonal plus a term of rank at
+  most the number of hyperedges (Woodbury identity), kept as its factors. Work grows with nodes x incidences instead of nodes cubed,
+  and it is the same at any `threads`. From an adjacency matrix it needs `hyperedges`, the table the matrix was made from, checks
+  exactly that they give the adjacency (in any node order) and stops otherwise. With at least as many hyperedges as nodes it gains
+  nothing and returns `"chol"`'s dense matrix.
 * Both stop like `"lu"` when the system is computationally singular (`r` near 0) and on non-finite weights.
 * Both differ from `"lu"` by about 1e-15 relative (6e-15 at 20,000 cells), which can break exact ties when grids are ranked; on 20,000
   cells the pairs keep master's order and priorities move by at most 1.3e-13 (`"hypergraph"`) and 1.9e-14 (`"chol"`).
-* `HyperCom` and `HyperCom_seurat` take `infmat.method` (default `"lu"`) and pass their hyperedges and `threads`.
+* `HyperCom` and `HyperCom_seurat` take `infmat.method` (default `"hypergraph"`; `"lu"` for master's numbers bit for bit) and pass
+  their thread count (`parallel`, `cl`, `threads`: one thread without `parallel`, as for scoring).
 
 ## New arguments and changed behaviour
 
 * `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `threads` (number of threads, capped at the available cores), `seed` (set before drawing the background
   interactions, so p-values are reproducible; ignored without `significance`), `verbose` (`FALSE` prints nothing). They come after
-  `outdir`, so positional calls written for master still work. `parallel=TRUE` uses `parallelly::availableCores()` threads; `cl` is
+  `outdir`, so positional calls written for master still work. `parallel=TRUE` uses one thread per physical core (`parallelly::availableCores(logical=FALSE)`); `cl` is
   accepted but only caps the thread count and is never stopped.
 * The per-pair score lines are printed once all pairs are scored, not as progress.
 * `generate_metadata` stops when a cell of the graph has no sample or group (master turned such cells into genes); metadata rows

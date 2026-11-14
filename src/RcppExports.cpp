@@ -50,9 +50,9 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// solve_influence_hypergraph_cpp
-Rcpp::NumericMatrix solve_influence_hypergraph_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs, double r, int threads);
-RcppExport SEXP _HyperCom_solve_influence_hypergraph_cpp(SEXP hpSEXP, SEXP hiSEXP, SEXP hxSEXP, SEXP nSEXP, SEXP rsSEXP, SEXP rSEXP, SEXP threadsSEXP) {
+// influence_factors_cpp
+Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs, double r, int threads);
+RcppExport SEXP _HyperCom_influence_factors_cpp(SEXP hpSEXP, SEXP hiSEXP, SEXP hxSEXP, SEXP nSEXP, SEXP rsSEXP, SEXP rSEXP, SEXP threadsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -63,7 +63,49 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type rs(rsSEXP);
     Rcpp::traits::input_parameter< double >::type r(rSEXP);
     Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
-    rcpp_result_gen = Rcpp::wrap(solve_influence_hypergraph_cpp(hp, hi, hx, n, rs, r, threads));
+    rcpp_result_gen = Rcpp::wrap(influence_factors_cpp(hp, hi, hx, n, rs, r, threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// influence_block_cpp
+Rcpp::NumericMatrix influence_block_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs, Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector rows, Rcpp::IntegerVector cols, int threads);
+RcppExport SEXP _HyperCom_influence_block_cpp(SEXP hpSEXP, SEXP hiSEXP, SEXP hxSEXP, SEXP nSEXP, SEXP rsSEXP, SEXP deltaSEXP, SEXP ZSEXP, SEXP rSEXP, SEXP rowsSEXP, SEXP colsSEXP, SEXP threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type hp(hpSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type hi(hiSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type hx(hxSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type rs(rsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type delta(deltaSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type Z(ZSEXP);
+    Rcpp::traits::input_parameter< double >::type r(rSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type rows(rowsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cols(colsSEXP);
+    Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(influence_block_cpp(hp, hi, hx, n, rs, delta, Z, r, rows, cols, threads));
+    return rcpp_result_gen;
+END_RCPP
+}
+// influence_blocks_cpp
+Rcpp::NumericVector influence_blocks_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs, Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample, int threads);
+RcppExport SEXP _HyperCom_influence_blocks_cpp(SEXP hpSEXP, SEXP hiSEXP, SEXP hxSEXP, SEXP nSEXP, SEXP rsSEXP, SEXP deltaSEXP, SEXP ZSEXP, SEXP rSEXP, SEXP cellSEXP, SEXP sampleSEXP, SEXP threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type hp(hpSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type hi(hiSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type hx(hxSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type rs(rsSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type delta(deltaSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type Z(ZSEXP);
+    Rcpp::traits::input_parameter< double >::type r(rSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cell(cellSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
+    Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(influence_blocks_cpp(hp, hi, hx, n, rs, delta, Z, r, cell, sample, threads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -83,13 +125,33 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// score_blocks_cpp
+Rcpp::List score_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads);
+RcppExport SEXP _HyperCom_score_blocks_cpp(SEXP blocksSEXP, SEXP ASEXP, SEXP BSEXP, SEXP sampleSEXP, SEXP ligSEXP, SEXP recSEXP, SEXP threadsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type blocks(blocksSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type A(ASEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type B(BSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type lig(ligSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type rec(recSEXP);
+    Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_blocks_cpp(blocks, A, B, sample, lig, rec, threads));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_adjacency_cpp", (DL_FUNC) &_HyperCom_adjacency_cpp, 4},
     {"_HyperCom_solve_influence_cpp", (DL_FUNC) &_HyperCom_solve_influence_cpp, 3},
     {"_HyperCom_solve_influence_chol_cpp", (DL_FUNC) &_HyperCom_solve_influence_chol_cpp, 3},
-    {"_HyperCom_solve_influence_hypergraph_cpp", (DL_FUNC) &_HyperCom_solve_influence_hypergraph_cpp, 7},
+    {"_HyperCom_influence_factors_cpp", (DL_FUNC) &_HyperCom_influence_factors_cpp, 7},
+    {"_HyperCom_influence_block_cpp", (DL_FUNC) &_HyperCom_influence_block_cpp, 11},
+    {"_HyperCom_influence_blocks_cpp", (DL_FUNC) &_HyperCom_influence_blocks_cpp, 11},
     {"_HyperCom_score_grids_cpp", (DL_FUNC) &_HyperCom_score_grids_cpp, 6},
+    {"_HyperCom_score_blocks_cpp", (DL_FUNC) &_HyperCom_score_blocks_cpp, 7},
     {NULL, NULL, 0}
 };
 

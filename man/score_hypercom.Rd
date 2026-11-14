@@ -7,7 +7,7 @@
 score_hypercom(infMat, metadata, ligand = NULL, receptors = NULL)
 }
 \arguments{
-\item{infMat}{A named influence matrix}
+\item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 

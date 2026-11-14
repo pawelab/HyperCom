@@ -14,7 +14,7 @@ generate_metadata(
 )
 }
 \arguments{
-\item{infMat}{A named influence matrix}
+\item{infMat}{An influence matrix from generate_infMat (only its node names are read)}
 
 \item{metadata}{A dataframe containing cell metadata with row names being cells}
 

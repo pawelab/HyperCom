@@ -26,6 +26,23 @@ quietly <- function(expr){
   return(x)
 }
 
+#' Get master's adjacency object from any build's adjacency
+#'
+#' `as_master_adjacency` returns the adjacency as master's dsCMatrix
+#'
+#' This function takes an adjacency from generate_adjacency_matrix: master's dsCMatrix is returned as is, the incidence kept by
+#' builds without node x node matrices is expanded to it.
+#' @param adj An adjacency from generate_adjacency_matrix
+#' @returns A dsCMatrix
+#' @noRd
+as_master_adjacency <- function(adj){
+  if(inherits(adj, "hypercom_adjacency")){
+    return(HyperCom:::adjacency_sparse(adj))
+  }
+
+  return(adj)
+}
+
 #' Expect a matrix to hold the same values as master's
 #'
 #' `expect_same_matrix` checks dimnames exactly and values exactly or within a tolerance

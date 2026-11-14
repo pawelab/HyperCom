@@ -8,38 +8,42 @@ generate_infMat(
   adj,
   r = 0.5,
   outfile = "4.infMat.rds",
-  method = c("lu", "chol", "hypergraph"),
+  method = NULL,
   hyperedges = NULL,
   threads = NULL
 )
 }
 \arguments{
-\item{adj}{A named adjacency matrix}
+\item{adj}{An adjacency from generate_adjacency_matrix, or a named adjacency matrix}
 
 \item{r}{A double between 0 and 1 representing the restart probability}
 
 \item{outfile}{A string naming the output file}
 
-\item{method}{A string naming the method: "lu", "chol" or "hypergraph"}
+\item{method}{A string naming the method: "hypergraph", "lu" or "chol"; NULL for "hypergraph" with an adjacency from
+generate_adjacency_matrix and "lu" with an adjacency matrix}
 
-\item{hyperedges}{A dataframe of the hyperedges adj was made from, needed by method "hypergraph"}
+\item{hyperedges}{A dataframe of the hyperedges an adjacency matrix was made from, needed by method "hypergraph" with an adjacency
+matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own}
 
 \item{threads}{An integer number of threads for method "hypergraph", NULL for all available cores ("lu" and "chol" run on the
 threads of the BLAS)}
 }
 \value{
-An influence matrix
+An influence matrix: a hypercom_influence (method "hypergraph") or a dense matrix
 }
 \description{
 \code{generate_infMat} returns the influence matrix of the hypergraph
 }
 \details{
 This function takes an adjacency matrix and returns its influence matrix using heat diffusion, r (I - (1 - r) adj / D)^-1 with D
-the row sums of adj. Three methods give the same matrix. "lu" solves the linear system with LAPACK in place as master's solve(),
-bit for bit: two dense node x node matrices at once. "chol" is v1-fast's symmetric Cholesky inverse: one dense matrix and about
-3/8 of the arithmetic. "hypergraph" inverts through the hyperedges adj was made from (Woodbury identity): one dense matrix, the
-result, and work growing with nodes x incidences instead of nodes cubed, so it is far faster when cells outnumber genes and
-interactions (with at least as many hyperedges as nodes it gains nothing and computes "chol"). "chol" and "hypergraph" differ from
-"lu" by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
+the row sums of adj. Three methods give the same matrix. "hypergraph", the default for an adjacency from
+\code{generate_adjacency_matrix}, inverts through the hyperedges (Woodbury identity) and returns the matrix factored, never stored:
+memory grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. The result
+works like a matrix for dim, dimnames and rownames, \code{infMat[i, j]} makes those entries and as.matrix the whole matrix. With at
+least as many hyperedges as nodes it gains nothing and returns "chol"'s dense matrix. "lu", the default for an adjacency matrix,
+solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense node x node matrices at once. "chol" is
+v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "hypergraph" differ from "lu"
+by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
 singular (r near 0).
 }

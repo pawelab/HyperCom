@@ -20,7 +20,7 @@ HyperCom_seurat(
   threads = NULL,
   seed = NULL,
   verbose = TRUE,
-  infmat.method = "lu"
+  infmat.method = "hypergraph"
 )
 }
 \arguments{
@@ -43,7 +43,7 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel: threads on all available cores}
+\item{parallel}{A boolean of whether to run in parallel: threads on the available physical cores}
 
 \item{cl}{A cluster object, kept for compatibility: only its size caps the number of threads}
 
@@ -55,8 +55,9 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{verbose}{A boolean of whether to print each weight and the score of each pair}
 
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "lu" (master's numbers bit for bit), "chol" or "hypergraph"
-(faster, one dense matrix instead of two, about 1e-15 apart)}
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "hypergraph" (fastest, kept as its factors: no node x node
+matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+1e-15 from "lu"}
 }
 \value{
 0 if run successfully

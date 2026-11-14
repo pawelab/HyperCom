@@ -35,6 +35,19 @@ test_that("seeded p-values equal master's after set.seed", {
   expect_identical(priority, fx$output$priority.sig)
 })
 
+test_that("prioritize_lr reads an adjacency without node x node matrix as master's matrix, bit for bit", {
+  skip_if_not(has_args("seed", "threads"), "build without seed and threads arguments")
+  skip_on_cran()
+  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
+  priority <- quietly(prioritize_lr(fx$output$lrs, adj, fx$output$infMat, fx$output$metadata, weights=c(1, 0.5, 0), threads=2,
+                                    outdir=NULL))
+  sig <- quietly(prioritize_lr(fx$output$lrs, adj, fx$output$infMat, fx$output$metadata, significance=TRUE, seed=1, threads=2,
+                               outdir=NULL))
+
+  expect_identical(priority, fx$output$priority)
+  expect_identical(sig, fx$output$priority.sig)
+})
+
 test_that("a factor ligand is read by name, as in master", {
   score <- score_hypercom(fx$output$infMat, fx$output$metadata, ligand=factor("Thbs1"), receptors="Sdc4")
 
@@ -51,7 +64,7 @@ test_that("a network score asked with several receptors averages copies of the n
 })
 
 test_that("the adjacency matrix is master's object, not only its values", {
-  expect_identical(generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL), fx$output$adj)
+  expect_identical(as_master_adjacency(generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)), fx$output$adj)
 })
 
 test_that("the influence matrix equals master's from sparse, general and dense adjacency, and leaves a dense input unchanged", {
@@ -77,4 +90,24 @@ test_that("priorities do not depend on how the pairs fall into batches", {
   rownames(b) <- NULL
 
   expect_identical(a, b)
+})
+
+test_that("priorities and seeded p-values are the same when every ligand is its own batch", {
+  skip_if_not(has_args("seed", "threads"), "build without seed and threads arguments")
+  skip_if_not(exists("batch_pairs", envir=asNamespace("HyperCom"), inherits=FALSE), "build without batches")
+  skip_on_cran()
+  lrs <- fx$output$lrs
+  md <- fx$output$metadata
+  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
+  infMat <- generate_infMat(adj, outfile=NULL, threads=2)
+  factored <- quietly(prioritize_lr(lrs, adj, infMat, md, weights=c(1, 0.5, 0), threads=2, outdir=NULL))
+  batch <- HyperCom:::batch_pairs
+  testthat::local_mocked_bindings(batch_pairs=function(ligands, receptors, size) batch(ligands, receptors, 1), .package="HyperCom")
+
+  expect_gt(length(HyperCom:::batch_pairs(lrs$ligand, as.matrix(lrs[, 3:ncol(lrs)]), 256)), 1)
+  expect_identical(quietly(prioritize_lr(lrs, fx$output$adj, fx$output$infMat, md, weights=c(1, 0.5, 0), threads=2, outdir=NULL)),
+                   fx$output$priority)
+  expect_identical(quietly(prioritize_lr(lrs, fx$output$adj, fx$output$infMat, md, significance=TRUE, seed=1, threads=2, outdir=NULL)),
+                   fx$output$priority.sig)
+  expect_identical(quietly(prioritize_lr(lrs, adj, infMat, md, weights=c(1, 0.5, 0), threads=2, outdir=NULL)), factored)
 })

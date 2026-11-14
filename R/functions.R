@@ -106,7 +106,8 @@ generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
 #' This function takes a dataframe of hyperedges and numbers its nodes by their names in the C locale and its hyperedges in order
 #' of appearance, leaving out rows with a missing node or hyperedge.
 #' @param hyperedges A dataframe of hyperedges with columns named edge and node
-#' @returns A list with nodes (sorted node names), n.edges (number of hyperedges), node and edge (1-based indices of the rows kept)
+#' @returns A list with nodes (sorted node names), edges (hyperedge names in order of appearance), node and edge (1-based indices
+#' of the rows kept)
 #' @noRd
 index_hyperedges <- function(hyperedges){
   if(is.null(hyperedges[["node"]]) | is.null(hyperedges[["edge"]])){
@@ -123,31 +124,171 @@ index_hyperedges <- function(hyperedges){
   edge.idx <- match(edge, edges)
   found <- !is.na(node.idx) & !is.na(edge.idx)
 
-  return(list(nodes=nodes, n.edges=length(edges), node=node.idx[found], edge=edge.idx[found]))
+  return(list(nodes=nodes, edges=edges, node=node.idx[found], edge=edge.idx[found]))
+}
+
+#' Count how often each node is in each hyperedge
+#'
+#' `hyperedge_incidence` returns the node x hyperedge incidence counts of the nodes that share a hyperedge with another node
+#'
+#' This function takes indexed hyperedges and returns how often each node is in each hyperedge, for the hyperedges with at least two
+#' distinct nodes (the only ones that add to the adjacency) and the nodes in one of them (the nodes of the adjacency), nodes in the
+#' order of index_hyperedges.
+#' @param h A list from index_hyperedges
+#' @returns A sparse node x hyperedge matrix of counts with node and hyperedge names
+#' @noRd
+hyperedge_incidence <- function(h){
+  H <- Matrix::sparseMatrix(i=h$node, j=h$edge, x=1, dims=c(length(h$nodes), length(h$edges)), dimnames=list(node=h$nodes, edge=h$edges))
+  H <- H[, diff(H@p) >= 2, drop=FALSE]
+  H <- H[Matrix::rowSums(H) > 0, , drop=FALSE]
+
+  return(H)
 }
 
 #' Generate adjacency matrix of hypergraph
 #'
 #' `generate_adjacency_matrix` returns the adjacency matrix of the hypergraph
 #'
-#' This function takes a dataframe of hyperedges and returns its adjacency matrix. Nodes are ordered by their names in the C locale,
-#' so the order does not depend on the session's collation. Nodes that share no hyperedge with another node are dropped.
-#' Only the upper triangle is computed and stored.
+#' This function takes a dataframe of hyperedges and returns its adjacency matrix: each entry is the number of hyperedges two nodes
+#' share, and the diagonal is zero. Nodes are ordered by their names in the C locale, so the order does not depend on the session's
+#' collation. Nodes that share no hyperedge with another node are dropped. The matrix itself is not stored: the result keeps the
+#' node x hyperedge incidence H, and the adjacency is H H' with the diagonal set to zero, so it takes memory in proportion to the
+#' hyperedge table instead of the number of nodes squared. It works like a matrix for dim, dimnames and rownames, `adj[i, j]` makes
+#' those entries and as.matrix the whole matrix.
 #' @param hyperedges A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge
 #' @param outfile A string naming the output file
-#' @returns An adjacency matrix where each entry is the number of shared hyperedges between nodes
+#' @returns A hypercom_adjacency: a list with H, the sparse node x hyperedge matrix of how often each node is in each hyperedge
 #' @export
 generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
-  h <- index_hyperedges(hyperedges)
-
-  A <- adjacency_cpp(h$node - 1L, h$edge - 1L, length(h$nodes), h$n.edges)
-  nodes <- h$nodes[A$keep]
-  adj <- methods::new("dsCMatrix", i=A$i, p=A$p, x=A$x, Dim=rep(length(nodes), 2), Dimnames=list(node=nodes, node=nodes), uplo="U")
+  adj <- list(H=hyperedge_incidence(index_hyperedges(hyperedges)))
+  class(adj) <- "hypercom_adjacency"
 
   if(!is.null(outfile)){
     saveRDS(adj, outfile)
   }
   return(adj)
+}
+
+#' Expand an adjacency into master's sparse matrix
+#'
+#' `adjacency_sparse` returns the adjacency matrix of a hypercom_adjacency as master's dsCMatrix
+#'
+#' This function takes an adjacency from generate_adjacency_matrix and returns the upper triangle of its symmetric matrix with the
+#' explicit zero diagonal, the object master's generate_adjacency_matrix made. It takes memory in proportion to the node pairs that
+#' share a hyperedge.
+#' @param adj A hypercom_adjacency
+#' @returns A dsCMatrix with node names
+#' @noRd
+adjacency_sparse <- function(adj){
+  H <- adj$H
+  node <- rep(H@i, H@x)
+  edge <- rep(rep(seq_len(ncol(H)) - 1L, diff(H@p)), H@x)
+  A <- adjacency_cpp(node, edge, nrow(H), ncol(H))
+  nodes <- rownames(H)[A$keep]
+
+  return(methods::new("dsCMatrix", i=A$i, p=A$p, x=A$x, Dim=rep(length(nodes), 2L), Dimnames=list(node=nodes, node=nodes), uplo="U"))
+}
+
+#' Find nodes by name, position or logical
+#'
+#' `node_index` returns the positions of indexed nodes
+#'
+#' This function takes an index as for a matrix (names, positive or negative positions, logical; a factor is read by name) and the
+#' node names and returns the positions, stopping on a name or position that is not a node, on NA and on a logical index longer than
+#' the nodes.
+#' @param i A vector indexing nodes
+#' @param nodes A vector of strings of the node names
+#' @returns An integer vector of positions
+#' @noRd
+node_index <- function(i, nodes){
+  if(anyNA(i)){
+    stop("indices must not be NA")
+  }
+  if(is.logical(i) & length(i) > length(nodes)){
+    stop("(subscript) logical subscript too long")
+  }
+  if(is.factor(i)){
+    i <- as.character(i)
+  }
+  if(is.character(i)){
+    idx <- match(i, nodes)
+  } else {
+    idx <- seq_along(nodes)[i]
+  }
+  if(anyNA(idx)){
+    stop("subscript out of bounds")
+  }
+
+  return(idx)
+}
+
+#' Adjacency matrix of a hypergraph, stored as its incidence
+#'
+#' `hypercom_adjacency` objects are made by generate_adjacency_matrix
+#'
+#' A hypercom_adjacency keeps the node x hyperedge incidence H of a hypergraph; its adjacency matrix is H H' with the diagonal set
+#' to zero. dim and dimnames give those of the matrix, `adj[i, j]` makes the indexed entries as a dense matrix (indices as for a
+#' matrix: names, positions or logical; factors are read by name, not by their codes) and as.matrix the whole dense matrix (nodes
+#' squared doubles).
+#' @param x A hypercom_adjacency
+#' @param i,j Indices of rows and columns
+#' @param drop A boolean of whether to drop dimensions of extent one
+#' @param ... Ignored
+#' @returns dim: the number of nodes twice; dimnames: the node names twice; `[` and as.matrix: a dense matrix; print: x, invisibly
+#' @name hypercom_adjacency
+NULL
+
+#' @rdname hypercom_adjacency
+#' @export
+dim.hypercom_adjacency <- function(x){
+  return(rep(nrow(x$H), 2L))
+}
+
+#' @rdname hypercom_adjacency
+#' @export
+dimnames.hypercom_adjacency <- function(x){
+  return(list(node=rownames(x$H), node=rownames(x$H)))
+}
+
+#' @rdname hypercom_adjacency
+#' @export
+`[.hypercom_adjacency` <- function(x, i, j, drop=TRUE){
+  narg <- nargs() - !missing(drop)
+  if(narg < 3){
+    stop("index an adjacency as adj[i, j]")
+  }
+  nodes <- rownames(x$H)
+  rows <- if(missing(i)) seq_along(nodes) else node_index(i, nodes)
+  cols <- if(missing(j)) seq_along(nodes) else node_index(j, nodes)
+  A <- as.matrix(Matrix::tcrossprod(x$H[rows, , drop=FALSE], x$H[cols, , drop=FALSE]))
+  if(anyDuplicated(cols) == 0){
+    same <- match(rows, cols)
+    A[cbind(which(!is.na(same)), same[!is.na(same)])] <- 0
+  } else {
+    for(a in which(rows %in% cols)){
+      A[a, cols == rows[a]] <- 0
+    }
+  }
+  dimnames(A) <- list(node=nodes[rows], node=nodes[cols])
+  if(drop & any(dim(A) == 1)){
+    A <- A[, , drop=TRUE]
+  }
+
+  return(A)
+}
+
+#' @rdname hypercom_adjacency
+#' @export
+as.matrix.hypercom_adjacency <- function(x, ...){
+  return(as.matrix(adjacency_sparse(x)))
+}
+
+#' @rdname hypercom_adjacency
+#' @export
+print.hypercom_adjacency <- function(x, ...){
+  cat("HyperCom adjacency matrix of ", nrow(x$H), " nodes, stored as their incidence in ", ncol(x$H), " hyperedges\n", sep="")
+
+  return(invisible(x))
 }
 
 #' Generate the incidence matrix behind an adjacency matrix
@@ -161,18 +302,15 @@ generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
 #' every sum to be exact in double precision; no random numbers are drawn).
 #' @param hyperedges A dataframe of hyperedges with columns named edge and node
 #' @param adj An adjacency matrix with node names
-#' @returns A sparse node x hyperedge matrix of counts
+#' @returns A sparse node x hyperedge matrix of counts with node and hyperedge names
 #' @noRd
 incidence_matrix <- function(hyperedges, adj){
-  h <- index_hyperedges(hyperedges)
-  H <- Matrix::sparseMatrix(i=h$node, j=h$edge, x=1, dims=c(length(h$nodes), h$n.edges))
-  H <- H[, diff(H@p) >= 2, drop=FALSE]
-  kept <- which(Matrix::rowSums(H) > 0)
-  idx <- match(rownames(adj), h$nodes[kept])
-  if(length(idx) != length(kept) | anyNA(idx) | anyDuplicated(idx) > 0){
+  H <- hyperedge_incidence(index_hyperedges(hyperedges))
+  idx <- match(rownames(adj), rownames(H))
+  if(length(idx) != nrow(H) | anyNA(idx) | anyDuplicated(idx) > 0){
     stop("hyperedges do not match adj (other nodes): make adj with generate_adjacency_matrix(hyperedges)")
   }
-  H <- H[kept[idx], , drop=FALSE]
+  H <- H[idx, , drop=FALSE]
 
   bound <- max(as.vector(H %*% Matrix::colSums(H)))
   top <- 2^max(1, min(30, floor(52 - log2(bound))))
@@ -191,33 +329,54 @@ incidence_matrix <- function(hyperedges, adj){
 #' `generate_infMat` returns the influence matrix of the hypergraph
 #'
 #' This function takes an adjacency matrix and returns its influence matrix using heat diffusion, r (I - (1 - r) adj / D)^-1 with D
-#' the row sums of adj. Three methods give the same matrix. "lu" solves the linear system with LAPACK in place as master's solve(),
-#' bit for bit: two dense node x node matrices at once. "chol" is v1-fast's symmetric Cholesky inverse: one dense matrix and about
-#' 3/8 of the arithmetic. "hypergraph" inverts through the hyperedges adj was made from (Woodbury identity): one dense matrix, the
-#' result, and work growing with nodes x incidences instead of nodes cubed, so it is far faster when cells outnumber genes and
-#' interactions (with at least as many hyperedges as nodes it gains nothing and computes "chol"). "chol" and "hypergraph" differ from
-#' "lu" by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
+#' the row sums of adj. Three methods give the same matrix. "hypergraph", the default for an adjacency from
+#' `generate_adjacency_matrix`, inverts through the hyperedges (Woodbury identity) and returns the matrix factored, never stored:
+#' memory grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. The result
+#' works like a matrix for dim, dimnames and rownames, `infMat[i, j]` makes those entries and as.matrix the whole matrix. With at
+#' least as many hyperedges as nodes it gains nothing and returns "chol"'s dense matrix. "lu", the default for an adjacency matrix,
+#' solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense node x node matrices at once. "chol" is
+#' v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "hypergraph" differ from "lu"
+#' by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
 #' singular (r near 0).
-#' @param adj A named adjacency matrix
+#' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
 #' @param r A double between 0 and 1 representing the restart probability
 #' @param outfile A string naming the output file
-#' @param method A string naming the method: "lu", "chol" or "hypergraph"
-#' @param hyperedges A dataframe of the hyperedges adj was made from, needed by method "hypergraph"
+#' @param method A string naming the method: "hypergraph", "lu" or "chol"; NULL for "hypergraph" with an adjacency from
+#' generate_adjacency_matrix and "lu" with an adjacency matrix
+#' @param hyperedges A dataframe of the hyperedges an adjacency matrix was made from, needed by method "hypergraph" with an adjacency
+#' matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own
 #' @param threads An integer number of threads for method "hypergraph", NULL for all available cores ("lu" and "chol" run on the
 #' threads of the BLAS)
-#' @returns An influence matrix
+#' @returns An influence matrix: a hypercom_influence (method "hypergraph") or a dense matrix
 #' @export
-generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("lu", "chol", "hypergraph"), hyperedges=NULL, threads=NULL){
-  method <- match.arg(method)
+generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=NULL, hyperedges=NULL, threads=NULL){
+  graph <- inherits(adj, "hypercom_adjacency")
+  if(is.null(method)){
+    if(graph){
+      method <- "hypergraph"
+    } else {
+      method <- "lu"
+    }
+  }
+  method <- match.arg(method, c("hypergraph", "lu", "chol"))
   if(is.data.frame(adj)){
     adj <- as.matrix(adj)
   }
   if(nrow(adj) == 0){
     stop("the adjacency matrix has no nodes: no ligand or receptor gene is expressed in any cell")
   }
-  rs <- Matrix::rowSums(adj)
-  if(!is.matrix(adj) & !methods::is(adj, "dsCMatrix")){
-    adj <- methods::as(methods::as(methods::as(adj, "CsparseMatrix"), "generalMatrix"), "dMatrix")
+  if(graph & method != "hypergraph"){
+    adj <- adjacency_sparse(adj)
+    graph <- FALSE
+  }
+  if(graph){
+    H <- adj$H
+    rs <- as.vector(H %*% Matrix::colSums(H) - Matrix::rowSums(H^2))
+  } else {
+    rs <- Matrix::rowSums(adj)
+    if(!is.matrix(adj) & !methods::is(adj, "dsCMatrix")){
+      adj <- methods::as(methods::as(methods::as(adj, "CsparseMatrix"), "generalMatrix"), "dMatrix")
+    }
   }
   if(method != "lu"){
     if(!(is.numeric(r) && length(r) == 1 && isTRUE(r > 0 & r <= 1))){
@@ -230,7 +389,7 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("lu", "
       stop("method \"", method, "\" needs every node of adj to have neighbours (positive row sums)")
     }
   }
-  if(method == "hypergraph" & is.null(hyperedges)){
+  if(method == "hypergraph" & !graph & is.null(hyperedges)){
     stop("method \"hypergraph\" needs the hyperedges adj was made from")
   }
 
@@ -239,14 +398,19 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("lu", "
   } else if(method == "chol"){
     infMat <- solve_influence_chol_cpp(adj, rs, r)
   } else {
-    H <- incidence_matrix(hyperedges, adj)
+    if(!graph){
+      H <- incidence_matrix(hyperedges, adj)
+    }
     if(ncol(H) < nrow(H)){
-      infMat <- solve_influence_hypergraph_cpp(H@p, H@i, H@x, nrow(H), rs, r, get_threads(parallel=TRUE, threads=threads))
+      infMat <- influence_factors(H, rs, r, threads)
     } else {
+      if(graph){
+        adj <- adjacency_sparse(adj)
+      }
       infMat <- solve_influence_chol_cpp(adj, rs, r)
     }
   }
-  if(!is.null(rownames(adj))){
+  if(is.matrix(infMat) & !is.null(rownames(adj))){
     dimnames(infMat) <- list(rownames(adj), rownames(adj))
   }
 
@@ -254,6 +418,138 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("lu", "
     saveRDS(infMat, outfile, compress=FALSE)
   }
   return(infMat)
+}
+
+#' Factor the influence matrix through the hyperedges
+#'
+#' `influence_factors` returns the influence matrix of a hypergraph as a hypercom_influence
+#'
+#' This function takes the node x hyperedge incidence, the row sums of the adjacency and the restart probability and returns the
+#' factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z (Y = H / Delta, Z = C^-1 Y' D): H, the row sums D, Delta and the
+#' hyperedge x node matrix Z.
+#' @param H A sparse node x hyperedge matrix of counts with node and hyperedge names
+#' @param rs A numeric vector of the row sums of the adjacency
+#' @param r A double between 0 and 1 representing the restart probability
+#' @param threads An integer number of threads, NULL for all available cores
+#' @returns A hypercom_influence: a list with H, rs, delta, Z and r
+#' @noRd
+influence_factors <- function(H, rs, r, threads=NULL){
+  rs <- as.numeric(rs)
+  f <- influence_factors_cpp(H@p, H@i, H@x, nrow(H), rs, r, get_threads(parallel=TRUE, threads=threads))
+  Z <- f$Z
+  dimnames(Z) <- list(edge=colnames(H), node=rownames(H))
+  infMat <- list(H=H, rs=rs, delta=f$delta, Z=Z, r=r)
+  class(infMat) <- "hypercom_influence"
+
+  return(infMat)
+}
+
+#' Make a block of a factored influence matrix
+#'
+#' `influence_slice` returns the entries of a hypercom_influence at given rows and columns
+#'
+#' This function takes a hypercom_influence and positions of rows and columns and returns those entries as a dense matrix, each
+#' entry the same as in the whole matrix at any thread count.
+#' @param infMat A hypercom_influence
+#' @param rows An integer vector of row positions
+#' @param cols An integer vector of column positions
+#' @param threads An integer number of threads
+#' @returns A dense matrix without names
+#' @noRd
+influence_slice <- function(infMat, rows, cols, threads=1){
+  H <- infMat$H
+  block <- influence_block_cpp(H@p, H@i, H@x, nrow(H), infMat$rs, infMat$delta, infMat$Z, infMat$r, as.integer(rows) - 1L,
+                               as.integer(cols) - 1L, get_threads(threads=threads))
+
+  return(block)
+}
+
+#' Make the within-sample blocks of a factored influence matrix
+#'
+#' `influence_blocks` returns every within-sample cell x cell block of a hypercom_influence, as the grid kernel reads them
+#'
+#' This function takes a hypercom_influence and the cells from grid_cells and returns the blocks one after the other (samples
+#' ascending, cells of a sample in the order given, each block by column): the sum of squared sample sizes of doubles.
+#' @param infMat A hypercom_influence
+#' @param g A list from grid_cells
+#' @param threads An integer number of threads
+#' @returns A numeric vector
+#' @noRd
+influence_blocks <- function(infMat, g, threads=1){
+  if(sum(as.numeric(tabulate(g$sample))^2) >= 4294967295){
+    stop("too many cells per sample: the sum of squared sample sizes must stay below 2^32")
+  }
+  H <- infMat$H
+
+  return(influence_blocks_cpp(H@p, H@i, H@x, nrow(H), infMat$rs, infMat$delta, infMat$Z, infMat$r, g$idx, g$sample, threads))
+}
+
+#' Influence matrix of a hypergraph, stored as its factors
+#'
+#' `hypercom_influence` objects are made by generate_infMat with method "hypergraph"
+#'
+#' A hypercom_influence keeps the factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z of a hypergraph (H, the node x
+#' hyperedge incidence; rs, the row sums D of the adjacency; delta, Delta = D + (1 - r) diag(H H'); Z, hyperedge x node; Y = H /
+#' Delta) instead of F. dim and dimnames give those of F, `infMat[i, j]` makes the indexed entries as a dense matrix (indices as for a
+#' matrix: names, positions or logical; factors are read by name, not by their codes) on one thread and as.matrix the whole dense
+#' matrix (nodes squared doubles).
+#' @param x A hypercom_influence
+#' @param i,j Indices of rows and columns
+#' @param drop A boolean of whether to drop dimensions of extent one
+#' @param threads An integer number of threads for as.matrix
+#' @param ... Ignored
+#' @returns dim: the number of nodes twice; dimnames: the node names twice; `[` and as.matrix: a dense matrix; print: x, invisibly
+#' @name hypercom_influence
+NULL
+
+#' @rdname hypercom_influence
+#' @export
+dim.hypercom_influence <- function(x){
+  return(rep(nrow(x$H), 2L))
+}
+
+#' @rdname hypercom_influence
+#' @export
+dimnames.hypercom_influence <- function(x){
+  return(list(rownames(x$H), rownames(x$H)))
+}
+
+#' @rdname hypercom_influence
+#' @export
+`[.hypercom_influence` <- function(x, i, j, drop=TRUE){
+  narg <- nargs() - !missing(drop)
+  if(narg < 3){
+    stop("index an influence matrix as infMat[i, j]")
+  }
+  nodes <- rownames(x$H)
+  rows <- if(missing(i)) seq_along(nodes) else node_index(i, nodes)
+  cols <- if(missing(j)) seq_along(nodes) else node_index(j, nodes)
+  block <- influence_slice(x, rows, cols)
+  dimnames(block) <- list(nodes[rows], nodes[cols])
+  if(drop & any(dim(block) == 1)){
+    block <- block[, , drop=TRUE]
+  }
+
+  return(block)
+}
+
+#' @rdname hypercom_influence
+#' @export
+as.matrix.hypercom_influence <- function(x, threads=1, ...){
+  nodes <- rownames(x$H)
+  block <- influence_slice(x, seq_along(nodes), seq_along(nodes), threads)
+  dimnames(block) <- list(nodes, nodes)
+
+  return(block)
+}
+
+#' @rdname hypercom_influence
+#' @export
+print.hypercom_influence <- function(x, ...){
+  cat("HyperCom influence matrix of ", nrow(x$H), " nodes (r = ", x$r, "), stored as its factors through ", ncol(x$H), " hyperedges\n",
+      sep="")
+
+  return(invisible(x))
 }
 
 #' Generate cleaned metadata table
@@ -265,7 +561,7 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("lu", "
 #' Nodes of the influence matrix that are not cells of the metadata are genes: their sample, group and kept columns are "gene".
 #' Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and other classed columns
 #' other than factors become strings.
-#' @param infMat A named influence matrix
+#' @param infMat An influence matrix from generate_infMat (only its node names are read)
 #' @param metadata A dataframe containing cell metadata with row names being cells
 #' @param sample A string that is the column name for sample in the provided metadata
 #' @param group A string that is the column name for group in the provided metadata
@@ -333,8 +629,9 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
 #' `get_threads` returns the number of threads used to score cell grids
 #'
 #' This function takes the parallel switch, an optional cluster and an optional thread count. An explicit thread count wins;
-#' otherwise one thread without parallel, and with parallel the available cores (no more than the size of the cluster if one is given,
-#' or than cl itself if it is a number). Never more than the available cores.
+#' otherwise one thread without parallel, and with parallel the available physical cores (no more than the size of the cluster if one
+#' is given, or than cl itself if it is a number): hyperthreads and big grids compete for the same caches. Never more than the
+#' available (logical) cores.
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object, a number of workers, or NULL
 #' @param threads An integer number of threads or NULL
@@ -352,6 +649,7 @@ get_threads <- function(parallel=FALSE, cl=NULL, threads=NULL){
   if(!parallel){
     return(1)
   }
+  cores <- min(cores, parallelly::availableCores(logical=FALSE), na.rm=TRUE)
   if(is.numeric(cl)){
     cores <- min(cores, max(1, floor(cl[1])))
   } else if(!is.null(cl)){
@@ -379,29 +677,17 @@ check_genes <- function(genes, nodes){
   return(invisible(NULL))
 }
 
-#' Calculate sender and receiver scores of cell grids
+#' Find the cells of the metadata in an influence matrix
 #'
-#' `score_grids` returns the sender and receiver scores of cells for ligand and receptor subunit pairs
+#' `grid_cells` returns the positions of the cells in the influence matrix, ascending, with their samples
 #'
-#' This function takes a named influence matrix, the corresponding metadata, and vectors of ligands and receptor subunits.
-#' For each pair it percent-ranks all entries of the cell x cell transfer grid between cells of the same sample together and averages
-#' the ranks of each cell as sender and as receiver. A pair with ligand and receptor NA gives the network score.
-#' Cells and genes are found in the influence matrix by name, so the metadata rows may be in any order.
-#' @param infMat A named influence matrix
+#' This function takes the node names of an influence matrix and the metadata and returns the 0-based positions of the metadata's
+#' cells among the nodes in increasing order, the sample number of each and the order that sorted them.
+#' @param nodes A vector of strings of the node names
 #' @param metadata A dataframe containing columns named cell, sample and group
-#' @param ligands A vector of strings of ligand names, NA for the network score
-#' @param receptors A vector of strings of receptor subunit names, NA for the network score
-#' @param threads An integer number of threads
-#' @returns A list of two matrices, sender and receiver, with one row per cell and one column per pair
+#' @returns A list with idx (positions), sample (integers from 1) and o (the order of the metadata's cells)
 #' @noRd
-score_grids <- function(infMat, metadata, ligands, receptors, threads=1){
-  ligands <- as.character(ligands)
-  receptors <- as.character(receptors)
-  nodes <- rownames(infMat)
-  check_genes(c(ligands, receptors), nodes)
-  if(any(is.na(ligands) != is.na(receptors))){
-    stop("each pair needs both a ligand and a receptor, or neither for the network score")
-  }
+grid_cells <- function(nodes, metadata){
   if(anyNA(metadata$sample)){
     stop("metadata has missing samples: make it with generate_metadata")
   }
@@ -409,21 +695,61 @@ score_grids <- function(infMat, metadata, ligands, receptors, threads=1){
   if(!any(cells)){
     stop("metadata has no cells: make it with generate_metadata from metadata whose row names are the cell names")
   }
-  cell.idx <- match(metadata$cell[cells], nodes) - 1
+  cell.idx <- match(metadata$cell[cells], nodes) - 1L
   if(anyNA(cell.idx) | anyDuplicated(cell.idx) > 0){
     stop("metadata cells must be distinct nodes of infMat: make it with generate_metadata")
   }
-
   samples <- as.integer(factor(metadata$sample[cells]))
-  lig <- match(ligands, nodes) - 1
-  rec <- match(receptors, nodes) - 1
-  lig[is.na(lig)] <- -1
-  rec[is.na(rec)] <- -1
   o <- order(cell.idx)
 
-  sr <- score_grids_cpp(infMat, cell.idx[o], samples[o], lig, rec, threads)
-  if(is.unsorted(cell.idx)){
-    sr <- list(sender=sr$sender[order(o), , drop=FALSE], receiver=sr$receiver[order(o), , drop=FALSE])
+  return(list(idx=cell.idx[o], sample=samples[o], o=o))
+}
+
+#' Calculate sender and receiver scores of cell grids
+#'
+#' `score_grids` returns the sender and receiver scores of cells for ligand and receptor subunit pairs
+#'
+#' This function takes a named influence matrix, the corresponding metadata, and vectors of ligands and receptor subunits.
+#' For each pair it percent-ranks all entries of the cell x cell transfer grid between cells of the same sample together and averages
+#' the ranks of each cell as sender and as receiver. A pair with ligand and receptor NA gives the network score.
+#' Cells and genes are found in the influence matrix by name, so the metadata rows may be in any order. A factored influence
+#' matrix is read through its within-sample blocks (made here unless given) and the genes' rows and columns.
+#' @param infMat A named influence matrix, dense or a hypercom_influence
+#' @param metadata A dataframe containing columns named cell, sample and group
+#' @param ligands A vector of strings of ligand names, NA for the network score
+#' @param receptors A vector of strings of receptor subunit names, NA for the network score
+#' @param threads An integer number of threads
+#' @param blocks A numeric vector from influence_blocks for a hypercom_influence, NULL to make it here
+#' @returns A list of two matrices, sender and receiver, with one row per cell and one column per pair
+#' @noRd
+score_grids <- function(infMat, metadata, ligands, receptors, threads=1, blocks=NULL){
+  ligands <- as.character(ligands)
+  receptors <- as.character(receptors)
+  nodes <- rownames(infMat)
+  check_genes(c(ligands, receptors), nodes)
+  if(any(is.na(ligands) != is.na(receptors))){
+    stop("each pair needs both a ligand and a receptor, or neither for the network score")
+  }
+  g <- grid_cells(nodes, metadata)
+  lig <- match(ligands, nodes) - 1L
+  rec <- match(receptors, nodes) - 1L
+  lig[is.na(lig)] <- -1L
+  rec[is.na(rec)] <- -1L
+
+  if(inherits(infMat, "hypercom_influence")){
+    if(is.null(blocks)){
+      blocks <- influence_blocks(infMat, g, threads)
+    }
+    lig.genes <- unique(lig[lig >= 0])
+    rec.genes <- unique(rec[rec >= 0])
+    A <- influence_slice(infMat, g$idx + 1L, lig.genes + 1L, threads)
+    B <- influence_slice(infMat, rec.genes + 1L, g$idx + 1L, threads)
+    sr <- score_blocks_cpp(blocks, A, B, g$sample, match(lig, lig.genes, nomatch=0L) - 1L, match(rec, rec.genes, nomatch=0L) - 1L, threads)
+  } else {
+    sr <- score_grids_cpp(infMat, g$idx, g$sample, lig, rec, threads)
+  }
+  if(is.unsorted(g$o)){
+    sr <- list(sender=sr$sender[order(g$o), , drop=FALSE], receiver=sr$receiver[order(g$o), , drop=FALSE])
   }
 
   return(sr)
@@ -461,7 +787,7 @@ average_scores <- function(sr, cols){
 #' This function takes a named influence matrix, the corresponding metadata, the ligand, and receptor
 #' to give each cell a HyperCom score. If both the ligand and receptor are specified this is the LR Pair Score
 #' otherwise the score is the Network Score. If a receptor complex is specified, the average of the score vectors is used.
-#' @param infMat A named influence matrix
+#' @param infMat An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param ligand A string of the ligand name
 #' @param receptors A vector containing string elements of the receptor names
@@ -595,13 +921,14 @@ batch_pairs <- function(ligands, receptors, size){
 #' This function takes list of all ligand-receptor pairs in the influence matrix,
 #' the adjacency matrix, a named influence matrix, and the corresponding metadata
 #' to score ligand-receptor pairs. Pairs are scored in batches of whole ligands: each ligand and receptor subunit grid is scored once,
-#' whatever the number of pairs using it, and only one batch of cell scores is in memory at a time. The gene x cell counts of a
+#' whatever the number of pairs using it, and only one batch of cell scores (about 64 MB at most, at least one grid per thread) is in
+#' memory at a time. The gene x cell counts of a
 #' symmetric sparse adjacency are read from its stored triangle, without expanding the whole matrix.
 #' @param lrs A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 #' interactions with only interactions present in the counts matrix
-#' @param adj A named adjacency matrix
-#' @param infMat A named influence matrix
+#' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
+#' @param infMat An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param threads An integer number of threads
 #' @return A list with terms, a matrix with one row per pair and columns frac, pct.min, max, balance and purity, and title, the pair names
@@ -618,7 +945,9 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
   genes <- unique(c(ligands, receptors[!is.na(receptors)]))
   check_genes(genes, rownames(infMat))
 
-  if(methods::is(adj, "dsCMatrix") & !any(genes %in% cells)){
+  if(inherits(adj, "hypercom_adjacency")){
+    gene.counts <- adj[cells, genes, drop=FALSE]
+  } else if(methods::is(adj, "dsCMatrix") & !any(genes %in% cells)){
     U <- methods::new("dgCMatrix", i=adj@i, p=adj@p, x=adj@x, Dim=adj@Dim, Dimnames=dimnames(adj))
     gene.counts <- as.matrix(Matrix::t(U[genes, cells, drop=FALSE]) + U[cells, genes, drop=FALSE])
     rm(U)
@@ -626,16 +955,23 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
     gene.counts <- as.matrix(Matrix::t(adj[genes, cells, drop=FALSE]))
   }
   gene.frac <- colSums(gene.counts) / length(cells)
-  expressed <- gene.counts > 0
+  expressed <- lapply(seq_len(ncol(gene.counts)), function(k) which(gene.counts[, k] > 0))
+  names(expressed) <- colnames(gene.counts)
   rm(gene.counts)
+
+  blocks <- NULL
+  if(inherits(infMat, "hypercom_influence")){
+    blocks <- influence_blocks(infMat, grid_cells(rownames(infMat), metadata), threads)
+  }
 
   terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
   title <- character(nrow(lrs))
-  for(rows in batch_pairs(ligands, receptors, max(256, 32 * threads))){
+  size <- max(threads, min(max(256, 32 * threads), floor(2^26 / (16 * length(cells)))))
+  for(rows in batch_pairs(ligands, receptors, size)){
     pairs <- unique(data.frame(ligand=rep(ligands[rows], ncol(receptors)), receptor=as.vector(receptors[rows, , drop=FALSE])))
     pairs <- pairs[!is.na(pairs$receptor), ]
     keys <- paste(pairs$ligand, pairs$receptor, sep="\t")
-    sr <- score_grids(infMat, metadata, pairs$ligand, pairs$receptor, threads)
+    sr <- score_grids(infMat, metadata, pairs$ligand, pairs$receptor, threads, blocks)
 
     for(i in rows){
       l <- ligands[i]
@@ -652,9 +988,9 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
       }
 
       pair.genes <- c(l, rs)
-      present <- expressed[, pair.genes[1]]
-      for(g in pair.genes[-1]){
-        present <- present | expressed[, g]
+      present <- logical(length(cells))
+      for(g in pair.genes){
+        present[expressed[[g]]] <- TRUE
       }
       pct.min <- min(gene.frac[pair.genes])
       frac <- sum(present) / length(cells)
@@ -711,12 +1047,12 @@ score_priority <- function(priority.terms, weight=1, verbose=TRUE){
 #' @param lrs A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 #' interactions with only interactions present in the counts matrix.
-#' @param adj A named adjacency matrix
-#' @param infMat A named influence matrix
+#' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
+#' @param infMat An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
-#' @param parallel A boolean of whether to run in parallel: threads on all available cores (`parallelly::availableCores()`)
+#' @param parallel A boolean of whether to run in parallel: threads on the available physical cores (`parallelly::availableCores(logical=FALSE)`)
 #' @param cl A cluster object, kept for compatibility: it is not used or stopped, only its size caps the number of threads
 #' @param outdir A string naming the output directory
 #' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
@@ -788,7 +1124,10 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' `HyperCom` Runs the HyperCom pipeline
 #'
 #' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency_matrix`, `generate_infMat`,
-#' `generate_metadata`, and `prioritize_lr`, writing every step to outdir.
+#' `generate_metadata`, and `prioritize_lr`, writing every step to outdir. By default no node x node matrix is made: the adjacency is
+#' kept as its hyperedge incidence and the influence matrix as its factors (method "hypergraph", about 1e-15 from master's "lu"),
+#' and only the within-sample cell blocks of the influence matrix are made, while pairs are scored. Small data with at least as many
+#' hyperedges (genes and interactions) as nodes get the dense influence matrix instead, which is then no bigger than the factors.
 #' @param lrdb A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
 #' @param counts A matrix with row names being genes and column names being cells
@@ -798,18 +1137,19 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata
 #' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
-#' @param parallel A boolean of whether to run in parallel: threads on all available cores
+#' @param parallel A boolean of whether to run in parallel: threads on the available physical cores
 #' @param cl A cluster object, kept for compatibility: only its size caps the number of threads
 #' @param outdir output directory of pipeline run
 #' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
 #' @param verbose A boolean of whether to print each weight and the score of each pair
-#' @param infmat.method A string naming the method of `generate_infMat`: "lu" (master's numbers bit for bit), "chol" or "hypergraph"
-#' (faster, one dense matrix instead of two, about 1e-15 apart)
+#' @param infmat.method A string naming the method of `generate_infMat`: "hypergraph" (fastest, kept as its factors: no node x node
+#' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+#' 1e-15 from "lu"
 #' @returns 0 if run successfully
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL,
-                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="lu"){
+                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="hypergraph"){
   dir.create(outdir, showWarnings=FALSE, recursive=TRUE)
   no.metadata <- setdiff(colnames(counts), rownames(metadata))
   if(length(no.metadata) > 0){
@@ -820,7 +1160,8 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   lrs <- generate_lrs_table(counts, lrdb, outfile=file.path(outdir, "1.lrs.csv"))
   hyperedges <- generate_hyperedges(counts, lrs, outfile=file.path(outdir, "2.hyperedges.csv"))
   adj <- generate_adjacency_matrix(hyperedges, outfile=file.path(outdir, "3.adj.rds"))
-  infMat <- generate_infMat(adj, outfile=file.path(outdir, "4.infMat.rds"), method=infmat.method, hyperedges=hyperedges, threads=threads)
+  rm(counts, hyperedges)
+  infMat <- generate_infMat(adj, outfile=file.path(outdir, "4.infMat.rds"), method=infmat.method, threads=get_threads(parallel, cl, threads))
   metadata <- generate_metadata(infMat, metadata, sample, group, keep, outfile=file.path(outdir, "5.metadata.csv"))
   priority <- prioritize_lr(lrs, adj, infMat, metadata, weights, significance, parallel, cl, outdir=file.path(outdir, "6.priority"),
                             threads=threads, seed=seed, verbose=verbose)
@@ -879,18 +1220,19 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata
 #' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
-#' @param parallel A boolean of whether to run in parallel: threads on all available cores
+#' @param parallel A boolean of whether to run in parallel: threads on the available physical cores
 #' @param cl A cluster object, kept for compatibility: only its size caps the number of threads
 #' @param outdir output directory of pipeline run
 #' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
 #' @param verbose A boolean of whether to print each weight and the score of each pair
-#' @param infmat.method A string naming the method of `generate_infMat`: "lu" (master's numbers bit for bit), "chol" or "hypergraph"
-#' (faster, one dense matrix instead of two, about 1e-15 apart)
+#' @param infmat.method A string naming the method of `generate_infMat`: "hypergraph" (fastest, kept as its factors: no node x node
+#' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+#' 1e-15 from "lu"
 #' @returns 0 if run successfully
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                            parallel=FALSE, cl=NULL, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="lu"){
+                            parallel=FALSE, cl=NULL, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="hypergraph"){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
 

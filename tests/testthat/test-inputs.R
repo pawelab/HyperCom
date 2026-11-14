@@ -83,3 +83,51 @@ test_that("an adjacency with one-sided dimnames gives the same priorities", {
 
   expect_identical(priority, fx$output$priority["1"])
 })
+
+test_that("adjacency and influence matrix without node x node matrices index like the matrices they stand for", {
+  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
+  skip_if_not(inherits(adj, "hypercom_adjacency"), "build with node x node matrices")
+  infMat <- generate_infMat(adj, outfile=NULL, threads=2)
+  A <- as.matrix(adj)
+  F <- as.matrix(infMat)
+  nodes <- rownames(A)
+  index <- list(list(5, nodes[c(3, 9)]), list(c(9, 1, 9), -1), list(nodes[1:4] %in% nodes[c(2, 4)], 7), list(3, 3),
+                list(factor(nodes[c(10, 2)]), c(2, 10, 2)), list(nodes[200], nodes))
+
+  expect_s3_class(infMat, "hypercom_influence")
+  expect_identical(dim(adj), dim(A))
+  expect_identical(dimnames(infMat), dimnames(fx$output$infMat))
+  for(k in seq_along(index)){
+    i <- index[[k]][[1]]
+    j <- index[[k]][[2]]
+    if(is.factor(i)){
+      i.base <- as.character(i)
+    } else {
+      i.base <- i
+    }
+    expect_identical(adj[i, j], A[i.base, j], info=k)
+    expect_identical(infMat[i, j], F[i.base, j], info=k)
+    expect_identical(infMat[i, j, drop=FALSE], F[i.base, j, drop=FALSE], info=k)
+  }
+  expect_identical(adj[, 2], A[, 2])
+  expect_identical(infMat[2, ], F[2, ])
+  expect_error(adj[5], "adj[i, j]", fixed=TRUE)
+  expect_error(infMat[5], "infMat[i, j]", fixed=TRUE)
+  expect_error(infMat["NotANode", 1], "subscript out of bounds")
+  expect_error(adj[1, 1000], "subscript out of bounds")
+  expect_error(adj[c(1, NA), 1], "NA")
+  expect_error(infMat[c(TRUE, logical(nrow(A))), 1], "too long")
+  expect_identical(as.matrix(infMat, threads=3), F)
+  expect_output(print(adj), "227 nodes")
+  expect_output(print(infMat), "227 nodes")
+})
+
+test_that("parallel uses one thread per physical core and an explicit count up to the logical cores", {
+  skip_if_not("threads" %in% names(formals(prioritize_lr)), "build without a threads argument")
+  physical <- min(parallelly::availableCores(), parallelly::availableCores(logical=FALSE), na.rm=TRUE)
+
+  expect_equal(HyperCom:::get_threads(parallel=TRUE), physical)
+  expect_equal(HyperCom:::get_threads(parallel=TRUE, cl=2), min(2, physical))
+  expect_equal(HyperCom:::get_threads(threads=1e10), as.integer(parallelly::availableCores()))
+  expect_equal(HyperCom:::get_threads(), 1)
+})

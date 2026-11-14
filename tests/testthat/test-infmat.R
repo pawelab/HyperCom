@@ -1,5 +1,6 @@
-# generate_infMat methods "chol" (v1-fast's Cholesky inverse) and "hypergraph" (Woodbury through the incidence): the same matrix as
-# "lu" (master, bit for bit) within ~1e-15 relative. Builds without the method argument (master) skip these tests.
+# generate_infMat methods "chol" (v1-fast's Cholesky inverse) and "hypergraph" (Woodbury through the incidence, kept factored): the
+# same matrix as "lu" (master, bit for bit) within ~1e-15 relative; scoring the factored matrix equals scoring its dense matrix bit for
+# bit. Builds without the method argument (master) skip these tests.
 
 skip_if_no_methods <- function(){
   testthat::skip_if_not("method" %in% names(formals(generate_infMat)), "build without generate_infMat methods")
@@ -59,7 +60,7 @@ test_that("method hypergraph counts nodes listed twice and ignores hyperedges of
 
   expect_identical(rownames(adj), c("a", "b", "c", "d", "e"))
   for(r in c(0.5, 0.3, 1)){
-    lu <- generate_infMat(adj, r=r, outfile=NULL)
+    lu <- generate_infMat(adj, r=r, outfile=NULL, method="lu")
 
     expect_lt(max_rel(generate_infMat(adj, r=r, outfile=NULL, method="hypergraph", hyperedges=hyperedges, threads=2), lu), 1e-13)
     expect_lt(max_rel(generate_infMat(adj, r=r, outfile=NULL, method="chol"), lu), 1e-13)
@@ -114,10 +115,11 @@ test_that("method hypergraph rejects hyperedges with the same nodes and row sums
                       node=c("a", "c", "b", "d", "a", "b", "c", "d", "a", "b", "c", "d", "x"))
   other <- given
   other$node[c(2, 4)] <- c("d", "c")
-  adj <- generate_adjacency_matrix(other, outfile=NULL)
+  adj <- as_master_adjacency(generate_adjacency_matrix(other, outfile=NULL))
+  adj.given <- as_master_adjacency(generate_adjacency_matrix(given, outfile=NULL))
 
-  expect_identical(rownames(adj), rownames(generate_adjacency_matrix(given, outfile=NULL)))
-  expect_identical(Matrix::rowSums(adj), Matrix::rowSums(generate_adjacency_matrix(given, outfile=NULL)))
+  expect_identical(rownames(adj), rownames(adj.given))
+  expect_identical(Matrix::rowSums(adj), Matrix::rowSums(adj.given))
   expect_error(generate_infMat(adj, outfile=NULL, method="hypergraph", hyperedges=given), "other entries")
 })
 
@@ -144,5 +146,57 @@ test_that("HyperCom with infmat.method hypergraph ranks the pairs as master", {
 
   expect_equal(status, 0)
   expect_lt(max_rel(readRDS(file.path("run", "4.infMat.rds")), fx$output$infMat), 1e-13)
-  expect_same_priority(priority, fx$output$priority[["1"]], tolerance=1e-4)
+  expect_same_priority(priority, fx$output$priority[["1"]])
+})
+
+test_that("HyperCom with infmat.method lu writes master's adjacency and influence matrix bit for bit", {
+  skip_if_no_methods()
+  dir <- withr::local_tempdir()
+  withr::local_dir(dir)
+  status <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run",
+                             threads=2, infmat.method="lu"))
+  priority <- utils::read.csv(file.path("run", "6.priority", "priority.1.csv"), check.names=FALSE)
+
+  expect_equal(status, 0)
+  expect_identical(as_master_adjacency(readRDS(file.path("run", "3.adj.rds"))), fx$output$adj)
+  expect_identical(readRDS(file.path("run", "4.infMat.rds")), fx$output$infMat)
+  expect_same_priority(priority, fx$output$priority[["1"]])
+})
+
+test_that("generate_infMat on an adjacency without node x node matrix: factored by default, lu as master, chol as from the matrix", {
+  skip_if_no_methods()
+  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
+  skip_if_not(inherits(adj, "hypercom_adjacency"), "build with node x node matrices")
+  infMat <- generate_infMat(adj, outfile=NULL, threads=2)
+
+  expect_s3_class(infMat, "hypercom_influence")
+  expect_identical(infMat, generate_infMat(fx$output$adj, outfile=NULL, method="hypergraph", hyperedges=fx$output$hyperedges, threads=3))
+  expect_lt(max_rel(infMat, fx$output$infMat), 1e-13)
+  expect_identical(generate_infMat(adj, outfile=NULL, method="lu"), fx$output$infMat)
+  expect_identical(generate_infMat(adj, r=0.3, outfile=NULL, method="lu"), fx$output$infMat.r03)
+  expect_identical(generate_infMat(adj, outfile=NULL, method="chol"), generate_infMat(fx$output$adj, outfile=NULL, method="chol"))
+})
+
+test_that("scoring a factored influence matrix equals scoring its dense matrix bit for bit", {
+  skip_if_no_methods()
+  skip_on_cran()
+  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
+  infMat <- generate_infMat(adj, outfile=NULL, method="hypergraph", hyperedges=fx$output$hyperedges, threads=2)
+  skip_if_not(inherits(infMat, "hypercom_influence"), "build without a factored influence matrix")
+  dense <- as.matrix(infMat)
+  md <- fx$output$metadata
+  md.rev <- md[rev(seq_len(nrow(md))), ]
+  lrs <- fx$output$lrs
+  pairs <- list(list(NULL, NULL), list("Thbs1", "Sdc4"), list("Tgfb1", c("Tgfbr1", "Tgfbr2")))
+
+  for(threads in c(1, 3)){
+    expect_identical(quietly(prioritize_lr(lrs, adj, infMat, md, weights=c(1, 0.5, 0), threads=threads, outdir=NULL)),
+                     quietly(prioritize_lr(lrs, fx$output$adj, dense, md, weights=c(1, 0.5, 0), threads=threads, outdir=NULL)))
+  }
+  expect_identical(quietly(prioritize_lr(lrs, adj, infMat, md, significance=TRUE, seed=1, threads=2, outdir=NULL)),
+                   quietly(prioritize_lr(lrs, fx$output$adj, dense, md, significance=TRUE, seed=1, threads=2, outdir=NULL)))
+  for(p in pairs){
+    expect_identical(score_hypercom(infMat, md, p[[1]], p[[2]]), score_hypercom(dense, md, p[[1]], p[[2]]))
+    expect_identical(score_hypercom(infMat, md.rev, p[[1]], p[[2]]), score_hypercom(dense, md.rev, p[[1]], p[[2]]))
+  }
 })

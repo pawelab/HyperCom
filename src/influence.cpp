@@ -11,14 +11,15 @@
 // F = r D^-1/2 S^-1 D^1/2. S is written into one n x n matrix, inverted in place by LAPACK dpotrf + dpotri (upper triangle),
 // mirrored and scaled: one n x n matrix, about 3/8 of the flops of lu. Not bit-identical to lu (~1e-15 relative).
 //
-// hypergraph (solve_influence_hypergraph_cpp): the adjacency of a hypergraph is A = H H' with its diagonal set to 0, H the node x
-// hyperedge incidence counts. So K = D - (1 - r) A = Delta - (1 - r) H H' with the diagonal Delta = D + (1 - r) diag(H H'), and by
-// the Woodbury identity K^-1 = Delta^-1 + (1 - r) Y C^-1 Y' with Y = Delta^-1 H and the hyperedge x hyperedge matrix
-// C = I - (1 - r) H' Y, symmetric positive definite. Since M = D^-1 K, F = r K^-1 D = r Delta^-1 D + r (1 - r) Y Z with
-// Z = C^-1 Y' D. Every entry of Y, C^-1 and Z is >= 0, so each entry of F is a sum of nonnegative terms (no cancellation).
-// Cost O(e^3 + n nnz(H)) instead of O(n^3) and one n x n matrix (the result): fast when nodes far outnumber hyperedges (cells
-// against genes and interactions). Not bit-identical to lu (~1e-15 relative); the same at any `threads` (the BLAS's own thread
-// count can change the last bits of the e x e inverse, as it does for lu and chol).
+// hypergraph (influence_factors_cpp, then influence_block_cpp / influence_blocks_cpp): the adjacency of a hypergraph is A = H H'
+// with its diagonal set to 0, H the node x hyperedge incidence counts. So K = D - (1 - r) A = Delta - (1 - r) H H' with the diagonal
+// Delta = D + (1 - r) diag(H H'), and by the Woodbury identity K^-1 = Delta^-1 + (1 - r) Y C^-1 Y' with Y = Delta^-1 H and the
+// hyperedge x hyperedge matrix C = I - (1 - r) H' Y, symmetric positive definite. Since M = D^-1 K, F = r K^-1 D =
+// r Delta^-1 D + r (1 - r) Y Z with Z = C^-1 Y' D (e x n). Every entry of Y, C^-1 and Z is >= 0, so each entry of F is a sum of
+// nonnegative terms (no cancellation). F is never stored: the factors (H, Delta, Z) take O(e n) memory, and any block F[rows, cols]
+// is made from them on demand at |rows| x |cols| x (hyperedges per row node), each entry the same at any `threads` and in any block.
+// Cost O(e^3 + n nnz(H)) for the factors instead of O(n^3). Not bit-identical to lu (~1e-15 relative); the BLAS's own thread count
+// can change the last bits of the e x e inverse, as it does for lu and chol.
 //
 // chol and hypergraph stop as solve() does when the system is computationally singular (LAPACK dpocon, reciprocal condition number
 // below the machine epsilon), e.g. for r near 0.
@@ -210,52 +211,136 @@ Rcpp::NumericMatrix solve_influence_chol_cpp(SEXP adj, Rcpp::NumericVector rs, d
   return S;
 }
 
-// [[Rcpp::export]]
-Rcpp::NumericMatrix solve_influence_hypergraph_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n,
-                                                   Rcpp::NumericVector rs, double r, int threads){
-  if(n < 1 || rs.size() != n) Rcpp::stop("solve_influence_hypergraph_cpp: one row sum per node");
+namespace {
+
+// The incidence by node (hyperedges ascending, with their counts) from the slots of a node x hyperedge dgCMatrix of positive
+// counts, and the size (summed counts) of each hyperedge
+struct Incidence {
+  size_t N, E;
+  std::vector<size_t> nptr;
+  std::vector<int> nedge;
+  std::vector<double> nh, size;
+};
+
+Incidence node_incidence(const Rcpp::IntegerVector &hp, const Rcpp::IntegerVector &hi, const Rcpp::NumericVector &hx, int n){
+  if(n < 1) Rcpp::stop("the incidence needs at least one node");
   if(hp.size() < 2 || hp[0] != 0 || hp[hp.size() - 1] != hi.size() || hi.size() != hx.size()){
-    Rcpp::stop("solve_influence_hypergraph_cpp: H must be the slots of a node x hyperedge dgCMatrix");
+    Rcpp::stop("H must be the slots of a node x hyperedge dgCMatrix");
   }
-  const size_t N = n, E = hp.size() - 1, NNZ = hi.size();
-  for(size_t e = 0; e < E; ++e){
-    if(hp[e + 1] < hp[e]) Rcpp::stop("solve_influence_hypergraph_cpp: H must be the slots of a node x hyperedge dgCMatrix");
+  Incidence h;
+  h.N = n;
+  h.E = hp.size() - 1;
+  const size_t NNZ = hi.size();
+  for(size_t e = 0; e < h.E; ++e){
+    if(hp[e + 1] < hp[e]) Rcpp::stop("H must be the slots of a node x hyperedge dgCMatrix");
   }
   for(size_t k = 0; k < NNZ; ++k){
-    if(hi[k] < 0 || hi[k] >= n || !(hx[k] > 0) || !std::isfinite(hx[k])){
-      Rcpp::stop("solve_influence_hypergraph_cpp: H must hold positive incidence counts of the nodes");
-    }
+    if(hi[k] < 0 || hi[k] >= n || !(hx[k] > 0) || !std::isfinite(hx[k])) Rcpp::stop("H must hold positive incidence counts of the nodes");
   }
-  const double c = 1 - r;
 
-  // incidence by node, hyperedges ascending; hyperedge sizes; Delta; Y = H / Delta
-  std::vector<size_t> nptr(N + 1, 0);
-  for(size_t k = 0; k < NNZ; ++k) ++nptr[hi[k] + 1];
-  for(size_t i = 0; i < N; ++i) nptr[i + 1] += nptr[i];
-  std::vector<int> nedge(NNZ);
-  std::vector<double> nh(NNZ), size(E, 0);
-  std::vector<size_t> fill(nptr.begin(), nptr.end() - 1);
-  for(size_t e = 0; e < E; ++e){
+  h.nptr.assign(h.N + 1, 0);
+  for(size_t k = 0; k < NNZ; ++k) ++h.nptr[hi[k] + 1];
+  for(size_t i = 0; i < h.N; ++i) h.nptr[i + 1] += h.nptr[i];
+  h.nedge.resize(NNZ);
+  h.nh.resize(NNZ);
+  h.size.assign(h.E, 0);
+  std::vector<size_t> fill(h.nptr.begin(), h.nptr.end() - 1);
+  for(size_t e = 0; e < h.E; ++e){
     for(int k = hp[e]; k < hp[e + 1]; ++k){
-      nedge[fill[hi[k]]] = (int) e;
-      nh[fill[hi[k]]++] = hx[k];
-      size[e] += hx[k];
+      h.nedge[fill[hi[k]]] = (int) e;
+      h.nh[fill[hi[k]]++] = hx[k];
+      h.size[e] += hx[k];
     }
   }
-  std::vector<double> delta(N), ny(NNZ);
+
+  return h;
+}
+
+// Y = H / Delta by node, in the order of the node incidence
+std::vector<double> scaled_incidence(const Incidence &h, const double *delta){
+  std::vector<double> ny(h.nedge.size());
+  for(size_t i = 0; i < h.N; ++i){
+    for(size_t k = h.nptr[i]; k < h.nptr[i + 1]; ++k) ny[k] = h.nh[k] / delta[i];
+  }
+
+  return ny;
+}
+
+// The factors' sizes and the node indices of rows or columns
+void check_factors(const Incidence &h, const Rcpp::NumericVector &rs, const Rcpp::NumericVector &delta, const Rcpp::NumericMatrix &Z){
+  if((size_t) rs.size() != h.N || (size_t) delta.size() != h.N) Rcpp::stop("the factors need one row sum and one Delta per node");
+  if((size_t) Z.nrow() != h.E || (size_t) Z.ncol() != h.N) Rcpp::stop("Z must have one row per hyperedge and one column per node");
+}
+
+void check_nodes(const Rcpp::IntegerVector &idx, size_t N){
+  for(R_xlen_t k = 0; k < idx.size(); ++k){
+    if(idx[k] < 0 || (size_t) idx[k] >= N) Rcpp::stop("node index out of range");
+  }
+}
+
+// F[rows, cols] into out (column-major, leading dimension ld) from the factors: r (1 - r) times the sum over the row node's
+// hyperedges, ascending, of Y * Z, plus r rs / Delta on the diagonal. Columns go in blocks of B, with Z of the block laid out
+// hyperedge-major; each entry is made by one thread in a fixed order, so F is the same at any thread count.
+void fill_block(const Incidence &h, const std::vector<double> &ny, const double *Z, const double *rs, const double *delta, double r,
+                const int *rows, size_t nr, const int *cols, size_t nc, double *out, size_t ld, int threads){
+  constexpr size_t B = 32;
+  const size_t E = h.E, nblocks = (nc + B - 1) / B;
+  if(nr == 0 || nblocks == 0) return;
+  const int nt = std::max(1, std::min<int>(threads, (int) nblocks));
+  std::vector<std::vector<double>> zt(nt, std::vector<double>(E * B));
+  const double c = 1 - r, rc = r * c;
+  run_tasks(nt, nblocks, [&](int w, size_t b){
+    double *z = zt[w].data();
+    const size_t c0 = b * B, nb = std::min(B, nc - c0);
+    std::fill(z, z + E * B, 0.0);
+    for(size_t jj = 0; jj < nb; ++jj){
+      const double *zc = Z + (size_t) cols[c0 + jj] * E;
+      for(size_t e = 0; e < E; ++e) z[e * B + jj] = zc[e];
+    }
+    for(size_t ii = 0; ii < nr; ++ii){
+      const size_t i = rows[ii];
+      double acc[B] = {0};
+      for(size_t k = h.nptr[i]; k < h.nptr[i + 1]; ++k){
+        const double y = ny[k];
+        const double *ze = z + (size_t) h.nedge[k] * B;
+        for(size_t jj = 0; jj < B; ++jj) acc[jj] += y * ze[jj];
+      }
+      for(size_t jj = 0; jj < nb; ++jj){
+        const size_t j = cols[c0 + jj];
+        double f = rc * acc[jj];
+        if(i == j) f += r * rs[j] / delta[j];
+        out[ii + (c0 + jj) * ld] = f;
+      }
+    }
+  });
+}
+
+}
+
+// [[Rcpp::export]]
+Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs,
+                                 double r, int threads){
+  const Incidence h = node_incidence(hp, hi, hx, n);
+  if(rs.size() != n) Rcpp::stop("influence_factors_cpp: one row sum per node");
+  const size_t N = h.N, E = h.E;
+  const double c = 1 - r;
+  const double *rsp = REAL(rs);
+
+  // Delta = D + (1 - r) diag(H H') with D checked against the hyperedges; Y = H / Delta
+  std::vector<double> delta(N);
   for(size_t i = 0; i < N; ++i){
     double d = 0, sq = 0;
-    for(size_t k = nptr[i]; k < nptr[i + 1]; ++k){
-      d += nh[k] * (size[nedge[k]] - nh[k]);
-      sq += nh[k] * nh[k];
+    for(size_t k = h.nptr[i]; k < h.nptr[i + 1]; ++k){
+      d += h.nh[k] * (h.size[h.nedge[k]] - h.nh[k]);
+      sq += h.nh[k] * h.nh[k];
     }
-    if(!(rs[i] > 0) || !std::isfinite(rs[i])) Rcpp::stop("method \"hypergraph\" needs a positive row sum for every node of adj");
-    if(std::fabs(d - rs[i]) > 1e-12 * rs[i]){
-      Rcpp::stop("hyperedges do not match adj: node %d has row sum %g in adj and %g from the hyperedges", (int) i + 1, rs[i], d);
+    if(!(rsp[i] > 0) || !std::isfinite(rsp[i])) Rcpp::stop("method \"hypergraph\" needs a positive row sum for every node of adj");
+    if(std::fabs(d - rsp[i]) > 1e-12 * rsp[i]){
+      Rcpp::stop("hyperedges do not match adj: node %d has row sum %g in adj and %g from the hyperedges", (int) i + 1, rsp[i], d);
     }
-    delta[i] = rs[i] + c * sq;
-    for(size_t k = nptr[i]; k < nptr[i + 1]; ++k) ny[k] = nh[k] / delta[i];
+    delta[i] = rsp[i] + c * sq;
   }
+  const std::vector<double> ny = scaled_incidence(h, delta.data());
 
   // C = I - (1 - r) H' Y, lower triangle by column, then C^-1 in place (dpotrf + dpotri) and mirrored
   std::vector<double> C;
@@ -270,8 +355,8 @@ Rcpp::NumericMatrix solve_influence_hypergraph_cpp(Rcpp::IntegerVector hp, Rcpp:
     for(int k = hp[f]; k < hp[f + 1]; ++k){
       const size_t i = hi[k];
       const double yf = hx[k] / delta[i];
-      const int *first = nedge.data() + nptr[i], *last = nedge.data() + nptr[i + 1];
-      for(const int *q = std::lower_bound(first, last, (int) f); q < last; ++q) col[*q] += nh[q - nedge.data()] * yf;
+      const int *first = h.nedge.data() + h.nptr[i], *last = h.nedge.data() + h.nptr[i + 1];
+      for(const int *q = std::lower_bound(first, last, (int) f); q < last; ++q) col[*q] += h.nh[q - h.nedge.data()] * yf;
     }
     for(size_t e = f; e < E; ++e) col[e] = (e == f ? 1.0 : 0.0) - c * col[e];
   });
@@ -291,49 +376,69 @@ Rcpp::NumericMatrix solve_influence_hypergraph_cpp(Rcpp::IntegerVector hp, Rcpp:
     for(size_t e = f + 1; e < E; ++e) cm[f + e * E] = cm[e + f * E];
   }
 
-  // F by blocks of B columns: Z = C^-1 Y' D for the block (hyperedge-major, B values per hyperedge), then every row of the block
-  // as Y Z, the sum over the node's hyperedges in ascending order; the diagonal adds r D / Delta
-  constexpr size_t B = 32;
-  const size_t nblocks = (N + B - 1) / B;
-  const int nt = std::max(1, std::min<int>(threads, (int) nblocks));
-  std::vector<std::vector<double>> zt, zc;
-  try{
-    zt.assign(nt, std::vector<double>(E * B));
-    zc.assign(nt, std::vector<double>(E));
-  } catch(std::bad_alloc &){
-    Rcpp::stop("method \"hypergraph\": not enough memory for the thread buffers");
-  }
-  Rcpp::NumericMatrix F(Rcpp::no_init(n, n));
-  double *fm = REAL(F);
-  const double rc = r * c;
-  run_tasks(nt, nblocks, [&](int w, size_t b){
-    double *z = zt[w].data(), *zcol = zc[w].data();
-    const size_t j0 = b * B, nb = std::min(B, N - j0);
-    std::fill(z, z + E * B, 0.0);
-    for(size_t jj = 0; jj < nb; ++jj){
-      const size_t j = j0 + jj;
-      std::fill(zcol, zcol + E, 0.0);
-      for(size_t k = nptr[j]; k < nptr[j + 1]; ++k){
-        const double wj = ny[k] * rs[j];
-        const double *cf = cm + (size_t) nedge[k] * E;
-        for(size_t e = 0; e < E; ++e) zcol[e] += cf[e] * wj;
+  // Z = C^-1 Y' D, column j summed over the node's hyperedges in ascending order
+  Rcpp::NumericMatrix Z(Rf_allocMatrix(REALSXP, (int) E, n));
+  double *zm = REAL(Z);
+  std::fill(zm, zm + E * N, 0.0);
+  constexpr size_t B = 64;
+  run_tasks(threads, (N + B - 1) / B, [&](int, size_t b){
+    for(size_t j = b * B; j < std::min(N, b * B + B); ++j){
+      double *zc = zm + j * E;
+      for(size_t k = h.nptr[j]; k < h.nptr[j + 1]; ++k){
+        const double wj = ny[k] * rsp[j];
+        const double *cf = cm + (size_t) h.nedge[k] * E;
+        for(size_t e = 0; e < E; ++e) zc[e] += cf[e] * wj;
       }
-      for(size_t e = 0; e < E; ++e) z[e * B + jj] = zcol[e];
-    }
-    for(size_t i = 0; i < N; ++i){
-      double acc[B] = {0};
-      for(size_t k = nptr[i]; k < nptr[i + 1]; ++k){
-        const double y = ny[k];
-        const double *ze = z + (size_t) nedge[k] * B;
-        for(size_t jj = 0; jj < B; ++jj) acc[jj] += y * ze[jj];
-      }
-      for(size_t jj = 0; jj < nb; ++jj) fm[i + (j0 + jj) * N] = rc * acc[jj];
-    }
-    for(size_t jj = 0; jj < nb; ++jj){
-      const size_t j = j0 + jj;
-      fm[j + j * N] += r * rs[j] / delta[j];
     }
   });
 
+  return Rcpp::List::create(Rcpp::Named("Z") = Z, Rcpp::Named("delta") = Rcpp::NumericVector(delta.begin(), delta.end()));
+}
+
+// [[Rcpp::export]]
+Rcpp::NumericMatrix influence_block_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs,
+                                        Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector rows,
+                                        Rcpp::IntegerVector cols, int threads){
+  const Incidence h = node_incidence(hp, hi, hx, n);
+  check_factors(h, rs, delta, Z);
+  check_nodes(rows, h.N);
+  check_nodes(cols, h.N);
+  const std::vector<double> ny = scaled_incidence(h, REAL(delta));
+  const size_t nr = rows.size(), nc = cols.size();
+
+  Rcpp::NumericMatrix F(Rf_allocMatrix(REALSXP, (int) nr, (int) nc));
+  fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, INTEGER(rows), nr, INTEGER(cols), nc, REAL(F), nr, threads);
+
   return F;
+}
+
+// [[Rcpp::export]]
+Rcpp::NumericVector influence_blocks_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs,
+                                         Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector cell,
+                                         Rcpp::IntegerVector sample, int threads){
+  const Incidence h = node_incidence(hp, hi, hx, n);
+  check_factors(h, rs, delta, Z);
+  check_nodes(cell, h.N);
+  if(sample.size() != cell.size()) Rcpp::stop("influence_blocks_cpp: one sample per cell");
+  int n_samples = 0;
+  for(R_xlen_t k = 0; k < sample.size(); ++k){
+    if(sample[k] < 1 || sample[k] == NA_INTEGER) Rcpp::stop("influence_blocks_cpp: sample ids must be positive integers");
+    n_samples = std::max(n_samples, (int) sample[k]);
+  }
+  const std::vector<double> ny = scaled_incidence(h, REAL(delta));
+
+  // within-sample blocks as score_blocks_cpp reads them: samples ascending, cells of a sample in the given order, column-major
+  std::vector<std::vector<int>> members(n_samples);
+  for(R_xlen_t k = 0; k < cell.size(); ++k) members[sample[k] - 1].push_back(cell[k]);
+  size_t total = 0;
+  for(const auto &m : members) total += m.size() * m.size();
+  Rcpp::NumericVector out(Rcpp::no_init((R_xlen_t) total));
+  size_t off = 0;
+  for(const auto &m : members){
+    if(m.empty()) continue;
+    fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, m.data(), m.size(), m.data(), m.size(), REAL(out) + off, m.size(), threads);
+    off += m.size() * m.size();
+  }
+
+  return out;
 }
