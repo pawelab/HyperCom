@@ -26,6 +26,11 @@ above its inputs instead of 1.37 GB), and every step is as fast or faster; outpu
   bucket is one exact run of memory instead of linked slabs, and the influence matrix is copied only for samples whose cells are not
   consecutive, while those copies fit the cache (else read in place). Kernel memory on 3000 cells at 16 threads: 46 MB instead of
   673 MB; two samples of 5000 cells: 0.49 GB instead of 2.35 GB. Faster at 8 or more threads.
+* Grids too big for the cache, on several threads, keep 8 bytes per entry instead of 10 (each value bucket keeps at most 48 key
+  bits, in 6 bytes) and their value buckets hold about equal numbers of entries (bounds from a histogram of a sample of the grid)
+  instead of equal value ranges, so every bucket is sorted within the core's cache. On 20,000 synthetic cells (16 threads) the whole
+  pipeline takes 4-7% less time and peaks 9% lower (3.29 instead of 3.63 GB); the gain grows with the grids. Ranks, and so every
+  score, are the same bit for bit; smaller grids and one thread are scored as before.
 * `generate_infMat` writes the system matrix straight from the sparse adjacency and has LAPACK's `dgesv` (the routine `solve()`
   calls) factor it in place into the identity that becomes the result: at most 2 dense node x node matrices instead of 5, and faster.
   The package now links R's LAPACK (on Windows through an import library for `Rlapack.dll`).
