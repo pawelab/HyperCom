@@ -128,7 +128,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <p>HyperCom requires three inputs. Most failed runs come from one of these points, so check them first:</p>
 <ol type="1">
 <li><p><strong>Counts:</strong> a gene x cell matrix with genes as row names and cells as column names, sparse or dense. Raw or normalised counts give the same results, since HyperCom only uses whether each gene is above 0 in each cell; never use scaled data (negative values stop the run). Cell names must be unique across samples: prefix the barcodes with their sample when merging samples.</p></li>
-<li><p><strong>Cell metadata:</strong> a dataframe with one row per cell, its row names being the cell names of the counts, with a sample column and optionally a group column. The sample is the library or replicate: cells are only compared with cells of their own sample, so every sample needs at least 2 cells that express a ligand or receptor gene. The group is the condition, for priorities specific to a group.</p></li>
+<li><p><strong>Cell metadata:</strong> a dataframe with one row per cell, its row names being the cell names of the counts, with a sample column and optionally a group column. The sample is the library or replicate: cells are only compared with cells of their own sample, so every sample needs at least 2 cells that express a ligand or receptor gene. The group is the condition, for priorities specific to a group. Cells of the counts without a row in the metadata are left out, with a warning.</p></li>
 <li><p><strong>Ligand-receptor (LR) interactions</strong> whose gene symbols match the species of the counts. HyperCom contains 2 built in LR databases formatted properly:</p>
 <ul>
 <li><p>CellChat human <code>cellchat.hs.lrdb</code> (gene symbols such as <code>TGFB1</code>)</p></li>
@@ -335,7 +335,7 @@ node    AAAGATGCACAGATTC-3 AAAGATGCAGCTCGCA-3 AAAGATGCAGGTCTCG-3
 </section>
 <section id="calculating-network-connectivity" class="level3">
 <h3 class="anchored" data-anchor-id="calculating-network-connectivity">Calculating Network Connectivity</h3>
-<p>In order to calculate the network connectivity of the hypergraph we perform a random walk with restart on the adjacency matrix to produce an influence matrix: entry (i, j) is how much of what starts at node i reaches node j. The restart probability <code>r</code> (default 0.5) sets how far the walk spreads; smaller values reach further through the hypergraph. Like the adjacency matrix, the influence matrix works like a matrix without being stored in full.</p>
+<p>In order to calculate the network connectivity of the hypergraph we perform a random walk with restart on the adjacency matrix to produce an influence matrix: entry (i, j) is the share of a walk started at node i that ends at node j, so each row sums to 1. At every step the walk returns to its start with the restart probability <code>r</code>, so about <code>r</code> of each node’s influence stays on the node itself and the rest spreads over the nodes it shares hyperedges with. <code>generate_infMat</code> takes <code>r</code> (default 0.5); <code>HyperCom</code> always uses 0.5. On this example the ranking of LR pairs hardly depends on it: <code>r</code> = 0.1 and 0.8 give the same top 20 pairs as 0.5. Like the adjacency matrix, the influence matrix works like a matrix without being stored in full.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>infMat <span class="ot">&lt;-</span> <span class="fu">generate_infMat</span>(<span class="at">adj=</span>adj, <span class="at">r=</span><span class="fl">0.5</span>, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
 <span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(infMat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
@@ -390,7 +390,7 @@ Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 6         CCL4_CCR5   Ccl4  Ccr5  &lt;NA&gt; &lt;NA&gt; 0.2645498</code></pre>
 </div>
 </div>
-<p>The result has one table per weight, with the columns of the LR table and the priority. With <code>significance=TRUE</code>, as in the <code>HyperCom</code> call above, it also has p and p.adj: p is the fraction of 1000 background pairs of random genes whose priority is at least as high, so it moves in steps of 0.001 and 0 means none was as high; p.adj is its Benjamini-Hochberg adjustment. This takes about four times as long.</p>
+<p>The result has one table per weight, with the columns of the LR table and the priority. With <code>significance=TRUE</code>, as in the <code>HyperCom</code> call above, it also has p and p.adj: p is the fraction of 1000 background pairs of random genes whose priority is at least as high, so it moves in steps of 0.001 and 0 means none was as high (background pairs that get no priority are left out, with a warning); p.adj is its Benjamini-Hochberg adjustment. This takes about four times as long.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(res<span class="sc">$</span>priority[[<span class="st">"1"</span>]][, <span class="fu">c</span>(<span class="st">"interaction"</span>, <span class="st">"priority"</span>, <span class="st">"p"</span>, <span class="st">"p.adj"</span>)])</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
@@ -406,7 +406,7 @@ Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 </section>
 <section id="scoring-cells" class="level3">
 <h3 class="anchored" data-anchor-id="scoring-cells">Scoring Cells</h3>
-<p>We see that Thbs1-Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair. Each pair of cells i and j of a sample is scored by how strongly cell i reaches the ligand and the receptor reaches cell j, relative to how strongly i reaches j; these scores are percent-ranked together. A cell’s <code>sender</code> score is its average rank as cell i and its <code>receiver</code> score its average rank as cell j (between 0 and 1); <code>dif</code> is receiver - sender, <code>avg</code> their mean and <code>max</code> the larger. The HyperCom score <code>hypercom</code> is the sign of <code>dif</code> times its rank among the cells times <code>avg</code>: negative for senders, positive for receivers. Cells with no path to the pair’s genes get NaN.</p>
+<p>We see that Thbs1-Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair. Each pair of cells i and j of a sample is scored by how strongly cell i reaches the ligand and the receptor reaches cell j, relative to how strongly i reaches j; these scores are percent-ranked together. A cell’s <code>sender</code> score is its average rank as cell i and its <code>receiver</code> score its average rank as cell j (between 0 and 1); <code>dif</code> is receiver - sender, <code>avg</code> their mean and <code>max</code> the larger. The HyperCom score <code>hypercom</code> is the sign of <code>dif</code> times the percent rank of its size among the cells times <code>avg</code>: negative for senders, positive for receivers. Cells with no path to the pair’s genes get NaN.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">score_hypercom</span>(<span class="at">infMat=</span>infMat, <span class="at">metadata=</span>node.meta, <span class="at">ligand=</span><span class="st">"Thbs1"</span>,</span>
 <span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a>                             <span class="at">receptors=</span><span class="st">"Sdc4"</span>)</span>
@@ -476,21 +476,12 @@ Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 6 GGATTACCACCTTGTC-3 0.4488283 0.8776201 0.6406520</code></pre>
 </div>
 </div>
-<p>Without a ligand and receptors, <code>score_hypercom</code> gives the network score: how much each cell sends to and receives from the other cells of its sample through the whole hypergraph, whatever the ligand.</p>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb50"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a>network <span class="ot">&lt;-</span> <span class="fu">score_hypercom</span>(<span class="at">infMat=</span>infMat, <span class="at">metadata=</span>node.meta)</span>
-<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(network<span class="sc">$</span>hypercom)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>    Min.  1st Qu.   Median     Mean  3rd Qu.     Max. 
--0.33824 -0.20942 -0.02292  0.05419  0.28993  0.73214 </code></pre>
-</div>
-</div>
 </section>
 </section>
 <section id="citation" class="level2">
 <h2 class="anchored" data-anchor-id="citation">Citation</h2>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb52"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">citation</span>(<span class="st">"HyperCom"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb50"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">citation</span>(<span class="st">"HyperCom"</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>To cite package 'HyperCom' in publications use:
 
@@ -514,7 +505,7 @@ A BibTeX entry for LaTeX users is
 </div>
 <div style="page-break-after: always;"></div>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb54"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb52"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sessionInfo</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>R version 4.4.2 (2024-10-31 ucrt)
 Platform: x86_64-w64-mingw32/x64
