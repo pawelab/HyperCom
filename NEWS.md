@@ -105,7 +105,8 @@ fix. Results of valid inputs are unchanged.
 
 * Dropped dependencies: collapse, doParallel, foreach, mltools, Rfast; SeuratObject moved to Suggests (only `HyperCom_seurat` needs
   it). Minimum versions: dplyr 1.1.0, parallelly 1.23.0 (older versions failed with cryptic errors).
-* README: installation per operating system. DESCRIPTION describes the method and has URL and BugReports; `citation("HyperCom")`
+* README: prerequisites and installation per operating system, the common installation errors, memory and run time, and how
+  to install the R-only version (0.0.0.9000) from the `base-R` branch. DESCRIPTION describes the method and has URL and BugReports; `citation("HyperCom")`
   gives the bioRxiv preprint. The bundled datasets are documented.
 * Every help page has examples on the bundled data (each runs in under a second). The overview vignette's HTML is
   rendered from the current source; its outdated PDF is gone.
