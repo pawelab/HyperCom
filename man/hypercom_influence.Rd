@@ -34,7 +34,7 @@
 dim: the number of nodes twice; dimnames: the node names twice; \code{[} and as.matrix: a dense matrix; print: x, invisibly
 }
 \description{
-\code{hypercom_influence} objects are made by generate_infMat with method "hypergraph"
+\code{hypercom_influence} objects are made by generate_infMat with method "woodbury" (the hypergraph method)
 }
 \details{
 A hypercom_influence keeps the factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z of a hypergraph (H, the node x

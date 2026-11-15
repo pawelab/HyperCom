@@ -8,7 +8,7 @@ generate_infMat(
   adj,
   r = 0.5,
   outfile = "4.infMat.rds",
-  method = NULL,
+  method = c("woodbury", "lu", "chol"),
   hyperedges = NULL,
   threads = NULL
 )
@@ -20,30 +20,33 @@ generate_infMat(
 
 \item{outfile}{A string naming the output file}
 
-\item{method}{A string naming the method: "hypergraph", "lu" or "chol"; NULL for "hypergraph" with an adjacency from
-generate_adjacency_matrix and "lu" with an adjacency matrix}
+\item{method}{A string naming the method: "woodbury" (the default; "lu" for an adjacency matrix given without hyperedges), "lu"
+or "chol"}
 
-\item{hyperedges}{A dataframe of the hyperedges an adjacency matrix was made from, needed by method "hypergraph" with an adjacency
+\item{hyperedges}{A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
 matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own}
 
-\item{threads}{An integer number of threads for method "hypergraph", NULL for all available cores ("lu" and "chol" run on the
+\item{threads}{An integer number of threads for method "woodbury", NULL for all available cores ("lu" and "chol" run on the
 threads of the BLAS)}
 }
 \value{
-An influence matrix: a hypercom_influence (method "hypergraph") or a dense matrix
+An influence matrix: a hypercom_influence (method "woodbury") or a dense matrix
 }
 \description{
 \code{generate_infMat} returns the influence matrix of the hypergraph
 }
 \details{
 This function takes an adjacency matrix and returns its influence matrix using heat diffusion, r (I - (1 - r) adj / D)^-1 with D
-the row sums of adj. Three methods give the same matrix. "hypergraph", the default for an adjacency from
-\code{generate_adjacency_matrix}, inverts through the hyperedges (Woodbury identity) and returns the matrix factored, never stored:
-memory grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. The result
-works like a matrix for dim, dimnames and rownames, \code{infMat[i, j]} makes those entries and as.matrix the whole matrix. With at
-least as many hyperedges as nodes it gains nothing and returns "chol"'s dense matrix. "lu", the default for an adjacency matrix,
-solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense node x node matrices at once. "chol" is
-v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "hypergraph" differ from "lu"
+the row sums of adj. Three methods give the same matrix. "woodbury", the default, is the hypergraph method: the adjacency of a
+hypergraph is its node x hyperedge incidence times its transpose (diagonal set to zero), so the Woodbury identity inverts it
+through a hyperedge x hyperedge matrix instead of a node x node one, and the matrix is returned factored, never stored: memory
+grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. It needs the
+hyperedges: an adjacency from \code{generate_adjacency_matrix} holds them, an adjacency matrix needs \code{hyperedges} (without them, and
+without a method given, an adjacency matrix gets "lu"). The result works like a matrix for dim, dimnames and rownames,
+\code{infMat[i, j]} makes those entries and as.matrix the whole matrix. With at least as many hyperedges as nodes it gains nothing and
+returns "chol"'s dense matrix. "lu" solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense
+node x node matrices at once. "chol" is
+v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "woodbury" differ from "lu"
 by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
 singular (r near 0).
 }

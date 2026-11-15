@@ -19,7 +19,7 @@ HyperCom(
   threads = NULL,
   seed = NULL,
   verbose = TRUE,
-  infmat.method = "hypergraph"
+  infmat.method = "woodbury"
 )
 }
 \arguments{
@@ -52,8 +52,8 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{verbose}{A boolean of whether to print each weight and the score of each pair}
 
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "hypergraph" (fastest, kept as its factors: no node x node
-matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
+matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
 1e-15 from "lu"}
 }
 \value{
@@ -65,7 +65,8 @@ matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two de
 \details{
 This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat},
 \code{generate_metadata}, and \code{prioritize_lr}, writing every step to outdir. By default no node x node matrix is made: the adjacency is
-kept as its hyperedge incidence and the influence matrix as its factors (method "hypergraph", about 1e-15 from master's "lu"),
-and only the within-sample cell blocks of the influence matrix are made, while pairs are scored. Small data with at least as many
+kept as its hyperedge incidence and the influence matrix as its factors (method "woodbury", which inverts through the
+hypergraph's hyperedges; about 1e-15 from master's "lu"), and only the within-sample cell blocks of the influence matrix are made,
+while pairs are scored. Small data with at least as many
 hyperedges (genes and interactions) as nodes get the dense influence matrix instead, which is then no bigger than the factors.
 }

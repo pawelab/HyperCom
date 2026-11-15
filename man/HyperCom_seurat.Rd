@@ -20,7 +20,7 @@ HyperCom_seurat(
   threads = NULL,
   seed = NULL,
   verbose = TRUE,
-  infmat.method = "hypergraph"
+  infmat.method = "woodbury"
 )
 }
 \arguments{
@@ -55,8 +55,8 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{verbose}{A boolean of whether to print each weight and the score of each pair}
 
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "hypergraph" (fastest, kept as its factors: no node x node
-matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
+matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
 1e-15 from "lu"}
 }
 \value{

@@ -329,43 +329,42 @@ incidence_matrix <- function(hyperedges, adj){
 #' `generate_infMat` returns the influence matrix of the hypergraph
 #'
 #' This function takes an adjacency matrix and returns its influence matrix using heat diffusion, r (I - (1 - r) adj / D)^-1 with D
-#' the row sums of adj. Three methods give the same matrix. "hypergraph", the default for an adjacency from
-#' `generate_adjacency_matrix`, inverts through the hyperedges (Woodbury identity) and returns the matrix factored, never stored:
-#' memory grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. The result
-#' works like a matrix for dim, dimnames and rownames, `infMat[i, j]` makes those entries and as.matrix the whole matrix. With at
-#' least as many hyperedges as nodes it gains nothing and returns "chol"'s dense matrix. "lu", the default for an adjacency matrix,
-#' solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense node x node matrices at once. "chol" is
-#' v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "hypergraph" differ from "lu"
+#' the row sums of adj. Three methods give the same matrix. "woodbury", the default, is the hypergraph method: the adjacency of a
+#' hypergraph is its node x hyperedge incidence times its transpose (diagonal set to zero), so the Woodbury identity inverts it
+#' through a hyperedge x hyperedge matrix instead of a node x node one, and the matrix is returned factored, never stored: memory
+#' grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. It needs the
+#' hyperedges: an adjacency from `generate_adjacency_matrix` holds them, an adjacency matrix needs `hyperedges` (without them, and
+#' without a method given, an adjacency matrix gets "lu"). The result works like a matrix for dim, dimnames and rownames,
+#' `infMat[i, j]` makes those entries and as.matrix the whole matrix. With at least as many hyperedges as nodes it gains nothing and
+#' returns "chol"'s dense matrix. "lu" solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense
+#' node x node matrices at once. "chol" is
+#' v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "woodbury" differ from "lu"
 #' by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
 #' singular (r near 0).
 #' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
 #' @param r A double between 0 and 1 representing the restart probability
 #' @param outfile A string naming the output file
-#' @param method A string naming the method: "hypergraph", "lu" or "chol"; NULL for "hypergraph" with an adjacency from
-#' generate_adjacency_matrix and "lu" with an adjacency matrix
-#' @param hyperedges A dataframe of the hyperedges an adjacency matrix was made from, needed by method "hypergraph" with an adjacency
+#' @param method A string naming the method: "woodbury" (the default; "lu" for an adjacency matrix given without hyperedges), "lu"
+#' or "chol"
+#' @param hyperedges A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
 #' matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own
-#' @param threads An integer number of threads for method "hypergraph", NULL for all available cores ("lu" and "chol" run on the
+#' @param threads An integer number of threads for method "woodbury", NULL for all available cores ("lu" and "chol" run on the
 #' threads of the BLAS)
-#' @returns An influence matrix: a hypercom_influence (method "hypergraph") or a dense matrix
+#' @returns An influence matrix: a hypercom_influence (method "woodbury") or a dense matrix
 #' @export
-generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=NULL, hyperedges=NULL, threads=NULL){
+generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbury", "lu", "chol"), hyperedges=NULL, threads=NULL){
   graph <- inherits(adj, "hypercom_adjacency")
-  if(is.null(method)){
-    if(graph){
-      method <- "hypergraph"
-    } else {
-      method <- "lu"
-    }
+  if(missing(method) & !graph & is.null(hyperedges)){
+    method <- "lu"
   }
-  method <- match.arg(method, c("hypergraph", "lu", "chol"))
+  method <- match.arg(method)
   if(is.data.frame(adj)){
     adj <- as.matrix(adj)
   }
   if(nrow(adj) == 0){
     stop("the adjacency matrix has no nodes: no ligand or receptor gene is expressed in any cell")
   }
-  if(graph & method != "hypergraph"){
+  if(graph & method != "woodbury"){
     adj <- adjacency_sparse(adj)
     graph <- FALSE
   }
@@ -389,8 +388,8 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=NULL, hyp
       stop("method \"", method, "\" needs every node of adj to have neighbours (positive row sums)")
     }
   }
-  if(method == "hypergraph" & !graph & is.null(hyperedges)){
-    stop("method \"hypergraph\" needs the hyperedges adj was made from")
+  if(method == "woodbury" & !graph & is.null(hyperedges)){
+    stop("method \"woodbury\" needs the hyperedges adj was made from")
   }
 
   if(method == "lu"){
@@ -486,7 +485,7 @@ influence_blocks <- function(infMat, g, threads=1){
 
 #' Influence matrix of a hypergraph, stored as its factors
 #'
-#' `hypercom_influence` objects are made by generate_infMat with method "hypergraph"
+#' `hypercom_influence` objects are made by generate_infMat with method "woodbury" (the hypergraph method)
 #'
 #' A hypercom_influence keeps the factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z of a hypergraph (H, the node x
 #' hyperedge incidence; rs, the row sums D of the adjacency; delta, Delta = D + (1 - r) diag(H H'); Z, hyperedge x node; Y = H /
@@ -1125,8 +1124,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #'
 #' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency_matrix`, `generate_infMat`,
 #' `generate_metadata`, and `prioritize_lr`, writing every step to outdir. By default no node x node matrix is made: the adjacency is
-#' kept as its hyperedge incidence and the influence matrix as its factors (method "hypergraph", about 1e-15 from master's "lu"),
-#' and only the within-sample cell blocks of the influence matrix are made, while pairs are scored. Small data with at least as many
+#' kept as its hyperedge incidence and the influence matrix as its factors (method "woodbury", which inverts through the
+#' hypergraph's hyperedges; about 1e-15 from master's "lu"), and only the within-sample cell blocks of the influence matrix are made,
+#' while pairs are scored. Small data with at least as many
 #' hyperedges (genes and interactions) as nodes get the dense influence matrix instead, which is then no bigger than the factors.
 #' @param lrdb A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
@@ -1143,13 +1143,13 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
 #' @param verbose A boolean of whether to print each weight and the score of each pair
-#' @param infmat.method A string naming the method of `generate_infMat`: "hypergraph" (fastest, kept as its factors: no node x node
-#' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+#' @param infmat.method A string naming the method of `generate_infMat`: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
+#' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
 #' 1e-15 from "lu"
 #' @returns 0 if run successfully
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL,
-                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="hypergraph"){
+                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
   dir.create(outdir, showWarnings=FALSE, recursive=TRUE)
   no.metadata <- setdiff(colnames(counts), rownames(metadata))
   if(length(no.metadata) > 0){
@@ -1226,13 +1226,13 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
 #' @param verbose A boolean of whether to print each weight and the score of each pair
-#' @param infmat.method A string naming the method of `generate_infMat`: "hypergraph" (fastest, kept as its factors: no node x node
-#' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "hypergraph" are about
+#' @param infmat.method A string naming the method of `generate_infMat`: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
+#' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
 #' 1e-15 from "lu"
 #' @returns 0 if run successfully
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                            parallel=FALSE, cl=NULL, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="hypergraph"){
+                            parallel=FALSE, cl=NULL, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
 

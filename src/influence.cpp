@@ -11,7 +11,7 @@
 // F = r D^-1/2 S^-1 D^1/2. S is written into one n x n matrix, inverted in place by LAPACK dpotrf + dpotri (upper triangle),
 // mirrored and scaled: one n x n matrix, about 3/8 of the flops of lu. Not bit-identical to lu (~1e-15 relative).
 //
-// hypergraph (influence_factors_cpp, then influence_block_cpp / influence_blocks_cpp): the adjacency of a hypergraph is A = H H'
+// woodbury (influence_factors_cpp, then influence_block_cpp / influence_blocks_cpp): the adjacency of a hypergraph is A = H H'
 // with its diagonal set to 0, H the node x hyperedge incidence counts. So K = D - (1 - r) A = Delta - (1 - r) H H' with the diagonal
 // Delta = D + (1 - r) diag(H H'), and by the Woodbury identity K^-1 = Delta^-1 + (1 - r) Y C^-1 Y' with Y = Delta^-1 H and the
 // hyperedge x hyperedge matrix C = I - (1 - r) H' Y, symmetric positive definite. Since M = D^-1 K, F = r K^-1 D =
@@ -21,7 +21,7 @@
 // Cost O(e^3 + n nnz(H)) for the factors instead of O(n^3). Not bit-identical to lu (~1e-15 relative); the BLAS's own thread count
 // can change the last bits of the e x e inverse, as it does for lu and chol.
 //
-// chol and hypergraph stop as solve() does when the system is computationally singular (LAPACK dpocon, reciprocal condition number
+// chol and woodbury stop as solve() does when the system is computationally singular (LAPACK dpocon, reciprocal condition number
 // below the machine epsilon), e.g. for r near 0.
 
 #define USE_FC_LEN_T
@@ -334,7 +334,7 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
       d += h.nh[k] * (h.size[h.nedge[k]] - h.nh[k]);
       sq += h.nh[k] * h.nh[k];
     }
-    if(!(rsp[i] > 0) || !std::isfinite(rsp[i])) Rcpp::stop("method \"hypergraph\" needs a positive row sum for every node of adj");
+    if(!(rsp[i] > 0) || !std::isfinite(rsp[i])) Rcpp::stop("method \"woodbury\" needs a positive row sum for every node of adj");
     if(std::fabs(d - rsp[i]) > 1e-12 * rsp[i]){
       Rcpp::stop("hyperedges do not match adj: node %d has row sum %g in adj and %g from the hyperedges", (int) i + 1, rsp[i], d);
     }
@@ -347,7 +347,7 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
   try{
     C.assign(E * E, 0.0);
   } catch(std::bad_alloc &){
-    Rcpp::stop("method \"hypergraph\": not enough memory for the %d x %d hyperedge matrix", (int) E, (int) E);
+    Rcpp::stop("method \"woodbury\": not enough memory for the %d x %d hyperedge matrix", (int) E, (int) E);
   }
   double *cm = C.data();
   run_tasks(threads, E, [&](int, size_t f){
@@ -366,7 +366,7 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
   std::vector<int> iwork(E);
   const double anorm = F77_CALL(dlansy)(&one, &uplo, &ne, cm, &ne, work.data() FCONE FCONE);
   F77_CALL(dpotrf)(&uplo, &ne, cm, &ne, &info FCONE);
-  if(info != 0) Rcpp::stop("method \"hypergraph\": the hyperedge matrix is not positive definite (Lapack dpotrf info %d; use method=\"lu\")", info);
+  if(info != 0) Rcpp::stop("method \"woodbury\": the hyperedge matrix is not positive definite (Lapack dpotrf info %d; use method=\"lu\")", info);
   double rcond = 0;
   F77_CALL(dpocon)(&uplo, &ne, cm, &ne, &anorm, &rcond, work.data(), iwork.data(), &info FCONE);
   if(rcond < DBL_EPSILON) Rcpp::stop("system is computationally singular: reciprocal condition number = %g", rcond);

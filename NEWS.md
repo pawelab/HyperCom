@@ -2,7 +2,7 @@
 
 Same results as 0.0.0.9000 (master b999a01) bit for bit on the bundled data: counts, LR table, hyperedges, adjacency and influence
 matrices, metadata, cell scores, priorities and seeded p-values are `identical()` to master's under the C collation. One exception
-by default: the influence matrix is now made with method `"hypergraph"`, about 1e-15 from master's (on the bundled data `HyperCom()`
+by default: the influence matrix is now made with method `"woodbury"`, about 1e-15 from master's (on the bundled data `HyperCom()`
 still writes master's priorities and seeded p-values); method `"lu"` gives master's numbers bit for bit. The adjacency and influence
 matrices are no longer stored as node x node matrices by default (see below).
 
@@ -56,10 +56,10 @@ in 3 samples (20,653 nodes, 1641 hyperedges, 16 threads) the whole pipeline peak
 * `generate_adjacency_matrix` returns a `hypercom_adjacency`: the node x hyperedge incidence `H` (how often each node is in each
   hyperedge); the adjacency is H H' with a zero diagonal. It works like a matrix for `dim`, `dimnames`, `rownames`, `adj[i, j]` (those
   entries) and `as.matrix` (master's matrix exactly). `3.adj.rds` holds it.
-* `generate_infMat` on such an adjacency returns a `hypercom_influence` by default (method `"hypergraph"`): the factors of the
+* `generate_infMat` on such an adjacency returns a `hypercom_influence` by default (method `"woodbury"`): the factors of the
   influence matrix (`H`, the row sums, `delta` and the hyperedge x node matrix `Z`), with the same methods; its entries equal the dense
-  `"hypergraph"` matrix's bit for bit. `4.infMat.rds` holds it. Methods `"lu"` and `"chol"` return the dense matrix as before; on a plain
-  adjacency matrix the default is still `"lu"`.
+  `"woodbury"` matrix's bit for bit. `4.infMat.rds` holds it. Methods `"lu"` and `"chol"` return the dense matrix as before; on a plain
+  adjacency matrix given without its `hyperedges` the default is still `"lu"`.
 * `prioritize_lr` and `score_hypercom` take either kind; with a factored influence matrix they make the within-sample cell blocks (the
   sum of squared sample sizes of doubles) and the genes' rows and columns, and give the same scores as from its dense matrix, bit for
   bit. `generate_metadata` reads only the node names.
@@ -72,21 +72,21 @@ in 3 samples (20,653 nodes, 1641 hyperedges, 16 threads) the whole pipeline peak
 
 ## Influence matrix methods
 
-`generate_infMat(method=)` chooses how the inverse is taken: `"hypergraph"` (the default for an adjacency from
-`generate_adjacency_matrix`), `"lu"` (master's, bit for bit; the default for an adjacency matrix) or `"chol"`. On 20,000 synthetic
-cells the dense influence matrix took 121 s with `"lu"` and 46 s with `"chol"`; the factors take 0.4 s (`"hypergraph"`).
+`generate_infMat(method=)` chooses how the inverse is taken: `"woodbury"` (the default), `"lu"` (master's, bit for bit; still what
+an adjacency matrix gets by default when it comes without its `hyperedges`) or `"chol"`. On 20,000 synthetic
+cells the dense influence matrix took 121 s with `"lu"` and 46 s with `"chol"`; the factors take 0.4 s (`"woodbury"`).
 
 * `"chol"`: v1-fast's Cholesky inverse of the symmetric form of the system, in place: one dense node x node matrix instead of two,
   about 3/8 of the arithmetic. The same numbers as v1-fast's `method="chol"` bit for bit.
-* `"hypergraph"`: the adjacency is the hyperedge incidence times its transpose, so the inverse is a diagonal plus a term of rank at
+* `"woodbury"`, the hypergraph method: the adjacency is the hyperedge incidence times its transpose, so the inverse is a diagonal plus a term of rank at
   most the number of hyperedges (Woodbury identity), kept as its factors. Work grows with nodes x incidences instead of nodes cubed,
   and it is the same at any `threads`. From an adjacency matrix it needs `hyperedges`, the table the matrix was made from, checks
   exactly that they give the adjacency (in any node order) and stops otherwise. With at least as many hyperedges as nodes it gains
   nothing and returns `"chol"`'s dense matrix.
 * Both stop like `"lu"` when the system is computationally singular (`r` near 0) and on non-finite weights.
 * Both differ from `"lu"` by about 1e-15 relative (6e-15 at 20,000 cells), which can break exact ties when grids are ranked; on 20,000
-  cells the pairs keep master's order and priorities move by at most 1.3e-13 (`"hypergraph"`) and 1.9e-14 (`"chol"`).
-* `HyperCom` and `HyperCom_seurat` take `infmat.method` (default `"hypergraph"`; `"lu"` for master's numbers bit for bit) and pass
+  cells the pairs keep master's order and priorities move by at most 1.3e-13 (`"woodbury"`) and 1.9e-14 (`"chol"`).
+* `HyperCom` and `HyperCom_seurat` take `infmat.method` (default `"woodbury"`; `"lu"` for master's numbers bit for bit) and pass
   their thread count (`parallel`, `cl`, `threads`: one thread without `parallel`, as for scoring).
 
 ## New arguments and changed behaviour
