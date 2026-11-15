@@ -8,6 +8,9 @@ HyperCom provides the following hypergraph-based features described in the [over
 
 2. Per Dataset Ligand-Receptor Pair Prioritization
 
+## Method Overview
+![HyperCom Overview](images/MethodOverview.jpg)
+
 ## Installation
 
 ### Prerequisites
@@ -70,6 +73,3 @@ head(res$priority[["1"]])
 scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
 ```
 Every step is also written to `outdir` (default `HyperCom/`). See `?HyperCom` and the vignette; cite with `citation("HyperCom")`.
-
-## Method Overview
-![HyperCom Overview](images/MethodOverview.jpg)
