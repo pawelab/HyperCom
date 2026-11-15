@@ -128,8 +128,9 @@ continues from the cache, losing at most the last batch of pairs. The results ar
 without `seed`, the run continues with the background pairs it drew before the stop. A continued run says so in its messages, e.g.
 `Continuing from the cache in overview/6.priority/cache: 812 of 2042 pairs already scored`.
 
-The cache folder is removed once the priority files are written, and a cache made from other inputs (other counts, metadata or
-`infmat.method`) is discarded with a warning. `cache=FALSE` keeps no cache. `prioritize_lr` keeps it in `<outdir>/cache` the same
+The cache folder is removed once the priority files are written. A cache made from other inputs (other counts, metadata or
+`infmat.method`) is not used: it is moved to `cache.old`, with a warning, and can be renamed back to continue the run it belongs to.
+If the cache cannot be written (e.g. a full disk), scoring goes on without it. `cache=FALSE` keeps no cache. `prioritize_lr` keeps it in `<outdir>/cache` the same
 way, and keeps none with `outdir=NULL`.
 
 On a cluster, a job can therefore ask for less time than the whole run and be submitted again, with the same script, until it

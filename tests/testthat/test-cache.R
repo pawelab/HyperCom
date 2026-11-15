@@ -49,7 +49,7 @@ test_that("a stopped run continues from the cache, scores only the rest and give
 
   expect_error(stop_after(3, run_priority(significance=TRUE, seed=1, outdir=outdir)), "run stopped")
   expect_setequal(list.files(cache.dir), c("fingerprint.rds", "background.rds", "terms.rds"))
-  cached <- readRDS(file.path(cache.dir, "terms.rds"))
+  cached <- readRDS(file.path(cache.dir, "terms.rds"))$terms
   expect_gt(nrow(cached), 0)
   expect_lt(nrow(cached), nrow(fx$output$lrs) + 1000)
 
@@ -108,24 +108,70 @@ test_that("a run stopped after scoring takes every pair from the cache and score
   expect_false(dir.exists(file.path(outdir, "cache")))
 })
 
-test_that("a cache made from other inputs, or damaged, is discarded with a warning; a half-written file is dropped silently", {
+test_that("a cache made from other inputs, or damaged, is moved to cache.old with a warning and can be moved back", {
   outdir <- withr::local_tempdir()
   cache.dir <- file.path(outdir, "cache")
+  old.dir <- file.path(outdir, "cache.old")
 
   expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
-  expect_warning(priority <- run_priority(metadata=fx$output$metadata.none, outdir=outdir), "made from other inputs, or is damaged")
+  expect_warning(priority <- run_priority(metadata=fx$output$metadata.none, outdir=outdir),
+                 "made from other inputs, or is damaged, and is not used; it is moved to .*cache.old")
   expect_master(priority, fx$output$priority.none)
+  expect_false(dir.exists(cache.dir))
+  expect_true(file.rename(old.dir, cache.dir))
+  resumed <- count_grids(expect_no_warning(run_priority(outdir=outdir)))
+  expect_master(resumed$value, fx$output$priority["1"])
+  expect_lt(resumed$grids, count_grids(run_priority())$grids)
 
   expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
   writeLines("not a cache", file.path(cache.dir, "fingerprint.rds"))
   expect_warning(priority <- run_priority(outdir=outdir), "made from other inputs, or is damaged")
   expect_master(priority, fx$output$priority["1"])
+  expect_true(file.exists(file.path(old.dir, "terms.rds")))
+})
+
+test_that("a half-written file is dropped silently, and metadata of other column types keep the cache", {
+  outdir <- withr::local_tempdir()
+  metadata <- fx$output$metadata
+  metadata$sample <- factor(metadata$sample)
+  metadata$group <- factor(metadata$group)
 
   expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
-  writeLines("half written", file.path(cache.dir, "terms.rds.tmp"))
-  expect_no_warning(priority <- run_priority(outdir=outdir))
+  writeLines("half written", file.path(outdir, "cache", "terms.rds.tmp"))
+  resumed <- count_grids(expect_no_warning(run_priority(metadata=metadata, outdir=outdir)))
+
+  expect_master(resumed$value, fx$output$priority["1"])
+  expect_lt(resumed$grids, count_grids(run_priority())$grids)
+  expect_false(dir.exists(file.path(outdir, "cache")))
+})
+
+test_that("terms written by a run on other inputs into the same cache folder are not used", {
+  outdir <- withr::local_tempdir()
+  cache.dir <- file.path(outdir, "cache")
+
+  expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
+  late <- readRDS(file.path(cache.dir, "terms.rds"))
+  expect_warning(expect_error(stop_after(2, run_priority(metadata=fx$output$metadata.none, outdir=outdir)), "run stopped"),
+                 "made from other inputs")
+  saveRDS(late, file.path(cache.dir, "terms.rds"))
+  resumed <- count_grids(expect_no_warning(run_priority(metadata=fx$output$metadata.none, outdir=outdir)))
+
+  expect_master(resumed$value, fx$output$priority.none)
+  expect_equal(resumed$grids, count_grids(run_priority(metadata=fx$output$metadata.none))$grids)
+})
+
+test_that("a cache that cannot be written warns and the run goes on; a call stopped before scoring leaves no cache", {
+  outdir <- withr::local_tempdir()
+  writeLines("a file where the cache folder would go", file.path(outdir, "cache"))
+
+  expect_warning(priority <- run_priority(outdir=outdir), "could not write the cache file .*scoring goes on without the cache")
   expect_master(priority, fx$output$priority["1"])
-  expect_false(dir.exists(cache.dir))
+
+  lrs <- fx$output$lrs
+  lrs$ligand[1] <- "NotAGene"
+  outdir <- withr::local_tempdir()
+  expect_error(run_priority(lrs=lrs, significance=TRUE, seed=1, outdir=outdir), "not nodes of infMat: NotAGene")
+  expect_length(list.files(outdir, recursive=TRUE, include.dirs=TRUE), 0)
 })
 
 test_that("cache=FALSE or outdir=NULL keep no cache, and cache must be TRUE or FALSE", {

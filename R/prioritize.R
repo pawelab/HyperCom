@@ -118,7 +118,8 @@ pair_grids <- function(ligands, receptors){
 #' subunit grid is scored once, whatever the number of pairs using it, and only one batch of cell scores (about 64 MB at most, at least
 #' one grid per thread) is in memory at a time. The gene x cell counts of a symmetric sparse adjacency are read from its stored
 #' triangle, without expanding the whole matrix. With a cache, pairs whose genes are in it take its terms and are not scored again,
-#' and the terms of all pairs scored so far are written to it after each batch.
+#' and the terms of all pairs scored so far (and of cached pairs of other calls) are written to it after each batch; the first write
+#' also saves the inputs (save_cache). After a failed write the run goes on without the cache.
 #' @inheritParams prioritize_lr
 #' @param threads An integer number of threads
 #' @param verbose A boolean of whether to report the pairs scored, about every 5 s, with an estimate of the time left (pairs are
@@ -155,10 +156,12 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
   terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
   pair.keys <- pair_keys(ligands, receptors)
   scored <- logical(nrow(lrs))
+  other.terms <- NULL
   if(!is.null(cached$terms)){
     hit <- match(pair.keys, rownames(cached$terms))
     scored <- !is.na(hit)
     terms[scored, ] <- cached$terms[hit[scored], , drop=FALSE]
+    other.terms <- cached$terms[!(rownames(cached$terms) %in% pair.keys), , drop=FALSE]
     if(verbose && any(scored)){
       message("  Continuing from the cache in ", cached$dir, ": ", sum(scored), " of ", nrow(lrs), " pairs already scored")
     }
@@ -216,7 +219,10 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
       keep <- scored & !duplicated(pair.keys)
       cache.terms <- terms[keep, , drop=FALSE]
       rownames(cache.terms) <- pair.keys[keep]
-      write_cache_file(cache.terms, cached$dir, "terms.rds")
+      saved <- if(grids.done == 0) save_cache(cached) else TRUE
+      if(!(saved && write_cache_file(list(token=cached$fingerprint$token, terms=rbind(other.terms, cache.terms)), cached$dir, "terms.rds"))){
+        cached <- NULL
+      }
     }
     done <- done + length(rows)
     grids.done <- grids.done + nrow(pairs)
@@ -375,8 +381,9 @@ priority_filename <- function(weights){
 #' With outdir set and cache=TRUE, the pairs scored so far are kept in `<outdir>/cache` while pairs are scored, and the folder is
 #' removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
 #' continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped; without
-#' seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs is
-#' discarded, with a warning.
+#' seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs (or
+#' damaged) is not used: it is moved to `<outdir>/cache.old`, with a warning. If the cache cannot be written, scoring goes on without
+#' it, with a warning.
 #' @param lrs A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
 #' in the counts matrix
 #' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
@@ -437,9 +444,8 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     message("Scoring ", nrow(lrs), " ligand-receptor pairs", if(significance) paste0(" and ", nrow(background.lrs), " background pairs"),
             " on ", threads, " thread", if(threads > 1) "s")
   }
-  if(!is.null(cached)){
-    cached$background <- if(significance) background.lrs else NULL
-    save_cache(cached)
+  if(!is.null(cached) && significance){
+    cached$background <- background.lrs
   }
 
   if(significance){

@@ -70,8 +70,9 @@ Background pairs without a priority (NaN, e.g. when some of their cells have no 
 With outdir set and cache=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache} while pairs are scored, and the folder is
 removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
 continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped; without
-seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs is
-discarded, with a warning.
+seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs (or
+damaged) is not used: it is moved to \verb{<outdir>/cache.old}, with a warning. If the cache cannot be written, scoring goes on without
+it, with a warning.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

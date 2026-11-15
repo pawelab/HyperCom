@@ -38,7 +38,8 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
   kept in `<outdir>/cache` (`<outdir>/6.priority/cache` for `HyperCom`) while pairs are scored, and the folder is removed once the
   priority files are written. A run that stops (time limit of a cluster job, crash) continues where it stopped when the same call
   is run again, losing at most the last batch of pairs, with the same results as a run that never stopped; without `seed` it keeps
-  the background pairs drawn before the stop. A cache made from other inputs is discarded with a warning. The cache holds 5
+  the background pairs drawn before the stop. A cache made from other inputs is not used and is moved to `cache.old`, with a
+  warning; a cache that cannot be written is skipped, with a warning. The cache holds 5
   numbers per pair (130 KB for the bundled data with significance) and the names of the cells (0.8 MB at 20,000 cells); on 20,000
   cells its writes took 0.1 s of a 77 s scoring step, with the same peak memory.
 * `prioritize_lr` documents its p-values: the fraction of 1000 background pairs scoring at least as high, in steps of 0.001; 0 means
