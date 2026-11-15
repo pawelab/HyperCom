@@ -51,3 +51,12 @@ the dense matrix of "chol", which is then no bigger.
 
 All methods stop when the matrix cannot be inverted (r near 0).
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+infMat <- generate_infMat(adj, outfile=NULL)
+infMat
+infMat[c("Thbs1", "Sdc4"), 1:3]
+}

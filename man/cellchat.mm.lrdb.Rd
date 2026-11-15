@@ -11,6 +11,10 @@ receptor genes, NA where a receptor complex has fewer subunits)
 \description{
 The ligand-receptor interactions of the CellChat database for M. musculus, in the format HyperCom reads as \code{lrdb}.
 }
+\examples{
+head(cellchat.mm.lrdb)
+cellchat.mm.lrdb[cellchat.mm.lrdb$ligand == "Tgfb1", ]
+}
 \references{
 \url{https://doi.org/10.1038/s41467-021-21246-9}
 }

@@ -12,6 +12,10 @@ suffix, e.g. "AACCGCGTCCAGAGGA-2"), in the order of the rows of \code{alexanian2
 Log-normalised expression of 1000 cells from mouse hearts after sham surgery or transverse aortic constriction (TAC), a subset of
 Alexanian et al. 2021, for trying HyperCom with \code{cellchat.mm.lrdb}.
 }
+\examples{
+dim(alexanian2021.counts)
+alexanian2021.counts[1:5, 1:3]
+}
 \references{
 \url{https://doi.org/10.1038/s41586-021-03674-1}
 }

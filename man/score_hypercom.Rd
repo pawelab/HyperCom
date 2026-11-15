@@ -41,3 +41,18 @@ This function takes a named influence matrix, the corresponding metadata, the li
 to give each cell a HyperCom score. With a ligand and receptors this is the ligand-receptor pair score; with neither, the network
 score. For a receptor complex the scores of its subunits are averaged. Scores are the same at any number of threads.
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+infMat <- generate_infMat(adj, outfile=NULL)
+metadata <- generate_metadata(infMat, alexanian2021.metadata, sample="sample", group="condition",
+                              outfile=NULL)
+scores <- score_hypercom(infMat, metadata, ligand="Thbs1", receptors="Sdc4")
+head(scores)
+# a receptor complex: the scores of its subunits are averaged
+complex <- score_hypercom(infMat, metadata, ligand="Tgfb1", receptors=c("Tgfbr1", "Tgfbr2"))
+# the network score: no ligand and no receptors
+network <- score_hypercom(infMat, metadata)
+}

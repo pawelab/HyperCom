@@ -40,3 +40,12 @@ to zero. dim and dimnames give those of the matrix, \code{adj[i, j]} makes the i
 matrix: names, positions or logical; factors are read by name, not by their codes) and as.matrix the whole dense matrix (nodes
 squared doubles).
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+adj
+dim(adj)
+adj[c("Thbs1", "Sdc4"), 1:3]
+}

@@ -73,3 +73,12 @@ lrdb of another species). Priority files of other weights already in outdir are 
 well as written, so they need not be read back: \code{res <- HyperCom(...)}, then \code{res$priority[["1"]]} or
 \code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}.
 }
+\examples{
+# a few ligands keep the example quick; use the whole database for real data
+lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand \%in\% c("Thbs1", "Comp", "Tgfb1"), ]
+res <- HyperCom(lrdb, alexanian2021.counts, alexanian2021.metadata, sample="sample",
+                group="condition", outdir=file.path(tempdir(), "HyperCom"))
+head(res$priority[["1"]])
+list.files(file.path(tempdir(), "HyperCom"), recursive=TRUE)
+scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
+}

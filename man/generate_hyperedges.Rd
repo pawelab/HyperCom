@@ -26,3 +26,9 @@ This function takes a filtered cell x gene counts matrix and table of ligand-rec
 a table of hyperedges: one per ligand-receptor interaction (its genes) and one per gene (the gene and the cells that express it).
 Cells are nodes named by the row names of counts, so they must be unique (prefix barcodes with their sample when merging samples).
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+head(hyperedges)
+}

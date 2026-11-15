@@ -43,3 +43,13 @@ Delta) instead of F. dim and dimnames give those of F, \code{infMat[i, j]} makes
 matrix: names, positions or logical; factors are read by name, not by their codes) on one thread and as.matrix the whole dense
 matrix (nodes squared doubles).
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+infMat <- generate_infMat(adj, outfile=NULL)
+infMat
+dim(infMat)
+infMat[c("Thbs1", "Sdc4"), 1:3]
+}

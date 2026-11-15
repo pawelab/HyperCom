@@ -40,3 +40,14 @@ Kept columns named cell, sample or group are renamed with make.unique (e.g. samp
 other than factors become strings. Cells are compared only within their sample, so every sample needs at least 2 cells in the
 graph (cells that express a ligand or receptor gene).
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+infMat <- generate_infMat(adj, outfile=NULL)
+metadata <- generate_metadata(infMat, alexanian2021.metadata, sample="sample", group="condition",
+                              outfile=NULL)
+head(metadata)
+table(metadata$sample)
+}

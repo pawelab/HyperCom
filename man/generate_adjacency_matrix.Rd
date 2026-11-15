@@ -24,3 +24,11 @@ collation. Nodes that share no hyperedge with another node are dropped. The full
 records which nodes are in which hyperedge, so it takes memory in proportion to the hyperedge table instead of the number of nodes
 squared. It works like a matrix for dim, dimnames and rownames; \code{adj[i, j]} gives those entries and as.matrix the whole matrix.
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+adj
+dim(adj)
+}

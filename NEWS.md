@@ -107,6 +107,8 @@ fix. Results of valid inputs are unchanged.
   it). Minimum versions: dplyr 1.1.0, parallelly 1.23.0 (older versions failed with cryptic errors).
 * README: installation per operating system. DESCRIPTION describes the method and has URL and BugReports; `citation("HyperCom")`
   gives the bioRxiv preprint. The bundled datasets are documented.
+* Every help page has examples on the bundled data (each runs in under a second). The overview vignette's HTML is
+  rendered from the current source; its outdated PDF is gone.
 * Docs: `filter_counts` returns a cell x gene matrix; `generate_metadata` returns a dataframe; the lrdb's first column may have any
   name; vignette `HyperCom_seurat` example fixed.
 

@@ -71,3 +71,12 @@ Invisibly, a list of the results also written to outdir: priority (from prioriti
 This function runs \code{HyperCom} on one assay layer and the cell metadata of a Seurat object (v5 or older assays). Needs the
 SeuratObject package.
 }
+\examples{
+\dontshow{if (requireNamespace("SeuratObject", quietly=TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+seurat <- SeuratObject::CreateSeuratObject(alexanian2021.counts, meta.data=alexanian2021.metadata)
+lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand \%in\% c("Thbs1", "Comp", "Tgfb1"), ]
+res <- HyperCom_seurat(seurat, lrdb, sample="sample", group="condition",
+                       outdir=file.path(tempdir(), "HyperCom_seurat"))
+head(res$priority[["1"]])
+\dontshow{\}) # examplesIf}
+}

@@ -62,3 +62,16 @@ for all weights; parallel or threads use several CPU cores.
 With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+infMat <- generate_infMat(adj, outfile=NULL)
+metadata <- generate_metadata(infMat, alexanian2021.metadata, sample="sample", group="condition",
+                              outfile=NULL)
+# a few ligands keep the example quick; significance=TRUE adds p-values from 1000 background pairs
+pairs <- lrs[lrs$ligand \%in\% c("Thbs1", "Comp", "Tgfb1"), ]
+priority <- prioritize_lr(pairs, adj, infMat, metadata, weights=c(1, 0.5), outdir=NULL)
+head(priority[["1"]])
+}

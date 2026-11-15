@@ -28,3 +28,7 @@ just ligand and receptor genes with greater than 0 expression. Missing (NA) coun
 A gene name used by several rows keeps its first row, with a warning. Raw and normalised counts give the same results (HyperCom uses
 whether each gene is above 0 in each cell); counts with negative values (scaled data) and counts with genes as column names stop.
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+dim(counts)
+}

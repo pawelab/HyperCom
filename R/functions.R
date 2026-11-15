@@ -13,6 +13,9 @@
 #' @param outfile A string naming the output file, or NULL to write none
 #' @returns A matrix with row names being cells and column names being genes of only ligand and receptor genes with greater than 0 expression,
 #' sparse if counts is sparse
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' dim(counts)
 #' @export
 filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
   check_lrdb(lrdb)
@@ -66,6 +69,10 @@ check_lrdb <- function(lrdb){
 #' @inheritParams filter_counts
 #' @returns A dataframe of ligand-receptor interactions in the format of lrdb with only interactions present in the counts matrix, and
 #' without receptor columns that are empty for all of them
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' head(lrs)
 #' @export
 generate_lrs_table <- function(counts, lrdb, outfile="1.lrs.csv"){
   genes <- as.matrix(lrdb[, -1, drop=FALSE])
@@ -94,6 +101,11 @@ generate_lrs_table <- function(counts, lrdb, outfile="1.lrs.csv"){
 #' in the counts matrix
 #' @returns A dataframe with one row per node of each hyperedge: columns edge (the hyperedge, an interaction or a gene), node (a gene or
 #' cell in it) and weight (1)
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' head(hyperedges)
 #' @export
 generate_hyperedges <- function(counts, lrs, outfile="2.hyperedges.csv"){
   dup.cells <- unique(rownames(counts)[duplicated(rownames(counts))])
@@ -179,6 +191,13 @@ hyperedge_incidence <- function(h){
 #' @param hyperedges A dataframe of hyperedges from generate_hyperedges, with columns edge (the hyperedge) and node (a node in it)
 #' @inheritParams filter_counts
 #' @returns A hypercom_adjacency: a list with H, the sparse node x hyperedge matrix of how often each node is in each hyperedge
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' adj
+#' dim(adj)
 #' @export
 generate_adjacency_matrix <- function(hyperedges, outfile="3.adj.rds"){
   adj <- list(H=hyperedge_incidence(index_hyperedges(hyperedges)))
@@ -256,6 +275,14 @@ node_index <- function(i, nodes){
 #' @param drop A boolean of whether to drop dimensions of extent one
 #' @param ... Ignored
 #' @returns dim: the number of nodes twice; dimnames: the node names twice; `[` and as.matrix: a dense matrix; print: x, invisibly
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' adj
+#' dim(adj)
+#' adj[c("Thbs1", "Sdc4"), 1:3]
 #' @name hypercom_adjacency
 NULL
 
@@ -372,6 +399,14 @@ incidence_matrix <- function(hyperedges, adj){
 #' @inheritParams filter_counts
 #' @returns An influence matrix with node names: a hypercom_influence (method "woodbury", unless there are at least as many hyperedges
 #' as nodes) or a dense matrix
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' infMat <- generate_infMat(adj, outfile=NULL)
+#' infMat
+#' infMat[c("Thbs1", "Sdc4"), 1:3]
 #' @export
 generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbury", "lu", "chol"), hyperedges=NULL, threads=NULL){
   # woodbury: adj = H H' with a zero diagonal (H the node x hyperedge incidence), so the Woodbury identity inverts it through a
@@ -535,6 +570,15 @@ influence_blocks <- function(infMat, g, threads=1){
 #' @param threads An integer number of threads for as.matrix
 #' @param ... Ignored
 #' @returns dim: the number of nodes twice; dimnames: the node names twice; `[` and as.matrix: a dense matrix; print: x, invisibly
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' infMat <- generate_infMat(adj, outfile=NULL)
+#' infMat
+#' dim(infMat)
+#' infMat[c("Thbs1", "Sdc4"), 1:3]
 #' @name hypercom_influence
 NULL
 
@@ -605,6 +649,16 @@ print.hypercom_influence <- function(x, ...){
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata
 #' @inheritParams filter_counts
 #' @returns A dataframe with columns cell, sample, group and the kept columns, one row per node of the influence matrix
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' infMat <- generate_infMat(adj, outfile=NULL)
+#' metadata <- generate_metadata(infMat, alexanian2021.metadata, sample="sample", group="condition",
+#'                               outfile=NULL)
+#' head(metadata)
+#' table(metadata$sample)
 #' @export
 generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
   check_columns(metadata, sample, group, keep)
@@ -867,6 +921,20 @@ average_scores <- function(sr, cols){
 #' @returns A dataframe with one row per cell, sorted by hypercom (highest first), with columns cell, sender and receiver (the cell's
 #' sender and receiver scores), dif (receiver - sender), avg (their mean), max (the larger of the two) and hypercom (the HyperCom score:
 #' the sign of dif times the percent rank of its size times avg)
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' infMat <- generate_infMat(adj, outfile=NULL)
+#' metadata <- generate_metadata(infMat, alexanian2021.metadata, sample="sample", group="condition",
+#'                               outfile=NULL)
+#' scores <- score_hypercom(infMat, metadata, ligand="Thbs1", receptors="Sdc4")
+#' head(scores)
+#' # a receptor complex: the scores of its subunits are averaged
+#' complex <- score_hypercom(infMat, metadata, ligand="Tgfb1", receptors=c("Tgfbr1", "Tgfbr2"))
+#' # the network score: no ligand and no receptors
+#' network <- score_hypercom(infMat, metadata)
 #' @export
 score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL, parallel=FALSE, threads=NULL){
   threads <- get_threads(parallel, threads=threads)
@@ -1252,6 +1320,18 @@ priority_filename <- function(weights){
 #' the time left, and the top pair of each weight
 #' @returns A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
 #' p.adj when significance is TRUE
+#' @examples
+#' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+#' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+#' hyperedges <- generate_hyperedges(counts, lrs, outfile=NULL)
+#' adj <- generate_adjacency_matrix(hyperedges, outfile=NULL)
+#' infMat <- generate_infMat(adj, outfile=NULL)
+#' metadata <- generate_metadata(infMat, alexanian2021.metadata, sample="sample", group="condition",
+#'                               outfile=NULL)
+#' # a few ligands keep the example quick; significance=TRUE adds p-values from 1000 background pairs
+#' pairs <- lrs[lrs$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
+#' priority <- prioritize_lr(pairs, adj, infMat, metadata, weights=c(1, 0.5), outdir=NULL)
+#' head(priority[["1"]])
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, outdir="6.priority",
                           threads=NULL, seed=NULL, verbose=TRUE){
@@ -1333,6 +1413,14 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' "lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15
 #' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
 #' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+#' @examples
+#' # a few ligands keep the example quick; use the whole database for real data
+#' lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
+#' res <- HyperCom(lrdb, alexanian2021.counts, alexanian2021.metadata, sample="sample",
+#'                 group="condition", outdir=file.path(tempdir(), "HyperCom"))
+#' head(res$priority[["1"]])
+#' list.files(file.path(tempdir(), "HyperCom"), recursive=TRUE)
+#' scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE,
                      outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
@@ -1433,6 +1521,12 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #' @inheritParams HyperCom
 #' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
 #' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+#' @examplesIf requireNamespace("SeuratObject", quietly=TRUE)
+#' seurat <- SeuratObject::CreateSeuratObject(alexanian2021.counts, meta.data=alexanian2021.metadata)
+#' lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
+#' res <- HyperCom_seurat(seurat, lrdb, sample="sample", group="condition",
+#'                        outdir=file.path(tempdir(), "HyperCom_seurat"))
+#' head(res$priority[["1"]])
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
                             parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){

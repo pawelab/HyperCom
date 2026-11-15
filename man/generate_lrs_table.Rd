@@ -26,3 +26,8 @@ without receptor columns that are empty for all of them
 This function takes a filtered cell x gene counts matrix and table of ligand-receptor interactions to produce
 a table of the ligand-receptor interactions whose genes are all in the counts matrix.
 }
+\examples{
+counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
+lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
+head(lrs)
+}
