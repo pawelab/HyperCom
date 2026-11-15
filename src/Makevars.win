@@ -1,5 +1,6 @@
 # LAPACK from R's own Rlapack.dll through an import library made from Rlapack-win.def: linking -lRlapack directly takes the
 # DLL's internal name, which is not Rlapack.dll when R's LAPACK has been swapped for another build (e.g. OpenBLAS)
+CXX_STD = CXX17
 PKG_LIBS = -pthread libRlapack.dll.a
 
 all: $(SHLIB)

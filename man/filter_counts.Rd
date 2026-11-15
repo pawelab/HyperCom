@@ -24,5 +24,6 @@ sparse if counts is sparse
 \details{
 This function takes a gene x cell counts matrix and filters it to
 just ligand and receptor genes with greater than 0 expression. Missing counts are left out of the means.
-A gene name used by several rows keeps its first row, with a warning.
+A gene name used by several rows keeps its first row, with a warning. Raw and normalised counts give the same results (HyperCom uses
+whether each gene is above 0 in each cell); counts with negative values (scaled data) and counts with genes as column names stop.
 }

@@ -12,6 +12,38 @@ read_fixture <- function(){
 withr::local_collate("C", .local_envir=testthat::teardown_env())
 fx <- read_fixture()
 tol <- 1e-10
+x87 <- identical(.Machine$longdouble.digits, 64L)
+
+#' Cap a thread count at the available cores
+#'
+#' `test_threads` returns a thread count no larger than the available cores
+#'
+#' This function takes the number of threads a test asks for and returns it, or the available cores if fewer (2 under R CMD check),
+#' so tests of several threads do not warn on small machines.
+#' @param n An integer number of threads
+#' @returns An integer number of threads
+#' @noRd
+test_threads <- function(n){
+  return(min(n, parallelly::availableCores()))
+}
+
+#' Expect a score or priority result to equal master's in the fixture
+#'
+#' `expect_master` checks a result of the grid kernel against master's output in the fixture
+#'
+#' This function compares bit for bit where long double is the 80-bit x87 type of the x86-64 machine the fixture was made on, and
+#' within 1e-12 elsewhere: R's means and the kernel's sums use the platform's long double (double on arm64 macOS and Windows, 128 bits
+#' on arm64 Linux, absent on builds without long double), so their last bits differ from the fixture's there.
+#' @param object A result from the build under test
+#' @param expected Master's result from the fixture
+#' @noRd
+expect_master <- function(object, expected){
+  if(x87){
+    testthat::expect_identical(object, expected)
+  } else {
+    testthat::expect_equal(object, expected, tolerance=1e-12)
+  }
+}
 
 #' Run an expression without its printed output
 #'
@@ -59,6 +91,46 @@ expect_same_matrix <- function(object, expected, tolerance=0){
   } else {
     testthat::expect_equal(unname(as.matrix(object)), unname(as.matrix(expected)), tolerance=tolerance)
   }
+}
+
+#' Calculate master's influence matrix on this machine
+#'
+#' `master_infmat` returns the influence matrix as master's generate_infMat makes it
+#'
+#' This function is master b999a01's generate_infMat without the file write. The last bits of its result depend on the LAPACK and BLAS
+#' R uses (the fixture was made with OpenBLAS on Windows; R's reference BLAS differs by ~3e-15), so a build is compared bit for bit
+#' with this function run on the same machine.
+#' @param adj An adjacency matrix with node names
+#' @param r A double between 0 and 1 representing the restart probability
+#' @returns A dense influence matrix with node names
+#' @noRd
+master_infmat <- function(adj, r=0.5){
+  len <- dim(adj)[1]
+  D <- as.matrix(Matrix::Diagonal(len))
+  W <- adj/Matrix::rowSums(adj)
+  W <- (1 - r) * W
+  W <- as.matrix(W)
+  M <- D - W
+  infMat <- r * Matrix::solve(M)
+  rownames(infMat) <- rownames(adj)
+  colnames(infMat) <- rownames(adj)
+
+  return(infMat)
+}
+
+#' Expect an influence matrix to be master's
+#'
+#' `expect_master_infmat` checks an influence matrix against master's formula on this machine and against the fixture
+#'
+#' This function compares bit for bit with master_infmat of the fixture's adjacency, and within 1e-12 with master's matrix in the
+#' fixture, whose last bits depend on the BLAS it was made with.
+#' @param object An influence matrix from the build under test
+#' @param r A double, 0.5 or 0.3 (the restart probabilities in the fixture)
+#' @noRd
+expect_master_infmat <- function(object, r=0.5){
+  expected <- if(r == 0.5) fx$output$infMat else fx$output$infMat.r03
+  testthat::expect_identical(object, master_infmat(fx$output$adj, r))
+  expect_same_matrix(object, expected, tolerance=1e-12)
 }
 
 #' Make a dataframe comparable

@@ -47,7 +47,7 @@ test_that("method woodbury is the same at any thread count, from factor hyperedg
   factors$edge <- factor(factors$edge)
   factors$node <- factor(factors$node)
 
-  expect_identical(generate_infMat(adj, outfile=NULL, method="woodbury", hyperedges=hyperedges, threads=3), hyper)
+  expect_identical(generate_infMat(adj, outfile=NULL, method="woodbury", hyperedges=hyperedges, threads=test_threads(3)), hyper)
   expect_identical(generate_infMat(adj, outfile=NULL, method="woodbury", hyperedges=factors, threads=2), hyper)
   expect_identical(generate_infMat(as.matrix(adj), outfile=NULL, method="woodbury", hyperedges=hyperedges, threads=1), hyper)
 })
@@ -140,11 +140,11 @@ test_that("HyperCom with infmat.method woodbury ranks the pairs as master", {
   skip_if_no_methods()
   dir <- withr::local_tempdir()
   withr::local_dir(dir)
-  status <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run",
-                             threads=2, infmat.method="woodbury"))
+  res <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run",
+                          threads=2, infmat.method="woodbury"))
   priority <- utils::read.csv(file.path("run", "6.priority", "priority.1.csv"), check.names=FALSE)
 
-  expect_equal(status, 0)
+  expect_identical(res$infMat, readRDS(file.path("run", "4.infMat.rds")))
   expect_lt(max_rel(readRDS(file.path("run", "4.infMat.rds")), fx$output$infMat), 1e-13)
   expect_same_priority(priority, fx$output$priority[["1"]])
 })
@@ -153,13 +153,13 @@ test_that("HyperCom with infmat.method lu writes master's adjacency and influenc
   skip_if_no_methods()
   dir <- withr::local_tempdir()
   withr::local_dir(dir)
-  status <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run",
-                             threads=2, infmat.method="lu"))
+  res <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run",
+                          threads=2, infmat.method="lu"))
   priority <- utils::read.csv(file.path("run", "6.priority", "priority.1.csv"), check.names=FALSE)
 
-  expect_equal(status, 0)
+  expect_master_infmat(res$infMat)
   expect_identical(as_master_adjacency(readRDS(file.path("run", "3.adj.rds"))), fx$output$adj)
-  expect_identical(readRDS(file.path("run", "4.infMat.rds")), fx$output$infMat)
+  expect_master_infmat(readRDS(file.path("run", "4.infMat.rds")))
   expect_same_priority(priority, fx$output$priority[["1"]])
 })
 
@@ -170,10 +170,10 @@ test_that("generate_infMat on an adjacency without node x node matrix: factored 
   infMat <- generate_infMat(adj, outfile=NULL, threads=2)
 
   expect_s3_class(infMat, "hypercom_influence")
-  expect_identical(infMat, generate_infMat(fx$output$adj, outfile=NULL, method="woodbury", hyperedges=fx$output$hyperedges, threads=3))
+  expect_identical(infMat, generate_infMat(fx$output$adj, outfile=NULL, method="woodbury", hyperedges=fx$output$hyperedges, threads=test_threads(3)))
   expect_lt(max_rel(infMat, fx$output$infMat), 1e-13)
-  expect_identical(generate_infMat(adj, outfile=NULL, method="lu"), fx$output$infMat)
-  expect_identical(generate_infMat(adj, r=0.3, outfile=NULL, method="lu"), fx$output$infMat.r03)
+  expect_master_infmat(generate_infMat(adj, outfile=NULL, method="lu"))
+  expect_master_infmat(generate_infMat(adj, r=0.3, outfile=NULL, method="lu"), r=0.3)
   expect_identical(generate_infMat(adj, outfile=NULL, method="chol"), generate_infMat(fx$output$adj, outfile=NULL, method="chol"))
 })
 
@@ -189,7 +189,7 @@ test_that("scoring a factored influence matrix equals scoring its dense matrix b
   lrs <- fx$output$lrs
   pairs <- list(list(NULL, NULL), list("Thbs1", "Sdc4"), list("Tgfb1", c("Tgfbr1", "Tgfbr2")))
 
-  for(threads in c(1, 3)){
+  for(threads in c(1, test_threads(3))){
     expect_identical(quietly(prioritize_lr(lrs, adj, infMat, md, weights=c(1, 0.5, 0), threads=threads, outdir=NULL)),
                      quietly(prioritize_lr(lrs, fx$output$adj, dense, md, weights=c(1, 0.5, 0), threads=threads, outdir=NULL)))
   }
@@ -210,6 +210,7 @@ test_that("generate_infMat defaults to woodbury, and to lu for an adjacency matr
 
   expect_s3_class(infMat, "hypercom_influence")
   expect_identical(infMat, generate_infMat(adj, outfile=NULL, method="woodbury", hyperedges=hyperedges, threads=2))
-  expect_identical(generate_infMat(adj, outfile=NULL), fx$output$infMat)
+  expect_master_infmat(generate_infMat(adj, outfile=NULL))
   expect_error(generate_infMat(adj, outfile=NULL, method="woodbury"), "needs the hyperedges")
+  expect_error(generate_infMat(adj, outfile=NULL, method="hypergraph", hyperedges=hyperedges), "now called \"woodbury\"")
 })

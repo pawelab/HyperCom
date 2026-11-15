@@ -1,3 +1,12 @@
+expect_run_result <- function(res, rundir){
+  testthat::expect_named(res, c("priority", "metadata", "infMat", "adj", "lrs"))
+  testthat::expect_identical(res$adj, readRDS(file.path(rundir, "3.adj.rds")))
+  testthat::expect_identical(res$infMat, readRDS(file.path(rundir, "4.infMat.rds")))
+  expect_same_priority(res$priority[["1"]], fx$output$priority[["1"]])
+  testthat::expect_identical(res$metadata$cell, fx$output$metadata$cell)
+  testthat::expect_equal(plain_df(res$lrs), plain_df(fx$output$lrs))
+}
+
 expect_run_matches_master <- function(rundir){
   files <- c("0.counts.rds", "1.lrs.csv", "2.hyperedges.csv", "3.adj.rds", "4.infMat.rds", "5.metadata.csv", "6.priority/priority.1.csv")
   testthat::expect_true(all(file.exists(file.path(rundir, files))))
@@ -11,10 +20,12 @@ expect_run_matches_master <- function(rundir){
 test_that("HyperCom runs the whole pipeline with defaults and reproduces master", {
   dir <- withr::local_tempdir()
   withr::local_dir(dir)
-  status <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run"))
+  res <- quietly(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run"))
 
-  expect_equal(status, 0)
+  expect_run_result(res, "run")
   expect_run_matches_master(file.path(dir, "run"))
+  expect_invisible(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", outdir="run2",
+                            verbose=FALSE))
 })
 
 test_that("HyperCom_seurat reproduces master from a Seurat object", {
@@ -22,9 +33,9 @@ test_that("HyperCom_seurat reproduces master from a Seurat object", {
   dir <- withr::local_tempdir()
   withr::local_dir(dir)
   seurat <- suppressWarnings(SeuratObject::CreateSeuratObject(counts=fx$input$counts, meta.data=fx$input$metadata))
-  status <- quietly(HyperCom_seurat(seurat, fx$input$lrdb, sample="sample", group="condition", outdir="run"))
+  res <- quietly(HyperCom_seurat(seurat, fx$input$lrdb, sample="sample", group="condition", outdir="run"))
 
-  expect_equal(status, 0)
+  expect_run_result(res, "run")
   expect_run_matches_master(file.path(dir, "run"))
 })
 

@@ -8,6 +8,14 @@
 Cell grids are scored by compiled code (\code{src/score_grids.cpp}). Importing a Matrix class loads the Matrix namespace with HyperCom,
 so the bundled sparse counts can be subset right after \code{library(HyperCom)}.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/pawelab/HyperCom}
+  \item Report bugs at \url{https://github.com/pawelab/HyperCom/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: Justin Moy \email{jmmoy@bu.edu} (\href{https://orcid.org/0000-0002-7566-2215}{ORCID})
 

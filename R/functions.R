@@ -4,7 +4,8 @@
 #'
 #' This function takes a gene x cell counts matrix and filters it to
 #' just ligand and receptor genes with greater than 0 expression. Missing counts are left out of the means.
-#' A gene name used by several rows keeps its first row, with a warning.
+#' A gene name used by several rows keeps its first row, with a warning. Raw and normalised counts give the same results (HyperCom uses
+#' whether each gene is above 0 in each cell); counts with negative values (scaled data) and counts with genes as column names stop.
 #' @param counts A matrix with row names being genes and column names being cells
 #' @param lrdb A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
@@ -13,13 +14,20 @@
 #' sparse if counts is sparse
 #' @export
 filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
+  check_lrdb(lrdb)
   genes <- unique(unlist(lapply(lrdb[, -1, drop=FALSE], as.character), use.names=FALSE))
   features <- intersect(rownames(counts), genes)
+  if(length(features) == 0 & any(colnames(counts) %in% genes)){
+    stop("counts has genes as column names: give a gene x cell matrix, e.g. t(counts)")
+  }
   dup.genes <- unique(rownames(counts)[duplicated(rownames(counts)) & rownames(counts) %in% features])
   if(length(dup.genes) > 0){
     warning("gene names used by several rows of counts, the first row is kept: ", paste(dup.genes, collapse=", "))
   }
   exp <- Matrix::t(counts[features, , drop=FALSE])
+  if(length(exp) > 0 && min(exp, na.rm=TRUE) < 0){
+    stop("counts has negative values (scaled data?): give raw or normalised counts; HyperCom uses whether each gene is above 0 in each cell")
+  }
   genes.exp <- Matrix::colMeans(exp, na.rm=TRUE)
   genes.filter <- features[which(genes.exp > 0)]
   cc.counts <- exp[, genes.filter, drop=FALSE]
@@ -28,6 +36,23 @@ filter_counts <- function(counts, lrdb, outfile="0.counts.rds"){
     saveRDS(cc.counts, outfile)
   }
   return(cc.counts)
+}
+
+#' Check a table of ligand-receptor interactions
+#'
+#' `check_lrdb` stops unless lrdb looks like a table of ligand-receptor interactions
+#'
+#' This function takes the lrdb argument and stops, naming the expected format, unless it is a dataframe with a column named ligand
+#' and at least one receptor column, so that swapped arguments fail at once.
+#' @param lrdb A dataframe of ligand-receptor interactions
+#' @returns NULL, invisibly
+#' @noRd
+check_lrdb <- function(lrdb){
+  if(!is.data.frame(lrdb) || !("ligand" %in% colnames(lrdb)) || ncol(lrdb) < 3){
+    stop("lrdb must be a dataframe of ligand-receptor interactions (interaction, ligand and receptor columns) like cellchat.mm.lrdb")
+  }
+
+  return(invisible(NULL))
 }
 
 #' Generate a table of ligand-receptor interactions present in a counts matrix
@@ -348,8 +373,8 @@ incidence_matrix <- function(hyperedges, adj){
 #' or "chol"
 #' @param hyperedges A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
 #' matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own
-#' @param threads An integer number of threads for method "woodbury", NULL for all available cores ("lu" and "chol" run on the
-#' threads of the BLAS)
+#' @param threads An integer number of threads for method "woodbury", NULL for one per physical core
+#' (`parallelly::availableCores(logical=FALSE)`; "lu" and "chol" run on the threads of the BLAS)
 #' @returns An influence matrix: a hypercom_influence (method "woodbury") or a dense matrix
 #' @export
 generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbury", "lu", "chol"), hyperedges=NULL, threads=NULL){
@@ -357,7 +382,7 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbu
   if(missing(method) & !graph & is.null(hyperedges)){
     method <- "lu"
   }
-  method <- match.arg(method)
+  method <- match_method(method)
   if(is.data.frame(adj)){
     adj <- as.matrix(adj)
   }
@@ -417,6 +442,23 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbu
     saveRDS(infMat, outfile, compress=FALSE)
   }
   return(infMat)
+}
+
+#' Match the name of an influence matrix method
+#'
+#' `match_method` returns the full name of an influence matrix method
+#'
+#' This function takes a method name as generate_infMat's method argument and returns it matched to "woodbury", "lu" or "chol",
+#' stopping with the new name for "hypergraph", the name of "woodbury" before 2026-11-15.
+#' @param method A string naming the method, or the vector of all three for the first
+#' @returns A string naming the method
+#' @noRd
+match_method <- function(method){
+  if(identical(method, "hypergraph")){
+    stop("method \"hypergraph\" is now called \"woodbury\"")
+  }
+
+  return(match.arg(method, c("woodbury", "lu", "chol")))
 }
 
 #' Factor the influence matrix through the hyperedges
@@ -559,7 +601,8 @@ print.hypercom_influence <- function(x, ...){
 #' node name, sample, and group. If group is unspecified, it is assumed all nodes are part of the same group.
 #' Nodes of the influence matrix that are not cells of the metadata are genes: their sample, group and kept columns are "gene".
 #' Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and other classed columns
-#' other than factors become strings.
+#' other than factors become strings. Cells are compared only within their sample, so every sample needs at least 2 cells in the
+#' graph (cells that express a ligand or receptor gene).
 #' @param infMat An influence matrix from generate_infMat (only its node names are read)
 #' @param metadata A dataframe containing cell metadata with row names being cells
 #' @param sample A string that is the column name for sample in the provided metadata
@@ -569,15 +612,16 @@ print.hypercom_influence <- function(x, ...){
 #' @returns A dataframe with columns cell, sample, group and the kept columns, one row per node of the influence matrix
 #' @export
 generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
+  check_columns(metadata, sample, group, keep)
   index <- data.frame(cell=row.names(infMat), check.names=FALSE)
   cells <- rownames(metadata)
 
   if(is.null(group)){
     group.vals <- "none"
   } else {
-    group.vals <- as.character(metadata[, group])
+    group.vals <- as.character(metadata[[group]])
   }
-  sample.vals <- as.character(metadata[, sample])
+  sample.vals <- as.character(metadata[[sample]])
 
   in.graph <- cells %in% index$cell
   if(!any(in.graph)){
@@ -591,6 +635,11 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
   }
   if(any(sample.vals == "gene", na.rm=TRUE) | any(group.vals == "gene", na.rm=TRUE)){
     stop("\"gene\" labels gene nodes and cannot name a sample or group")
+  }
+  sizes <- table(sample.vals[in.graph])
+  if(any(sizes < 2)){
+    stop("every sample needs at least 2 cells in the graph (cells that express a ligand or receptor gene), as cells are compared only ",
+         "within their sample; remove the cells of: ", paste(names(sizes)[sizes < 2], collapse=", "))
   }
 
   clean.df <- data.frame(cell=cells, sample=sample.vals, group=group.vals, check.names=FALSE)
@@ -623,6 +672,36 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
   return(clean.df)
 }
 
+#' Check the metadata columns named by the arguments
+#'
+#' `check_columns` stops unless sample, group and keep name columns of the metadata
+#'
+#' This function takes the metadata and the column arguments of generate_metadata and stops, naming the problem, unless metadata is a
+#' dataframe, sample and group are each one string and every named column exists.
+#' @param metadata A dataframe containing cell metadata with row names being cells
+#' @param sample A string that is the column name for sample in the provided metadata
+#' @param group A string that is the column name for group in the provided metadata, or NULL
+#' @param keep A vector of strings that are additional column names to keep in the provided metadata, or NULL
+#' @returns NULL, invisibly
+#' @noRd
+check_columns <- function(metadata, sample, group=NULL, keep=NULL){
+  if(!is.data.frame(metadata)){
+    stop("metadata must be a dataframe with row names being cells")
+  }
+  for(arg in list(sample, group)){
+    if(!is.null(arg) && !(is.character(arg) && length(arg) == 1)){
+      stop("sample and group must each be one column name of metadata, e.g. sample=\"sample\"")
+    }
+  }
+  absent <- setdiff(c(sample, group, keep[is.character(keep)]), colnames(metadata))
+  if(length(absent) > 0){
+    stop("not columns of metadata: ", paste(absent, collapse=", "), " (its columns: ", paste(utils::head(colnames(metadata), 20), collapse=", "),
+         ")")
+  }
+
+  return(invisible(NULL))
+}
+
 #' Choose the number of threads
 #'
 #' `get_threads` returns the number of threads used to score cell grids
@@ -630,7 +709,7 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
 #' This function takes the parallel switch, an optional cluster and an optional thread count. An explicit thread count wins;
 #' otherwise one thread without parallel, and with parallel the available physical cores (no more than the size of the cluster if one
 #' is given, or than cl itself if it is a number): hyperthreads and big grids compete for the same caches. Never more than the
-#' available (logical) cores.
+#' available (logical) cores: a larger thread count warns. A thread count below 1 stops.
 #' @param parallel A boolean of whether to run in parallel
 #' @param cl A cluster object, a number of workers, or NULL
 #' @param threads An integer number of threads or NULL
@@ -643,7 +722,13 @@ get_threads <- function(parallel=FALSE, cl=NULL, threads=NULL){
     if(length(threads) != 1 || is.na(threads)){
       stop("threads must be one number")
     }
-    return(as.integer(max(1, min(floor(threads), cores))))
+    if(threads < 1){
+      stop("threads must be at least 1")
+    }
+    if(floor(threads) > cores){
+      warning("threads=", threads, " is more than the ", cores, " available cores: using ", cores)
+    }
+    return(as.integer(min(floor(threads), cores)))
   }
   if(!parallel){
     return(1)
@@ -784,24 +869,36 @@ average_scores <- function(sr, cols){
 #' `score_hypercom` returns a dataframe containing the HyperCom score for each cell
 #'
 #' This function takes a named influence matrix, the corresponding metadata, the ligand, and receptor
-#' to give each cell a HyperCom score. If both the ligand and receptor are specified this is the LR Pair Score
-#' otherwise the score is the Network Score. If a receptor complex is specified, the average of the score vectors is used.
+#' to give each cell a HyperCom score. If both the ligand and receptor are specified this is the LR Pair Score,
+#' if neither is the score is the Network Score. If a receptor complex is specified, the average of the score vectors is used.
+#' Scores are the same at any number of threads.
 #' @param infMat An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)
 #' @param metadata A dataframe containing columns named cell, sample and group
-#' @param ligand A string of the ligand name
-#' @param receptors A vector containing string elements of the receptor names
+#' @param ligand A string of the ligand name, NULL for the network score
+#' @param receptors A vector containing string elements of the receptor names, NULL for the network score
+#' @param parallel A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
+#' not tell them apart)
+#' @param threads An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
+#' them all
 #' @returns A dataframe containing the sender score, receiver score, avg, dif, and HyperCom score
 #' @export
-score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL){
+score_hypercom <- function(infMat, metadata, ligand=NULL, receptors=NULL, parallel=FALSE, threads=NULL){
+  threads <- get_threads(parallel, NULL, threads)
   complex.size <- length(receptors)
+  if(is.null(ligand) != is.null(receptors)){
+    stop("give both ligand and receptors for a pair score, or neither for the network score")
+  }
+  if(!is.null(ligand) && length(ligand) != 1){
+    stop("ligand must be one gene")
+  }
   if(!is.null(ligand) & !is.null(receptors) & complex.size == 0){
     stop("receptors must name at least one gene")
   }
-  if(is.null(ligand) | is.null(receptors)){
-    sr <- score_grids(infMat, metadata, NA, NA)
-    cols <- rep(1, max(complex.size, 1))
+  if(is.null(ligand)){
+    sr <- score_grids(infMat, metadata, NA, NA, threads)
+    cols <- 1
   } else {
-    sr <- score_grids(infMat, metadata, rep(ligand, complex.size), receptors)
+    sr <- score_grids(infMat, metadata, rep(ligand, complex.size), receptors, threads)
     cols <- seq_len(complex.size)
   }
 
@@ -930,9 +1027,11 @@ batch_pairs <- function(ligands, receptors, size){
 #' @param infMat An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param threads An integer number of threads
+#' @param verbose A boolean of whether to report the pairs scored, about every 5 s, with an estimate of the time left (pairs are
+#' scored in about 20 batches or more when grids are bigger than the kernel's 24 MB cache budget; see batch_size)
 #' @return A list with terms, a matrix with one row per pair and columns frac, pct.min, max, balance and purity, and title, the pair names
 #' @noRd
-calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
+calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
   cells.idx <- metadata$sample != "gene"
@@ -965,7 +1064,13 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
 
   terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
   title <- character(nrow(lrs))
-  size <- max(threads, min(max(256, 32 * threads), floor(2^26 / (16 * length(cells)))))
+  grids <- unique(data.frame(ligand=rep(ligands, ncol(receptors)), receptor=as.vector(receptors)))
+  n.grids <- sum(!is.na(grids$receptor))
+  size <- batch_size(threads, length(cells), tabulate(as.integer(factor(metadata$sample[cells.idx]))), n.grids)
+  done <- 0
+  grids.done <- 0
+  t0 <- Sys.time()
+  shown <- t0
   for(rows in batch_pairs(ligands, receptors, size)){
     pairs <- unique(data.frame(ligand=rep(ligands[rows], ncol(receptors)), receptor=as.vector(receptors[rows, , drop=FALSE])))
     pairs <- pairs[!is.na(pairs$receptor), ]
@@ -995,19 +1100,86 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
       frac <- sum(present) / length(cells)
       max <- mean(pmax(ss, rr)[present])
 
-      if(gini.max > 0){
-        purity <- gini.max - gini_impurity(groups[present])
-      }else{purity <- 1}
-
+      purity <- group_purity(groups[present], gini.max)
       balance <- gini_impurity(type[present]) / 0.5
 
       terms[i, ] <- c(frac, pct.min, max, balance, purity)
       title[i] <- paste(c(l, rs), collapse="_")
     }
     rm(sr)
+    done <- done + length(rows)
+    grids.done <- grids.done + nrow(pairs)
+    if(verbose && (as.numeric(difftime(Sys.time(), shown, units="secs")) >= 5 | done == nrow(lrs))){
+      left <- as.numeric(difftime(Sys.time(), t0, units="secs")) / grids.done * (n.grids - grids.done)
+      message("  ", done, " of ", nrow(lrs), " pairs scored", if(done < nrow(lrs)) paste0(", about ", format_duration(left), " left"))
+      shown <- Sys.time()
+    }
   }
 
   return(list(terms=terms, title=title))
+}
+
+#' Choose the number of grids per batch
+#'
+#' `batch_size` returns how many grids calculate_priority scores per kernel call
+#'
+#' This function takes the thread count, the number of cells, the cells of each sample and the number of grids and returns the batch
+#' size: at least one grid per thread and at most about 64 MB of cell scores; when a grid is bigger than the kernel's 24 MB cache
+#' budget (10 bytes per within-sample cell pair), all threads score one grid at a time, so smaller batches keep every thread busy and
+#' there are about 20 batches or more, for progress messages. Each batch sets up the kernel's buffers again: on 20,000 cells, 104
+#' pairs in 20 batches instead of 2 took 5% longer (90 instead of 86 s) and peaked 0.16 GB higher; the full CellChat database already
+#' gives about 20 batches there.
+#' @param threads An integer number of threads
+#' @param cells An integer number of cells
+#' @param sample.sizes An integer vector of the number of cells of each sample
+#' @param n.grids An integer number of grids to score
+#' @returns An integer number of grids per batch
+#' @noRd
+batch_size <- function(threads, cells, sample.sizes, n.grids){
+  size <- max(threads, min(max(256, 32 * threads), floor(2^26 / (16 * cells))))
+  if(10 * sum(as.numeric(sample.sizes)^2) > 24 * 2^20){
+    size <- max(threads, min(size, ceiling(n.grids / 20)))
+  }
+
+  return(size)
+}
+
+#' Format a duration for a progress message
+#'
+#' `format_duration` returns a duration in seconds as a short string
+#'
+#' This function takes a number of seconds and returns it rounded in seconds below 90 s, in minutes below 90 min and in hours above.
+#' @param seconds A double number of seconds
+#' @returns A string, e.g. "40 s", "12 min" or "2.5 h"
+#' @noRd
+format_duration <- function(seconds){
+  if(seconds < 90){
+    return(paste0(max(1, round(seconds)), " s"))
+  }
+  if(seconds < 5400){
+    return(paste0(round(seconds / 60), " min"))
+  }
+
+  return(paste0(round(seconds / 3600, 1), " h"))
+}
+
+#' Calculate the group purity of the cells of a pair
+#'
+#' `group_purity` returns how far the groups of a pair's cells are from evenly mixed
+#'
+#' This function takes the groups of the cells expressing a pair's genes and the largest possible Gini impurity and returns their
+#' difference, at least 0: cells perfectly balanced over 5, 10 or 11 groups round the difference to -1.1e-16, whose log would make the
+#' priority NaN. One group (largest impurity 0) gives 1.
+#' @param groups A factor of the groups of the cells
+#' @param gini.max A double of the largest possible Gini impurity, 1 - 1 / the number of groups
+#' @returns A numeric purity
+#' @noRd
+group_purity <- function(groups, gini.max){
+  if(gini.max <= 0){
+    return(1)
+  }
+
+  return(max(0, gini.max - gini_impurity(groups)))
 }
 
 #' Combine priority terms into priority scores
@@ -1017,10 +1189,9 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1){
 #' This function takes the priority terms of calculate_priority and returns their weighted geometric mean.
 #' @param priority.terms A list from calculate_priority
 #' @param weight a value between 0 to 1 for the importance of number of cells involved in an interaction
-#' @param verbose A boolean of whether to print the score of each pair
 #' @return A numeric vector of priority scores
 #' @noRd
-score_priority <- function(priority.terms, weight=1, verbose=TRUE){
+score_priority <- function(priority.terms, weight=1){
   w <- c(weight, rep(1, 4))
   terms <- priority.terms$terms
   priority <- numeric(nrow(terms))
@@ -1028,12 +1199,27 @@ score_priority <- function(priority.terms, weight=1, verbose=TRUE){
     priority[i] <- exp(stats::weighted.mean(log(terms[i, ]), w))
   }
 
-  if(verbose){
-    for(i in seq_along(priority)){
-      print(paste0(priority.terms$title[i], ",", priority[i]))
-    }
-  }
   return(priority)
+}
+
+#' Check the weights of the priority scores
+#'
+#' `check_weights` stops unless the weights are distinct numbers of at least 0
+#'
+#' This function takes the weights argument of prioritize_lr and stops unless every weight is a finite number of at least 0 and no two
+#' weights print alike (each names a result and an output file).
+#' @param weights A vector of values between 0 to 1 for the importance of number of cells involved in an interaction
+#' @returns NULL, invisibly
+#' @noRd
+check_weights <- function(weights){
+  if(!is.numeric(weights) || length(weights) == 0 || !all(is.finite(weights)) || any(weights < 0)){
+    stop("weights must be numbers of at least 0, e.g. c(1, 0.5)")
+  }
+  if(anyDuplicated(as.character(weights)) > 0){
+    stop("weights must differ: each names a result and an output file")
+  }
+
+  return(invisible(NULL))
 }
 
 #' Order ligand receptor pairs based on signalling strength and specificity
@@ -1043,6 +1229,8 @@ score_priority <- function(priority.terms, weight=1, verbose=TRUE){
 #' This function takes list of all ligand-receptor pairs in the influence matrix,
 #' the adjacency matrix, a named influence matrix, and the corresponding metadata
 #' to prioritize ligand-receptor pairs. Cell grids are scored in C++ threads, once for all weights.
+#' With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
+#' high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 #' @param lrs A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
 #' interactions with only interactions present in the counts matrix.
@@ -1051,19 +1239,21 @@ score_priority <- function(priority.terms, weight=1, verbose=TRUE){
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
-#' @param parallel A boolean of whether to run in parallel: threads on the available physical cores (`parallelly::availableCores(logical=FALSE)`)
+#' @param parallel A boolean of whether to run in parallel: one thread per physical core (`parallelly::availableCores(logical=FALSE)`;
+#' on Linux R does not tell physical from logical cores, so one per logical core)
 #' @param cl A cluster object, kept for compatibility: it is not used or stopped, only its size caps the number of threads
 #' @param outdir A string naming the output directory
-#' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
+#' @param threads An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+#' them all
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
-#' @param verbose A boolean of whether to print each weight and the score of each pair
-#' @returns A dataframe of ligand-receptor pairs ordered by priority score for each weight
+#' @param verbose A boolean of whether to report progress as messages: the pairs scored about every 5 s with
+#' the time left, and the top pair of each weight
+#' @returns A list of dataframes named by weight, each the ligand-receptor pairs ordered by priority score, with columns p and p.adj
+#' when significance is TRUE
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL, outdir="6.priority",
                           threads=NULL, seed=NULL, verbose=TRUE){
-  if(anyDuplicated(as.character(weights)) > 0){
-    stop("weights must differ: each names a result and an output file")
-  }
+  check_weights(weights)
   if(significance){
     if(!is.null(seed)){
       set.seed(seed)
@@ -1071,29 +1261,30 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     background.lrs <- generate_background_lrs(lrs, metadata)
   }
   threads <- get_threads(parallel, cl, threads)
+  if(verbose){
+    message("Scoring ", nrow(lrs), " ligand-receptor pairs", if(significance) paste0(" and ", nrow(background.lrs), " background pairs"),
+            " on ", threads, " thread", if(threads > 1) "s")
+  }
 
   if(significance){
-    all.terms <- calculate_priority(rbind(lrs, background.lrs), adj, infMat, metadata, threads)
+    all.terms <- calculate_priority(rbind(lrs, background.lrs), adj, infMat, metadata, threads, verbose)
     fg <- seq_len(nrow(lrs))
     priority.terms <- list(terms=all.terms$terms[fg, , drop=FALSE], title=all.terms$title[fg])
     background.terms <- list(terms=all.terms$terms[-fg, , drop=FALSE], title=all.terms$title[-fg])
   } else {
-    priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads)
+    priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose)
   }
 
   lrs.list <- list()
 
   for(i in seq(1, length(weights))){
     weight <- weights[i]
-    if(verbose){
-      print(weight)
-    }
-    priority <- score_priority(priority.terms, weight, verbose)
+    priority <- score_priority(priority.terms, weight)
 
     current.lrs <- lrs
 
     if(significance){
-      background.priority <- score_priority(background.terms, weight, verbose)
+      background.priority <- score_priority(background.terms, weight)
     }
 
     current.lrs$priority <- priority
@@ -1104,10 +1295,14 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
       current.lrs$p.adj <- stats::p.adjust(current.lrs$p, method="BH")
     }
 
+    outfile <- NULL
     if(!is.null(outdir)){
       dir.create(file.path(outdir), showWarnings=FALSE, recursive=TRUE)
       outfile <- paste0(outdir, "/priority.", weight, ".csv")
       utils::write.csv(current.lrs, outfile, row.names=FALSE)
+    }
+    if(verbose){
+      message("Weight ", weight, ": top pair ", current.lrs[[1]][1], if(!is.null(outfile)) paste0(", written to ", outfile))
     }
 
     lrs.list[[i]] <- current.lrs
@@ -1128,6 +1323,10 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' hypergraph's hyperedges; about 1e-15 from master's "lu"), and only the within-sample cell blocks of the influence matrix are made,
 #' while pairs are scored. Small data with at least as many
 #' hyperedges (genes and interactions) as nodes get the dense influence matrix instead, which is then no bigger than the factors.
+#' The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
+#' lrdb of another species). Priority files of other weights already in outdir are kept, with a warning. The results are returned as
+#' well as written, so they need not be read back: `res <- HyperCom(...)`, then `res$priority[["1"]]` or
+#' `score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")`.
 #' @param lrdb A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
 #' and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions
 #' @param counts A matrix with row names being genes and column names being cells
@@ -1137,19 +1336,32 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata
 #' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
-#' @param parallel A boolean of whether to run in parallel: threads on the available physical cores
+#' @param parallel A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
+#' not tell them apart)
 #' @param cl A cluster object, kept for compatibility: only its size caps the number of threads
 #' @param outdir output directory of pipeline run
-#' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
+#' @param threads An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+#' them all
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
-#' @param verbose A boolean of whether to print each weight and the score of each pair
+#' @param verbose A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
+#' each weight
 #' @param infmat.method A string naming the method of `generate_infMat`: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
 #' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
 #' 1e-15 from "lu"
-#' @returns 0 if run successfully
+#' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
+#' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE, cl=NULL,
                      outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
+  check_lrdb(lrdb)
+  check_columns(metadata, sample, group, keep)
+  check_weights(weights)
+  infmat.method <- match_method(infmat.method)
+  threads <- get_threads(parallel, cl, threads)
+  stale <- setdiff(list.files(file.path(outdir, "6.priority"), pattern="^priority\\..*\\.csv$"), paste0("priority.", weights, ".csv"))
+  if(length(stale) > 0){
+    warning("outdir already holds priorities of other weights, which are kept: ", paste(stale, collapse=", "))
+  }
   dir.create(outdir, showWarnings=FALSE, recursive=TRUE)
   no.metadata <- setdiff(colnames(counts), rownames(metadata))
   if(length(no.metadata) > 0){
@@ -1158,22 +1370,38 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
 
   counts <- filter_counts(counts, lrdb, outfile=file.path(outdir, "0.counts.rds"))
   lrs <- generate_lrs_table(counts, lrdb, outfile=file.path(outdir, "1.lrs.csv"))
+  if(nrow(lrs) == 0){
+    stop("no interaction of lrdb has all its genes expressed in counts (", ncol(counts), " of its genes are): check that lrdb is of the ",
+         "species of counts (cellchat.mm.lrdb mouse, cellchat.hs.lrdb human) and that counts is gene x cell")
+  }
+  if(verbose){
+    message(ncol(counts), " ligand and receptor genes expressed in ", nrow(counts), " cells; ", nrow(lrs), " interactions of lrdb have all ",
+            "their genes expressed")
+  }
   hyperedges <- generate_hyperedges(counts, lrs, outfile=file.path(outdir, "2.hyperedges.csv"))
   adj <- generate_adjacency_matrix(hyperedges, outfile=file.path(outdir, "3.adj.rds"))
   rm(counts, hyperedges)
-  infMat <- generate_infMat(adj, outfile=file.path(outdir, "4.infMat.rds"), method=infmat.method, threads=get_threads(parallel, cl, threads))
+  infMat <- generate_infMat(adj, outfile=file.path(outdir, "4.infMat.rds"), method=infmat.method, threads=threads)
+  if(verbose){
+    message("Hypergraph of ", nrow(adj), " cells and genes; influence matrix made (method \"", infmat.method, "\")")
+  }
   metadata <- generate_metadata(infMat, metadata, sample, group, keep, outfile=file.path(outdir, "5.metadata.csv"))
   priority <- prioritize_lr(lrs, adj, infMat, metadata, weights, significance, parallel, cl, outdir=file.path(outdir, "6.priority"),
                             threads=threads, seed=seed, verbose=verbose)
+  if(verbose){
+    message("Done: results in ", outdir)
+  }
 
-  return(0)
+  return(invisible(list(priority=priority, metadata=metadata, infMat=infMat, adj=adj, lrs=lrs)))
 }
 
 #' Get the counts matrix of a Seurat assay layer
 #'
 #' `get_seurat_layer` returns the matrix with dimnames for given assay and layer
 #'
-#' This function takes a Seurat object and returns one layer of one assay, joining split layers of v5 assays.
+#' This function takes a Seurat object and returns one layer of one assay, joining split layers of v5 assays. Assays of other classes
+#' (v3 assays, SeuratObject 4 and 5) are read from the slot of that name, as GetAssayData does in SeuratObject 5 (in SeuratObject 4
+#' GetAssayData has no layer argument and returns the data slot).
 #' @param seurat A seurat object
 #' @param assay A string naming the assay to get data from
 #' @param layer A string naming the layer to get data from
@@ -1186,7 +1414,10 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
   a <- seurat[[assay]]
 
   if(!inherits(a, "Assay5")){
-    m <- SeuratObject::GetAssayData(a, layer=layer)
+    if(!(layer %in% c("counts", "data", "scale.data"))){
+      stop("layer '", layer, "' is not a layer of assay '", assay, "': use counts, data or scale.data")
+    }
+    m <- methods::slot(a, layer)
     if(!length(m)){
       stop("layer '", layer, "' is empty or absent in assay '", assay, "'")
     }
@@ -1220,24 +1451,28 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata
 #' @param weights a vector of values between 0 to 1 for the importance of number of cells involved in an interaction
 #' @param significance A boolean of whether to generate p-values for ligand-receptor interactions
-#' @param parallel A boolean of whether to run in parallel: threads on the available physical cores
+#' @param parallel A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
+#' not tell them apart)
 #' @param cl A cluster object, kept for compatibility: only its size caps the number of threads
 #' @param outdir output directory of pipeline run
-#' @param threads An integer number of threads, overriding parallel and cl (at most the available cores)
+#' @param threads An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+#' them all
 #' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
-#' @param verbose A boolean of whether to print each weight and the score of each pair
+#' @param verbose A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
+#' each weight
 #' @param infmat.method A string naming the method of `generate_infMat`: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
 #' matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
 #' 1e-15 from "lu"
-#' @returns 0 if run successfully
+#' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
+#' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
                             parallel=FALSE, cl=NULL, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
 
-  status <- HyperCom(lrdb, counts, metadata, sample, group, keep, weights, significance, parallel, cl, outdir, threads=threads, seed=seed,
-                     verbose=verbose, infmat.method=infmat.method)
+  res <- HyperCom(lrdb, counts, metadata, sample, group, keep, weights, significance, parallel, cl, outdir, threads=threads, seed=seed,
+                  verbose=verbose, infmat.method=infmat.method)
 
-  return(status)
+  return(invisible(res))
 }

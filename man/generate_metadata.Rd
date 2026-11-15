@@ -37,5 +37,6 @@ This function takes an influence matrix and metadata table and creates a metadat
 node name, sample, and group. If group is unspecified, it is assumed all nodes are part of the same group.
 Nodes of the influence matrix that are not cells of the metadata are genes: their sample, group and kept columns are "gene".
 Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and other classed columns
-other than factors become strings.
+other than factors become strings. Cells are compared only within their sample, so every sample needs at least 2 cells in the
+graph (cells that express a ligand or receptor gene).
 }

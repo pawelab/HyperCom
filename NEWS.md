@@ -1,10 +1,11 @@
-# HyperCom 0.0.0.9001 (development)
+# HyperCom 0.2.0
 
 Same results as 0.0.0.9000 (master b999a01) bit for bit on the bundled data: counts, LR table, hyperedges, adjacency and influence
 matrices, metadata, cell scores, priorities and seeded p-values are `identical()` to master's under the C collation. One exception
 by default: the influence matrix is now made with method `"woodbury"`, about 1e-15 from master's (on the bundled data `HyperCom()`
-still writes master's priorities and seeded p-values); method `"lu"` gives master's numbers bit for bit. The adjacency and influence
-matrices are no longer stored as node x node matrices by default (see below).
+still writes master's priorities and seeded p-values); method `"lu"` gives master's numbers bit for bit. Where master gave NaN
+priorities for cells perfectly balanced over groups, priorities are now 0 (see Bug fixes). The adjacency and influence matrices are
+no longer stored as node x node matrices by default (see below).
 
 ## Speed
 
@@ -91,16 +92,57 @@ cells the dense influence matrix took 121 s with `"lu"` and 46 s with `"chol"`; 
 
 ## New arguments and changed behaviour
 
-* `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `threads` (number of threads, capped at the available cores), `seed` (set before drawing the background
-  interactions, so p-values are reproducible; ignored without `significance`), `verbose` (`FALSE` prints nothing). They come after
+* `score_hypercom` takes `parallel` and `threads` like `prioritize_lr` (one thread by default); scores are the same at any number of
+  threads. On 20,000 cells one pair took 4.6 s on 1 thread and 0.9 s on 16.
+
+* `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `threads` (number of threads: below 1 stops, more than the available cores warns and uses them all), `seed` (set before drawing the background
+  interactions, so p-values are reproducible; ignored without `significance`), `verbose` (`FALSE` reports nothing). They come after
   `outdir`, so positional calls written for master still work. `parallel=TRUE` uses one thread per physical core (`parallelly::availableCores(logical=FALSE)`); `cl` is
   accepted but only caps the thread count and is never stopped.
-* The per-pair score lines are printed once all pairs are scored, not as progress.
+* `HyperCom` and `HyperCom_seurat` return, invisibly, a list of their results instead of 0: `priority` (one dataframe per weight),
+  `metadata`, `infMat`, `adj` and `lrs`, the objects also written to `outdir`. Results need not be read back from the files:
+  `res <- HyperCom(...)`, then `res$priority[["1"]]` or `score_hypercom(res$infMat, res$metadata, "Thbs1", "Sdc4")`. Code that compared
+  the value with 0 needs changing; the files are as before.
+* Progress is reported with `message()` instead of `print()`, so `suppressMessages()` silences it: what each `HyperCom` step
+  found (genes, cells, interactions, nodes), the pairs scored about every 5 s with an estimate of the time left, and the top pair
+  and output file of each weight. On data whose grids exceed the kernel's 24 MB cache budget (about 1600 cells in one sample), pairs
+  are scored in about 20 batches or more, so that progress comes often; smaller data keep the larger batches. Each batch sets up the
+  kernel's buffers again, so a run of few pairs on big data takes a little longer (20,000 cells, 104 pairs: 90 instead of 86 s); with
+  the full CellChat database the number of batches is about the same as before. The
+  per-pair score lines (one per pair and background pair and weight, 800-3600 lines) are gone; the scores are in the returned tables
+  and the CSV files.
+* `prioritize_lr` documents its p-values: the fraction of 1000 background pairs scoring at least as high, in steps of 0.001; 0 means
+  none did.
 * `generate_metadata` stops when a cell of the graph has no sample or group (master turned such cells into genes); metadata rows
   that are not in the graph may still have missing values.
 * The package has compiled code: installing from source needs a C++ compiler (Rtools on Windows).
 
+## Input checks
+
+Mistakes that ran to meaningless results, or failed late with unclear messages, now stop at once with a message that says what to
+fix. Results of valid inputs are unchanged.
+
+* `HyperCom` checks `lrdb`, the `sample` / `group` / `keep` columns, `weights` and `infmat.method` before any step runs (a misspelt
+  column used to fail after the influence matrix with "undefined columns selected"; `lrdb` and `counts` swapped took 27 s and 6 GB).
+* `HyperCom` stops when no interaction of `lrdb` has all its genes expressed, e.g. a human `lrdb` on mouse counts; it used to finish
+  with an empty priority table.
+* `filter_counts` stops on counts with genes as column names (transposed) and on negative values (scaled data, which ran as if every
+  value were expression).
+* `generate_metadata` stops when a sample has fewer than 2 cells in the graph (its cells get no scores, and with `significance` every
+  p-value became NA); `sample` and `group` must be one column name each; tibbles are read by column name.
+* `score_hypercom` stops when given only one of `ligand` and `receptors` (a ligand alone gave the network score, receptors alone
+  all-zero scores) and when `ligand` names more than one gene.
+* `prioritize_lr` stops on weights that are not numbers of at least 0 (negative weights gave infinite priorities).
+* The old method name `"hypergraph"` stops with its new name, `"woodbury"`.
+* `HyperCom` warns when `outdir` already holds priority files of other weights, which it keeps.
+* `HyperCom_seurat` reads v3 assays from the layer asked for with SeuratObject 4 as well (SeuratObject 4's `GetAssayData` ignored
+  `layer` and returned the `data` slot).
+
 ## Bug fixes
+
+* Cells perfectly balanced over 5, 10 or 11 groups no longer give NaN priorities: the group purity term rounded to -1.1e-16, whose
+  log is NaN, and every p-value then became NA (also in master). Purity below 0 now counts as 0, so such pairs get priority 0. Results
+  change only where master gave NaN.
 
 * Cells sharing a barcode stop with a message in `generate_hyperedges` (master mangled them with `make.names` and merged or lost
   cells); metadata whose row names match no node stops in `generate_metadata`.
@@ -136,6 +178,14 @@ cells the dense influence matrix took 121 s with `"lu"` and 46 s with `"chol"`; 
 ## Package
 
 * Dropped dependencies: collapse, doParallel, foreach, mltools, Rfast; SeuratObject moved to Suggests (only `HyperCom_seurat` needs it).
+* Minimum versions: dplyr 1.1.0 (`join_by`), parallelly 1.23.0 (`availableCores(logical=)`); older versions failed with cryptic
+  errors. C++ is compiled as C++17 on every R version.
+* README: installation per operating system (build tools for the C++ code) with `pak`.
+* Tests compare the LU influence matrix bit for bit with master's formula run on the same machine and within 1e-12 with the fixture,
+  whose last bits depend on the BLAS it was made with (they failed on Linux and with R's reference BLAS). Scores and priorities are
+  compared bit for bit with the fixture where long double is the x87 type it was made with (x86-64), within 1e-12 elsewhere (arm64).
+* Version 0.2.0, above the 0.1.x of branch v1-fast, so installs of that branch update to it. DESCRIPTION has a description of the
+  method, URL and BugReports; `citation("HyperCom")` gives the bioRxiv preprint.
 * No more `:::` to the package's own functions; `weighted.mean` called as `stats::weighted.mean`.
 * Docs: `filter_counts` returns a cell x gene matrix; `generate_metadata` returns a data frame; the lrdb's first column may have any
   name; vignette `HyperCom_seurat` example fixed.

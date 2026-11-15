@@ -34,20 +34,24 @@ interactions with only interactions present in the counts matrix.}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel: threads on the available physical cores (\code{parallelly::availableCores(logical=FALSE)})}
+\item{parallel}{A boolean of whether to run in parallel: one thread per physical core (\code{parallelly::availableCores(logical=FALSE)};
+on Linux R does not tell physical from logical cores, so one per logical core)}
 
 \item{cl}{A cluster object, kept for compatibility: it is not used or stopped, only its size caps the number of threads}
 
 \item{outdir}{A string naming the output directory}
 
-\item{threads}{An integer number of threads, overriding parallel and cl (at most the available cores)}
+\item{threads}{An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+them all}
 
 \item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
 
-\item{verbose}{A boolean of whether to print each weight and the score of each pair}
+\item{verbose}{A boolean of whether to report progress as messages: the pairs scored about every 5 s with
+the time left, and the top pair of each weight}
 }
 \value{
-A dataframe of ligand-receptor pairs ordered by priority score for each weight
+A list of dataframes named by weight, each the ligand-receptor pairs ordered by priority score, with columns p and p.adj
+when significance is TRUE
 }
 \description{
 \code{prioritize_lr} returns an ordered list of ligand-receptor pairs
@@ -56,4 +60,6 @@ A dataframe of ligand-receptor pairs ordered by priority score for each weight
 This function takes list of all ligand-receptor pairs in the influence matrix,
 the adjacency matrix, a named influence matrix, and the corresponding metadata
 to prioritize ligand-receptor pairs. Cell grids are scored in C++ threads, once for all weights.
+With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
+high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 }

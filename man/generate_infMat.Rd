@@ -26,8 +26,8 @@ or "chol"}
 \item{hyperedges}{A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
 matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own}
 
-\item{threads}{An integer number of threads for method "woodbury", NULL for all available cores ("lu" and "chol" run on the
-threads of the BLAS)}
+\item{threads}{An integer number of threads for method "woodbury", NULL for one per physical core
+(\code{parallelly::availableCores(logical=FALSE)}; "lu" and "chol" run on the threads of the BLAS)}
 }
 \value{
 An influence matrix: a hypercom_influence (method "woodbury") or a dense matrix
