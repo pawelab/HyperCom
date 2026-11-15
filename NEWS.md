@@ -128,6 +128,8 @@ fix. Results of valid inputs are unchanged.
 * Tests compare with fixtures made by 0.0.0.9000: the LU influence matrix bit for bit with 0.0.0.9000's formula run on the same
   machine and within 1e-12 with the fixture (whose last bits depend on the BLAS it was made with); scores and priorities bit for bit
   where long double is x87 (x86-64), within 1e-12 elsewhere (arm64).
+* The R code is split by pipeline stage (`R/preprocess.R`, `hypergraph.R`, `influence.R`, `metadata.R`, `score.R`, `prioritize.R`,
+  `pipeline.R`, `utils.R`) instead of one `R/functions.R`; the code itself is unchanged.
 * No more `:::` to the package's own functions; `weighted.mean` is called as `stats::weighted.mean`.
 * Large R allocations in the compiled code go through `Rcpp::unwindProtect` (`src/r_alloc.h`), so an allocation error unwinds the
   C++ stack (destructors run, inputs are unprotected) before R's error is raised. The grid kernel packs its 6-byte keys byte by
