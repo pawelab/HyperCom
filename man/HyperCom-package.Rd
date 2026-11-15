@@ -3,10 +3,9 @@
 \docType{package}
 \name{HyperCom-package}
 \alias{HyperCom-package}
-\title{HyperCom: a hypergraph method to understand cell-cell communication}
+\title{HyperCom: A Hypergraph Method to Understand Cell-Cell Communication}
 \description{
-Cell grids are scored by compiled code (\code{src/score_grids.cpp}). Importing a Matrix class loads the Matrix namespace with HyperCom,
-so the bundled sparse counts can be subset right after \code{library(HyperCom)}.
+Infers cell-resolved cell-cell communication from single-cell transcriptomics data without aggregating cells by type (Moy and Przytycki (2026) \doi{10.64898/2026.09.30.755742}). HyperCom builds a hypergraph from known ligand-receptor interactions and the expression of those ligands and receptors in individual cells, diffuses over it by a random walk with restart, and scores each cell on a continuous spectrum from sender to receiver for each ligand-receptor pair. It then ranks ligand-receptor pairs by communication over the whole dataset or by condition, with optional permutation p-values. Input is a counts matrix with cell metadata, or a 'Seurat' object; 'CellChat' ligand-receptor databases for human and mouse are included.
 }
 \seealso{
 Useful links:

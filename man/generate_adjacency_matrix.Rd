@@ -7,9 +7,9 @@
 generate_adjacency_matrix(hyperedges, outfile = "3.adj.rds")
 }
 \arguments{
-\item{hyperedges}{A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge}
+\item{hyperedges}{A dataframe of hyperedges from generate_hyperedges, with columns edge (the hyperedge) and node (a node in it)}
 
-\item{outfile}{A string naming the output file}
+\item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
 A hypercom_adjacency: a list with H, the sparse node x hyperedge matrix of how often each node is in each hyperedge
@@ -20,8 +20,7 @@ A hypercom_adjacency: a list with H, the sparse node x hyperedge matrix of how o
 \details{
 This function takes a dataframe of hyperedges and returns its adjacency matrix: each entry is the number of hyperedges two nodes
 share, and the diagonal is zero. Nodes are ordered by their names in the C locale, so the order does not depend on the session's
-collation. Nodes that share no hyperedge with another node are dropped. The matrix itself is not stored: the result keeps the
-node x hyperedge incidence H, and the adjacency is H H' with the diagonal set to zero, so it takes memory in proportion to the
-hyperedge table instead of the number of nodes squared. It works like a matrix for dim, dimnames and rownames, \code{adj[i, j]} makes
-those entries and as.matrix the whole matrix.
+collation. Nodes that share no hyperedge with another node are dropped. The full node x node matrix is not stored: the result
+records which nodes are in which hyperedge, so it takes memory in proportion to the hyperedge table instead of the number of nodes
+squared. It works like a matrix for dim, dimnames and rownames; \code{adj[i, j]} gives those entries and as.matrix the whole matrix.
 }

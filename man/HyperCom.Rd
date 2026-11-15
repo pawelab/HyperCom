@@ -14,7 +14,6 @@ HyperCom(
   weights = c(1),
   significance = FALSE,
   parallel = FALSE,
-  cl = NULL,
   outdir = "HyperCom",
   threads = NULL,
   seed = NULL,
@@ -24,7 +23,8 @@ HyperCom(
 }
 \arguments{
 \item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}
+and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
+interactions, e.g. \code{cellchat.mm.lrdb}}
 
 \item{counts}{A matrix with row names being genes and column names being cells}
 
@@ -36,18 +36,17 @@ and subsequent columns are named r1, ..., rn where n is the maximum number of ge
 
 \item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
 
-\item{weights}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
+score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
 not tell them apart)}
 
-\item{cl}{A cluster object, kept for compatibility: only its size caps the number of threads}
+\item{outdir}{A string naming the output directory of the pipeline run}
 
-\item{outdir}{output directory of pipeline run}
-
-\item{threads}{An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+\item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
 them all}
 
 \item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
@@ -55,24 +54,20 @@ them all}
 \item{verbose}{A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
 each weight}
 
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
-matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
-1e-15 from "lu"}
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default; fastest and least memory), "chol" or
+"lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15}
 }
 \value{
 Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
 (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
 }
 \description{
-\code{HyperCom} Runs the HyperCom pipeline
+\code{HyperCom} runs the HyperCom pipeline
 }
 \details{
 This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat},
-\code{generate_metadata}, and \code{prioritize_lr}, writing every step to outdir. By default no node x node matrix is made: the adjacency is
-kept as its hyperedge incidence and the influence matrix as its factors (method "woodbury", which inverts through the
-hypergraph's hyperedges; about 1e-15 from master's "lu"), and only the within-sample cell blocks of the influence matrix are made,
-while pairs are scored. Small data with at least as many
-hyperedges (genes and interactions) as nodes get the dense influence matrix instead, which is then no bigger than the factors.
+\code{generate_metadata}, and \code{prioritize_lr}, writing every step to outdir. By default no matrix with a row and a column for every
+cell and gene is made, so memory grows with the number of cells rather than its square (see \code{generate_infMat}).
 The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
 lrdb of another species). Priority files of other weights already in outdir are kept, with a warning. The results are returned as
 well as written, so they need not be read back: \code{res <- HyperCom(...)}, then \code{res$priority[["1"]]} or

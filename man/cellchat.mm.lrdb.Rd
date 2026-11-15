@@ -3,9 +3,13 @@
 \docType{data}
 \name{cellchat.mm.lrdb}
 \alias{cellchat.mm.lrdb}
-\title{CellChat M. musculus Ligand-Receptor Interactions}
+\title{CellChat mouse ligand-receptor interactions}
+\format{
+A dataframe of 2377 interactions with columns interaction (its name), ligand (a mouse gene symbol) and r1 to r4 (the
+receptor genes, NA where a receptor complex has fewer subunits)
+}
 \description{
-CellChat M. musculus Ligand-Receptor Interactions
+The ligand-receptor interactions of the CellChat database for M. musculus, in the format HyperCom reads as \code{lrdb}.
 }
 \references{
 \url{https://doi.org/10.1038/s41467-021-21246-9}

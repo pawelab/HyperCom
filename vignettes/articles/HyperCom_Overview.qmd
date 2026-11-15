@@ -1,12 +1,12 @@
 ---
 title: "HyperCom Overview"
 author: "Justin K. Moy & Pawel F. Przytycki"
-output: html_document
+format: html
 ---
 
 #### Last Updated: `r Sys.Date()`
 
-```{r setup, message=FALSE}
+```{r setup, message=FALSE, warning=FALSE}
 library(HyperCom)
 library(dplyr)
 library(ggplot2)
@@ -63,18 +63,20 @@ head(lrdb, 2)
 ```
 
 ## Running HyperCom
-The standard pipeline can be run using the `HyperCom` or for a seurat object the `HyperCom_seurat` function.
+The standard pipeline can be run using the `HyperCom` or for a Seurat object the `HyperCom_seurat` function. Both write every step to
+`outdir` and return the results as a list.
 This vignette details each component function of the pipeline.
 ```{r, eval=FALSE}
-HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
-         metadata=alexanian2021.metadata, sample="sample",
-         group="condition", keep=NULL,
-         significance=FALSE, parallel=FALSE, cl=NULL, outdir="overview")
-
-HyperCom_seurat(seurat=seurat_object, lrdb=cellchat.mm.lrdb, sample="sample",
-                assay="RNA", layer="counts",
+res <- HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
+                metadata=alexanian2021.metadata, sample="sample",
                 group="condition", keep=NULL,
-                significance=FALSE, parallel=FALSE, cl=NULL, outdir="overview")
+                significance=FALSE, parallel=FALSE, outdir="overview")
+head(res$priority[["1"]])
+
+res <- HyperCom_seurat(seurat=seurat_object, lrdb=cellchat.mm.lrdb, sample="sample",
+                       assay="RNA", layer="counts",
+                       group="condition", keep=NULL,
+                       significance=FALSE, parallel=FALSE, outdir="overview")
 ```
 
 ### Preprocessing
@@ -92,9 +94,9 @@ dim(lrs)
 ```
 
 ### Generating Hypergraph
-To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix LR interaction to create 2 types of hyperedges:
+To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix and the LR interactions to create 2 types of hyperedges:
 
-1. expression edges - edges containing cells that express a given ligand or receptor
+1. expression edges - edges containing a ligand or receptor gene and the cells that express it
 
 2. interaction edges - edges containing the genes that comprise an LR interaction
 
@@ -105,7 +107,7 @@ head(hyperedges, 2)
 ```
 
 We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
-Each entry is the number hyperedges shared by nodes.
+Each entry is the number of hyperedges shared by nodes.
 The matrix is not stored: `adj` keeps which nodes are in which hyperedge, which is much smaller, and works like a matrix
 (`dim(adj)`, `adj[i, j]`, `as.matrix(adj)` for the whole matrix).
 ```{r}
@@ -115,38 +117,39 @@ dim(adj)
 
 ### Calculating Network Connectivity
 In order to calculate the network connectivity of the hypergraph we perform a random walk on the adjacency matrix to produce an influence matrix.
-By default the influence matrix is kept as its factors through the hyperedges, so for data with many more cells than genes and
-interactions its memory grows with the number of cells instead of its square (on this small example both are about 20 MB; data with
-at least as many hyperedges as nodes get the dense matrix); `infMat[i, j]` gives entries and `as.matrix(infMat)` the whole matrix.
-`method="lu"` gives the dense matrix exactly as HyperCom 0.0.0.9000 did.
+By default the whole influence matrix is never made, so its memory grows with the number of cells instead of its square (on this
+small example both are about 20 MB; data with at least as many hyperedges as nodes get the whole matrix); `infMat[i, j]` gives entries
+and `as.matrix(infMat)` the whole matrix. `method="lu"` makes the whole matrix exactly as HyperCom 0.0.0.9000 did.
 ```{r}
 infMat <- generate_infMat(adj=adj, outfile=NULL)
 dim(infMat)
 ```
 
-## Downstream Analysis
+### Preparing Metadata
 To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
-Additionally to reduce memory, we reduce the number of columns to just node, sample, and group. Optionally other metadata columns can be kept.
+Additionally to reduce memory, we reduce the number of columns to just cell, sample, and group. Optionally other metadata columns can be kept.
 ```{r}
 metadata <- generate_metadata(infMat=infMat, metadata=meta.data,
                               sample=sample.column, group=group.column,
-                              keep=c(), outfile=NULL)
+                              keep=NULL, outfile=NULL)
 head(metadata)
 ```
+
+## Downstream Analysis
 
 ### Identifying Important LR Pairs
 We can also identify important LR pairs by using HyperCom scoring on LR pairs.
 This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
-By default gene expression is weighted at 1 for recovery mode, but a vector of any number of values between 0 and 1 can be supplied 
+The `weights` arg sets how much the fraction of cells expressing a pair's genes counts in the priority: 1 (the default) weighs it
+like the other terms of the score and smaller values favor pairs specific to fewer cells; a vector of weights gives one result each.
 A p-value can be calculated for each LR pair against 1000 random gene interactions, which takes about four times as long. By default the `significance` arg is FALSE;
 the `seed` arg makes the p-values reproducible.
-The `prioritize_lr` function can be run sequentially or parallelly and by default the `parallel` arg is FALSE.
-In parallel the cell grids are scored in C++ threads, one per physical core (`parallelly::availableCores(logical=FALSE)`); the `threads` arg sets the number directly.
-A `cl` cluster is still accepted, but only its size is used.
+The `prioritize_lr` function runs on one thread by default; `parallel=TRUE` uses one thread per physical core and the `threads` arg
+sets the number directly.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=metadata,
-                          weights = c(1), significance=FALSE, parallel=TRUE,
-                          cl=NULL, outdir=NULL)
+                          weights=c(1), significance=FALSE, parallel=TRUE,
+                          outdir=NULL)
 head(priority[[1]])
 ```
 
@@ -155,7 +158,7 @@ As a note, the `score_hypercom` function can also take a vector of receptor gene
 ```{r}
 Thbs1_Sdc4 <- score_hypercom(infMat=infMat, metadata=metadata, ligand="Thbs1",
                              receptors="Sdc4")
-head(Thbs1_Sdc4[, c(1, 2, 3, 6, 7)])
+head(Thbs1_Sdc4[, c("cell", "sender", "receiver", "max", "hypercom")])
 ```
 
 If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.

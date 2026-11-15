@@ -24,7 +24,7 @@ generate_metadata(
 
 \item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
 
-\item{outfile}{A string naming the output file}
+\item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
 A dataframe with columns cell, sample, group and the kept columns, one row per node of the influence matrix

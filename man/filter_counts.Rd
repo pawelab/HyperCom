@@ -10,9 +10,10 @@ filter_counts(counts, lrdb, outfile = "0.counts.rds")
 \item{counts}{A matrix with row names being genes and column names being cells}
 
 \item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}
+and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
+interactions, e.g. \code{cellchat.mm.lrdb}}
 
-\item{outfile}{A string naming the output file}
+\item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
 A matrix with row names being cells and column names being genes of only ligand and receptor genes with greater than 0 expression,
@@ -23,7 +24,7 @@ sparse if counts is sparse
 }
 \details{
 This function takes a gene x cell counts matrix and filters it to
-just ligand and receptor genes with greater than 0 expression. Missing counts are left out of the means.
+just ligand and receptor genes with greater than 0 expression. Missing (NA) counts are ignored.
 A gene name used by several rows keeps its first row, with a warning. Raw and normalised counts give the same results (HyperCom uses
 whether each gene is above 0 in each cell); counts with negative values (scaled data) and counts with genes as column names stop.
 }

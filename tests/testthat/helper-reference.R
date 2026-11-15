@@ -9,10 +9,14 @@ read_fixture <- function(){
   return(readRDS(testthat::test_path("fixtures", "master.rds")))
 }
 
+# testthat 3e also runs each test under C collation, but the fixture's node order depends on it (finding #15), so it is pinned
+# explicitly for the whole run.
 withr::local_collate("C", .local_envir=testthat::teardown_env())
 fx <- read_fixture()
 tol <- 1e-10
 x87 <- identical(.Machine$longdouble.digits, 64L)
+fx_pairs <- list(network=list(NULL, NULL), single=list("Thbs1", "Sdc4"), complex=list("Tgfb1", c("Tgfbr1", "Tgfbr2")),
+                 triple=list("Tgfb1", c("Acvr1", "Tgfbr1", "Tgfbr2")), same=as.list(fx$output$same.pair))
 
 #' Cap a thread count at the available cores
 #'
@@ -58,21 +62,37 @@ quietly <- function(expr){
   return(x)
 }
 
-#' Get master's adjacency object from any build's adjacency
+#' Run prioritize_lr on the fixture
 #'
-#' `as_master_adjacency` returns the adjacency as master's dsCMatrix
+#' `run_priority` returns the priorities of prioritize_lr, by default on master's inputs in the fixture, without writing them
 #'
-#' This function takes an adjacency from generate_adjacency_matrix: master's dsCMatrix is returned as is, the incidence kept by
-#' builds without node x node matrices is expanded to it.
-#' @param adj An adjacency from generate_adjacency_matrix
-#' @returns A dsCMatrix
+#' This function takes any input that replaces the fixture's and further arguments of prioritize_lr, and runs it quietly.
+#' @param lrs A dataframe of ligand-receptor interactions
+#' @param adj An adjacency
+#' @param infMat An influence matrix
+#' @param metadata A dataframe containing columns named cell, sample and group
+#' @param ... Further arguments of prioritize_lr
+#' @param outdir A string naming the output directory, NULL to write nothing
+#' @returns A list of dataframes named by weight
 #' @noRd
-as_master_adjacency <- function(adj){
-  if(inherits(adj, "hypercom_adjacency")){
-    return(HyperCom:::adjacency_sparse(adj))
-  }
+run_priority <- function(lrs=fx$output$lrs, adj=fx$output$adj, infMat=fx$output$infMat, metadata=fx$output$metadata, ..., outdir=NULL){
+  return(quietly(prioritize_lr(lrs, adj, infMat, metadata, ..., outdir=outdir)))
+}
 
-  return(adj)
+#' Run HyperCom on the fixture
+#'
+#' `run_hypercom` returns the results of HyperCom on the fixture's input, by sample and condition
+#'
+#' This function takes the output directory, any input that replaces the fixture's and further arguments of HyperCom, and runs it
+#' quietly.
+#' @param outdir A string naming the output directory
+#' @param ... Further arguments of HyperCom
+#' @param counts A matrix with row names being genes and column names being cells
+#' @param metadata A dataframe containing cell metadata with row names being cells
+#' @returns The list HyperCom returns
+#' @noRd
+run_hypercom <- function(outdir, ..., counts=fx$input$counts, metadata=fx$input$metadata){
+  return(quietly(HyperCom(fx$input$lrdb, counts, metadata, sample="sample", group="condition", outdir=outdir, ...)))
 }
 
 #' Expect a matrix to hold the same values as master's
@@ -128,7 +148,8 @@ master_infmat <- function(adj, r=0.5){
 #' @param r A double, 0.5 or 0.3 (the restart probabilities in the fixture)
 #' @noRd
 expect_master_infmat <- function(object, r=0.5){
-  expected <- if(r == 0.5) fx$output$infMat else fx$output$infMat.r03
+  expected <- switch(as.character(r), "0.5"=fx$output$infMat, "0.3"=fx$output$infMat.r03,
+                     stop("the fixture has influence matrices for r = 0.5 and 0.3 only, not ", r))
   testthat::expect_identical(object, master_infmat(fx$output$adj, r))
   expect_same_matrix(object, expected, tolerance=1e-12)
 }
@@ -182,15 +203,20 @@ expect_same_priority <- function(object, expected, tolerance=tol){
   testthat::expect_equal(plain_df(object), plain_df(expected), tolerance=tolerance)
 }
 
-#' Skip a test of a known master bug unless asked
+#' Expect the result of a HyperCom run to be what it wrote and master's
 #'
-#' `skip_known_bug` skips tests that state the intended behaviour where master is known to differ
+#' `expect_run_result` checks the list HyperCom returns against the files of the run and against master's output in the fixture
 #'
-#' This function runs the test only when the environment variable HYPERCOM_KNOWN_BUGS is true, so the suite passes on master.
-#' @param id A string naming the finding (see the project findings list)
+#' This function checks the names of the result, that the adjacency and influence matrix returned are the ones written, and that the
+#' priorities of weight 1, the metadata's cells and the interactions are master's.
+#' @param res The list HyperCom returned
+#' @param rundir A string naming the output directory of the run
 #' @noRd
-skip_known_bug <- function(id){
-  if(!identical(tolower(Sys.getenv("HYPERCOM_KNOWN_BUGS")), "true")){
-    testthat::skip(paste0("known master bug ", id, " (set HYPERCOM_KNOWN_BUGS=true to run)"))
-  }
+expect_run_result <- function(res, rundir){
+  testthat::expect_named(res, c("priority", "metadata", "infMat", "adj", "lrs"))
+  testthat::expect_identical(res$adj, readRDS(file.path(rundir, "3.adj.rds")))
+  testthat::expect_identical(res$infMat, readRDS(file.path(rundir, "4.infMat.rds")))
+  expect_same_priority(res$priority[["1"]], fx$output$priority[["1"]])
+  testthat::expect_identical(res$metadata$cell, fx$output$metadata$cell)
+  testthat::expect_equal(plain_df(res$lrs), plain_df(fx$output$lrs))
 }

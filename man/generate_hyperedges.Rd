@@ -7,22 +7,22 @@
 generate_hyperedges(counts, lrs, outfile = "2.hyperedges.csv")
 }
 \arguments{
-\item{counts}{A filtered matrix with row names being cells and column names being genes}
+\item{counts}{A filtered matrix with row names being cells and column names being genes, from filter_counts}
 
-\item{lrs}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions with only interactions present in the counts matrix}
+\item{lrs}{A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
+in the counts matrix}
 
-\item{outfile}{A string naming the output file}
+\item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
-A dataframe of hyperedges where the edges column are the hyperedges and the nodes column are the node belonging to the hyperedge
+A dataframe with one row per node of each hyperedge: columns edge (the hyperedge, an interaction or a gene), node (a gene or
+cell in it) and weight (1)
 }
 \description{
-\code{generate_hyperedges} returns dataframe of hyperedges
+\code{generate_hyperedges} returns a dataframe of hyperedges
 }
 \details{
-This function takes a filtered cell x gene counts matrix and table of ligand-receptors interactions to produce
-a table of hyperedges: one per ligand-receptor interaction, one per gene, and one per expressed gene holding the cells that express it.
+This function takes a filtered cell x gene counts matrix and table of ligand-receptor interactions to produce
+a table of hyperedges: one per ligand-receptor interaction (its genes) and one per gene (the gene and the cells that express it).
 Cells are nodes named by the row names of counts, so they must be unique (prefix barcodes with their sample when merging samples).
 }

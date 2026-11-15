@@ -1,8 +1,8 @@
 # HyperCom
 
-HyperCom is the R package implementation of the method described in [HyperCom: a hypergraph-based method to infer cell-resolved cell-cell communication](https://www.biorxiv.org/content/10.64898/2026.09.30.755742v1) on biorXiv. It is a hypergraph based method to understand cell-cell communication at a cluster free single-cell resolution.
+HyperCom is the R package implementation of the method described in [HyperCom: a hypergraph-based method to infer cell-resolved cell-cell communication](https://www.biorxiv.org/content/10.64898/2026.09.30.755742v1) on bioRxiv. It is a hypergraph-based method to understand cell-cell communication at a cluster-free single-cell resolution.
 
-HyperCom provides the following hypergraph based features described in the <a href="https://raw.githubusercontent.com/pawelab/HyperCom/master/vignettes/articles/HyperCom_Overview.pdf" download>overview vignette</a>:
+HyperCom provides the following hypergraph-based features described in the [overview vignette](vignettes/articles/HyperCom_Overview.qmd):
 
 1. Per Cell Ligand-Receptor Pair Scoring
 
@@ -24,6 +24,16 @@ pak::pak("pawelab/HyperCom")
 ```
 
 `HyperCom_seurat` also needs the SeuratObject package (`install.packages("SeuratObject")`).
+
+## Usage
+Counts are a gene x cell matrix (raw or normalised, not scaled) and the metadata has one row per cell, named by its barcode:
+```r
+library(HyperCom)
+res <- HyperCom(cellchat.mm.lrdb, alexanian2021.counts, alexanian2021.metadata, sample="sample", group="condition", parallel=TRUE)
+head(res$priority[["1"]])
+scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
+```
+Every step is also written to `outdir` (default `HyperCom/`). See `?HyperCom` and the vignette; cite with `citation("HyperCom")`.
 
 ## Method Overview
 ![HyperCom Overview](images/MethodOverview.jpg)

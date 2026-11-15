@@ -1,15 +1,18 @@
-// adjacency.cpp: adjacency matrix of a hypergraph, the same dsCMatrix as master's generate_adjacency_matrix
+// adjacency.cpp: adjacency matrix of a hypergraph, the same dsCMatrix as generate_adjacency_matrix of HyperCom 0.0.0.9000
 //
-// Master counts node x edge incidences with xtabs, takes tcrossprod (CHOLMOD builds the whole product, then its upper
+// That version counts node x edge incidences with xtabs, takes tcrossprod (CHOLMOD builds the whole product, then its upper
 // triangle), sets the diagonal to 0 (a copy) and drops nodes without neighbours (another copy). Here each column j of the
 // upper triangle is accumulated directly from the edges of node j (sum over shared edges of the product of incidence counts,
 // exact integers in any order), nodes without neighbours are left out from the start, and the diagonal is written as the
-// explicit zeros master keeps. Two passes (count, then fill) so the output is allocated once at its final size.
+// explicit zeros that version keeps. Two passes (count, then fill) so the output is allocated once at its final size.
 
 #include <Rcpp.h>
 #include <algorithm>
 #include <climits>
 #include <vector>
+#include "r_alloc.h"
+
+const size_t SCAN_RATIO = 16;          // column j: its touched rows are sorted when fewer than j / 16, else rows 0..j-1 are scanned
 
 // [[Rcpp::export]]
 Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int n_nodes, int n_edges){
@@ -70,7 +73,7 @@ Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int
   std::vector<size_t> mark(N, 0);
   std::vector<double> acc(N, 0);
   std::vector<int> touched;
-  Rcpp::IntegerVector p(kept + 1);
+  Rcpp::IntegerVector p = alloc_vector<INTSXP>(kept + 1);
   size_t nnz = 0;
   for(size_t j = 0; j < N; ++j){
     if(!keep[j]) continue;
@@ -90,8 +93,8 @@ Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int
     p[new_idx[j] + 1] = (int) nnz;
   }
 
-  Rcpp::IntegerVector out_i(nnz);
-  Rcpp::NumericVector out_x(nnz);
+  Rcpp::IntegerVector out_i = alloc_vector<INTSXP>(nnz);
+  Rcpp::NumericVector out_x = alloc_vector<REALSXP>(nnz);
   std::fill(mark.begin(), mark.end(), 0);
   size_t pos = 0;
   for(size_t j = 0; j < N; ++j){
@@ -110,7 +113,7 @@ Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int
         acc[i] += cj * ccount[q];
       }
     }
-    if(touched.size() * 16 < j){
+    if(touched.size() * SCAN_RATIO < j){
       std::sort(touched.begin(), touched.end());
     } else {
       touched.clear();

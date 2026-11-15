@@ -16,7 +16,7 @@ score_hypercom(
 \arguments{
 \item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
-\item{metadata}{A dataframe containing columns named cell, sample and group}
+\item{metadata}{A dataframe from generate_metadata, containing columns named cell, sample and group}
 
 \item{ligand}{A string of the ligand name, NULL for the network score}
 
@@ -29,14 +29,15 @@ not tell them apart)}
 them all}
 }
 \value{
-A dataframe containing the sender score, receiver score, avg, dif, and HyperCom score
+A dataframe with one row per cell, sorted by hypercom (highest first), with columns cell, sender and receiver (the cell's
+sender and receiver scores), dif (receiver - sender), avg (their mean), max (the larger of the two) and hypercom (the HyperCom score:
+the sign of dif times the percent rank of its size times avg)
 }
 \description{
 \code{score_hypercom} returns a dataframe containing the HyperCom score for each cell
 }
 \details{
 This function takes a named influence matrix, the corresponding metadata, the ligand, and receptor
-to give each cell a HyperCom score. If both the ligand and receptor are specified this is the LR Pair Score,
-if neither is the score is the Network Score. If a receptor complex is specified, the average of the score vectors is used.
-Scores are the same at any number of threads.
+to give each cell a HyperCom score. With a ligand and receptors this is the ligand-receptor pair score; with neither, the network
+score. For a receptor complex the scores of its subunits are averaged. Scores are the same at any number of threads.
 }

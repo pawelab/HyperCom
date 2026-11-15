@@ -1,5 +1,5 @@
 # Every step on the full bundled data against master's golden outputs (fixtures/make_reference.R). Skipped unless HYPERCOM_REFERENCE
-# names the golden folder. Each step gets master's own input, so a difference points at the step that made it. Several minutes.
+# names the golden folder. Each step gets master's own input, so a difference points at the step that made it. About 5 s.
 
 ref_path <- function(name){
   return(file.path(Sys.getenv("HYPERCOM_REFERENCE"), name))
@@ -52,17 +52,7 @@ test_that("full data: scores and priorities match master", {
   }
 
   workers <- as.integer(Sys.getenv("HYPERCOM_TEST_WORKERS", "4"))
-  set.seed(1)
-  if("threads" %in% names(formals(prioritize_lr))){
-    priority <- quietly(prioritize_lr(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, threads=workers, outdir=NULL))
-  } else if("cores" %in% names(formals(prioritize_lr))){
-    priority <- quietly(prioritize_lr(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, parallel=TRUE, cores=workers,
-                                      outdir=NULL))
-  } else {
-    cl <- parallel::makeCluster(workers)
-    on.exit(try(parallel::stopCluster(cl), silent=TRUE), add=TRUE)
-    priority <- quietly(prioritize_lr(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, parallel=TRUE, cl=cl, outdir=NULL))
-  }
+  priority <- run_priority(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(workers))
   ref.priority <- readRDS(ref_path("6.priority.rds"))
   for(w in names(ref.priority)){
     expect_same_priority(priority[[w]], ref.priority[[w]])

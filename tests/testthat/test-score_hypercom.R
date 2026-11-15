@@ -1,15 +1,3 @@
-test_that("score_hypercom matches master for network, single, complex and same-gene scores", {
-  infMat <- fx$output$infMat
-  md <- fx$output$metadata
-  scores <- fx$output$scores
-
-  expect_same_scores(score_hypercom(infMat, md), scores$network)
-  expect_same_scores(score_hypercom(infMat, md, ligand="Thbs1", receptors="Sdc4"), scores$single)
-  expect_same_scores(score_hypercom(infMat, md, ligand="Tgfb1", receptors=c("Tgfbr1", "Tgfbr2")), scores$complex)
-  expect_same_scores(score_hypercom(infMat, md, ligand="Tgfb1", receptors=c("Acvr1", "Tgfbr1", "Tgfbr2")), scores$triple)
-  expect_same_scores(score_hypercom(infMat, md, ligand=fx$output$same.pair[1], receptors=fx$output$same.pair[2]), scores$same)
-})
-
 test_that("a receptor complex scores the mean of its subunits", {
   infMat <- fx$output$infMat
   md <- fx$output$metadata
@@ -37,4 +25,17 @@ test_that("scores are bounded and consistent", {
   expect_equal(sr$max, pmax(sr$sender, sr$receiver), tolerance=tol)
   expect_true(all(abs(sr$hypercom) <= sr$avg + 1e-12, na.rm=TRUE))
   expect_true(all(same$dif == 0 & same$hypercom == 0))
+})
+
+test_that("score_hypercom gives the same scores on several threads, for a dense and for a factored influence matrix", {
+  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
+  infMat <- generate_infMat(adj, outfile=NULL, threads=test_threads(2))
+  md <- fx$output$metadata
+
+  for(p in fx_pairs){
+    expect_identical(score_hypercom(fx$output$infMat, md, p[[1]], p[[2]], threads=test_threads(3)),
+                     score_hypercom(fx$output$infMat, md, p[[1]], p[[2]]))
+    expect_identical(score_hypercom(infMat, md, p[[1]], p[[2]], parallel=TRUE), score_hypercom(infMat, md, p[[1]], p[[2]]))
+  }
+  expect_error(score_hypercom(infMat, md, "Thbs1", "Sdc4", threads=0), "at least 1")
 })

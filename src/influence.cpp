@@ -1,15 +1,16 @@
 // influence.cpp: the influence matrix F = r (I - W)^-1 with W = (1 - r) A / rowSums(A), three ways
 //
-// lu (solve_influence_cpp): bit-identical to master's generate_infMat. Master forms W from the sparse adjacency, densifies it,
-// forms M = I - W and calls solve(M), which solves M X = I with LAPACK's dgesv on a copy of M and a dense identity: four or five
-// n x n matrices at once. Here M is written straight from the adjacency (a base matrix, or the slots of a dgCMatrix or dsCMatrix)
-// and dgesv factors it in place into an identity that becomes the result: two n x n matrices. Same arithmetic element by element,
-// the same dgesv call and the same singularity checks as R's solve.
+// lu (solve_influence_cpp): bit-identical to generate_infMat of HyperCom 0.0.0.9000. That version forms W from the sparse
+// adjacency, densifies it, forms M = I - W and calls solve(M), which solves M X = I with LAPACK's dgesv on a copy of M and a
+// dense identity: four or five n x n matrices at once. Here M is written straight from the adjacency (a base matrix, or the
+// slots of a dgCMatrix or dsCMatrix) and dgesv factors it in place into an identity that becomes the result: two n x n
+// matrices. Same arithmetic element by element, the same dgesv call and the same singularity checks as R's solve.
 //
-// chol (solve_influence_chol_cpp): v1-fast's method with its arithmetic, step by step. With D = diag(rowSums(A)) and s = D^-1/2,
-// M = I - W is similar to the symmetric positive definite S = I - (1 - r) diag(s) A diag(s) (eigenvalues in [r, 2 - r]), so
-// F = r D^-1/2 S^-1 D^1/2. S is written into one n x n matrix, inverted in place by LAPACK dpotrf + dpotri (upper triangle),
-// mirrored and scaled: one n x n matrix, about 3/8 of the flops of lu. Not bit-identical to lu (~1e-15 relative).
+// chol (solve_influence_chol_cpp): the earlier Cholesky variant (method="chol" of HyperCom 0.1.0) with its arithmetic, step by
+// step. With D = diag(rowSums(A)) and s = D^-1/2, M = I - W is similar to the symmetric positive definite
+// S = I - (1 - r) diag(s) A diag(s) (eigenvalues in [r, 2 - r]), so F = r D^-1/2 S^-1 D^1/2. S is written into one n x n
+// matrix, inverted in place by LAPACK dpotrf + dpotri (upper triangle), mirrored and scaled: one n x n matrix, about 3/8 of
+// the flops of lu. Not bit-identical to lu (~1e-15 relative).
 //
 // woodbury (influence_factors_cpp, then influence_block_cpp / influence_blocks_cpp): the adjacency of a hypergraph is A = H H'
 // with its diagonal set to 0, H the node x hyperedge incidence counts. So K = D - (1 - r) A = Delta - (1 - r) H H' with the diagonal
@@ -33,11 +34,15 @@
 #include <cmath>
 #include <thread>
 #include <vector>
-#ifndef FCONE
-#define FCONE
-#endif
+#include "grid_layout.h"
+#include "r_alloc.h"
 
 namespace {
+
+const size_t TILE = 64;                 // chol: tile edge of the loops over both triangles
+const size_t BLOCK_COLS = 32;           // fill_block: columns per task
+const size_t Z_COLS = 64;               // influence_factors_cpp: columns of Z per task
+const double ROWSUM_TOL = 1e-12;        // woodbury: relative tolerance of adj's row sums against the hyperedges
 
 // order of a square adjacency given as a base matrix, dgCMatrix or dsCMatrix, with R's solve() messages
 int adjacency_order(SEXP adj){
@@ -50,13 +55,44 @@ int adjacency_order(SEXP adj){
     n = Rf_nrows(adj);
     if(Rf_ncols(adj) != n) Rcpp::stop("'a' (%d x %d) must be square", n, Rf_ncols(adj));
   } else {
-    const Rcpp::IntegerVector dim = Rf_getAttrib(adj, Rf_install("Dim"));
+    const Rcpp::IntegerVector dim = Rf_getAttrib(adj, Rf_install("Dim"));  // the Matrix slot, not R's dim (R_DimSymbol)
     n = dim[0];
     if(dim[1] != n) Rcpp::stop("'a' (%d x %d) must be square", n, dim[1]);
   }
   if(n == 0) Rcpp::stop("'a' is 0-diml");
 
   return n;
+}
+
+// The n x n adjacency as a dense matrix: a base matrix copied, a dgCMatrix written from its slots, a dsCMatrix (either
+// triangle stored) into the upper triangle, and into the lower one too when mirror
+Rcpp::NumericMatrix dense_adjacency(SEXP adj, int n, bool mirror){
+  const size_t N = n;
+  const bool dense = Rf_isMatrix(adj);
+  Rcpp::NumericMatrix M = alloc_numeric_matrix(n, n, !dense);
+  double *m = REAL(M);
+  if(dense){
+    const Rcpp::NumericVector a(adj);
+    std::copy(a.begin(), a.end(), m);
+  } else {
+    const Rcpp::IntegerVector i = Rf_getAttrib(adj, Rf_install("i")), p = Rf_getAttrib(adj, Rf_install("p"));
+    const Rcpp::NumericVector x = Rf_getAttrib(adj, Rf_install("x"));
+    const bool sym = Rf_inherits(adj, "dsCMatrix");
+    for(size_t j = 0; j < N; ++j){
+      for(int k = p[j]; k < p[j + 1]; ++k){
+        const size_t row = i[k];
+        if(!sym){
+          m[row + j * N] = x[k];
+        } else {
+          const size_t lo = std::min(row, j), hi = std::max(row, j);
+          m[lo + hi * N] = x[k];
+          if(mirror) m[hi + lo * N] = x[k];
+        }
+      }
+    }
+  }
+
+  return M;
 }
 
 // fn(worker, task) for tasks 0..ntasks-1 on up to nthreads workers (the calling thread is worker 0), each task once; fn must not
@@ -81,32 +117,17 @@ void run_tasks(int nthreads, size_t ntasks, Fn fn){
 
 // [[Rcpp::export]]
 Rcpp::NumericMatrix solve_influence_cpp(SEXP adj, Rcpp::NumericVector rs, double r){
-  const bool dense = Rf_isMatrix(adj);
   int n = adjacency_order(adj);
   if(rs.size() != n) Rcpp::stop("solve_influence_cpp: one row sum per row");
   const size_t N = n;
+  const double *rsp = REAL(rs);
 
-  Rcpp::NumericMatrix M = dense ? Rcpp::NumericMatrix(Rcpp::no_init(n, n)) : Rcpp::NumericMatrix(n, n);
+  Rcpp::NumericMatrix M = dense_adjacency(adj, n, true);
   double *m = REAL(M);
-  if(dense){
-    const Rcpp::NumericVector a(adj);
-    std::copy(a.begin(), a.end(), m);
-  } else {
-    const Rcpp::IntegerVector i = Rf_getAttrib(adj, Rf_install("i")), p = Rf_getAttrib(adj, Rf_install("p"));
-    const Rcpp::NumericVector x = Rf_getAttrib(adj, Rf_install("x"));
-    const bool sym = Rf_inherits(adj, "dsCMatrix");
-    for(size_t j = 0; j < N; ++j){
-      for(int k = p[j]; k < p[j + 1]; ++k){
-        const size_t row = i[k];
-        m[row + j * N] = x[k];
-        if(sym && row != j) m[j + row * N] = x[k];
-      }
-    }
-  }
   const double c = 1 - r;
   for(size_t j = 0; j < N; ++j){
     for(size_t i = 0; i < N; ++i){
-      double w = m[i + j * N] / rs[i];
+      double w = m[i + j * N] / rsp[i];
       w = c * w;
       m[i + j * N] = (i == j ? 1.0 : 0.0) - w;
     }
@@ -114,7 +135,7 @@ Rcpp::NumericMatrix solve_influence_cpp(SEXP adj, Rcpp::NumericVector rs, double
 
   const char one = '1';
   const double anorm = F77_CALL(dlange)(&one, &n, &n, m, &n, nullptr FCONE);
-  Rcpp::NumericMatrix X(n, n);
+  Rcpp::NumericMatrix X = alloc_numeric_matrix(n, n);
   double *x = REAL(X);
   for(size_t k = 0; k < N; ++k) x[k * N + k] = 1.0;
   std::vector<int> ipiv(N), iwork(N);
@@ -134,35 +155,18 @@ Rcpp::NumericMatrix solve_influence_cpp(SEXP adj, Rcpp::NumericVector rs, double
 
 // [[Rcpp::export]]
 Rcpp::NumericMatrix solve_influence_chol_cpp(SEXP adj, Rcpp::NumericVector rs, double r){
-  const bool dense = Rf_isMatrix(adj), sym = Rf_inherits(adj, "dsCMatrix");
+  const bool sym = Rf_inherits(adj, "dsCMatrix");
   int n = adjacency_order(adj);
   if(rs.size() != n) Rcpp::stop("solve_influence_chol_cpp: one row sum per row");
-  const size_t N = n, T = 64;
+  const size_t N = n;
 
-  Rcpp::NumericMatrix S = dense ? Rcpp::NumericMatrix(Rcpp::no_init(n, n)) : Rcpp::NumericMatrix(n, n);
+  Rcpp::NumericMatrix S = dense_adjacency(adj, n, false);
   double *m = REAL(S);
-  if(dense){
-    const Rcpp::NumericVector a(adj);
-    std::copy(a.begin(), a.end(), m);
-  } else {
-    const Rcpp::IntegerVector i = Rf_getAttrib(adj, Rf_install("i")), p = Rf_getAttrib(adj, Rf_install("p"));
-    const Rcpp::NumericVector x = Rf_getAttrib(adj, Rf_install("x"));
-    for(size_t j = 0; j < N; ++j){
-      for(int k = p[j]; k < p[j + 1]; ++k){
-        const size_t row = i[k];
-        if(!sym || row <= j){
-          m[row + j * N] = x[k];
-        } else {
-          m[j + row * N] = x[k];
-        }
-      }
-    }
-  }
   if(!sym){
-    for(size_t jb = 0; jb < N; jb += T){
-      for(size_t ib = 0; ib <= jb; ib += T){
-        for(size_t j = jb; j < std::min(jb + T, N); ++j){
-          for(size_t i = ib; i < std::min(ib + T, j); ++i){
+    for(size_t jb = 0; jb < N; jb += TILE){
+      for(size_t ib = 0; ib <= jb; ib += TILE){
+        for(size_t j = jb; j < std::min(jb + TILE, N); ++j){
+          for(size_t i = ib; i < std::min(ib + TILE, j); ++i){
             if(!(m[i + j * N] == m[j + i * N])) Rcpp::stop("method \"chol\" needs a symmetric adjacency matrix (use method=\"lu\")");
           }
         }
@@ -196,10 +200,10 @@ Rcpp::NumericMatrix solve_influence_chol_cpp(SEXP adj, Rcpp::NumericVector rs, d
   F77_CALL(dpotri)(&uplo, &n, m, &n, &info FCONE);
   if(info != 0) Rcpp::stop("Lapack routine %s failed with info %d", "dpotri", info);
 
-  for(size_t jb = 0; jb < N; jb += T){
-    for(size_t ib = 0; ib <= jb; ib += T){
-      for(size_t j = jb; j < std::min(jb + T, N); ++j){
-        for(size_t i = ib; i < std::min(ib + T, j + 1); ++i){
+  for(size_t jb = 0; jb < N; jb += TILE){
+    for(size_t ib = 0; ib <= jb; ib += TILE){
+      for(size_t j = jb; j < std::min(jb + TILE, N); ++j){
+        for(size_t i = ib; i < std::min(ib + TILE, j + 1); ++i){
           const double u = m[i + j * N];
           m[i + j * N] = (u * row[i]) * col[j];
           if(i != j) m[j + i * N] = (u * row[j]) * col[i];
@@ -219,7 +223,7 @@ struct Incidence {
   size_t N, E;
   std::vector<size_t> nptr;
   std::vector<int> nedge;
-  std::vector<double> nh, size;
+  std::vector<double> nh, edge_size;
 };
 
 Incidence node_incidence(const Rcpp::IntegerVector &hp, const Rcpp::IntegerVector &hi, const Rcpp::NumericVector &hx, int n){
@@ -243,13 +247,13 @@ Incidence node_incidence(const Rcpp::IntegerVector &hp, const Rcpp::IntegerVecto
   for(size_t i = 0; i < h.N; ++i) h.nptr[i + 1] += h.nptr[i];
   h.nedge.resize(NNZ);
   h.nh.resize(NNZ);
-  h.size.assign(h.E, 0);
+  h.edge_size.assign(h.E, 0);
   std::vector<size_t> fill(h.nptr.begin(), h.nptr.end() - 1);
   for(size_t e = 0; e < h.E; ++e){
     for(int k = hp[e]; k < hp[e + 1]; ++k){
       h.nedge[fill[hi[k]]] = (int) e;
       h.nh[fill[hi[k]]++] = hx[k];
-      h.size[e] += hx[k];
+      h.edge_size[e] += hx[k];
     }
   }
 
@@ -279,31 +283,30 @@ void check_nodes(const Rcpp::IntegerVector &idx, size_t N){
 }
 
 // F[rows, cols] into out (column-major, leading dimension ld) from the factors: r (1 - r) times the sum over the row node's
-// hyperedges, ascending, of Y * Z, plus r rs / Delta on the diagonal. Columns go in blocks of B, with Z of the block laid out
-// hyperedge-major; each entry is made by one thread in a fixed order, so F is the same at any thread count.
+// hyperedges, ascending, of Y * Z, plus r rs / Delta on the diagonal. Columns go in blocks of BLOCK_COLS, with Z of the block
+// laid out hyperedge-major; each entry is made by one thread in a fixed order, so F is the same at any thread count.
 void fill_block(const Incidence &h, const std::vector<double> &ny, const double *Z, const double *rs, const double *delta, double r,
                 const int *rows, size_t nr, const int *cols, size_t nc, double *out, size_t ld, int threads){
-  constexpr size_t B = 32;
-  const size_t E = h.E, nblocks = (nc + B - 1) / B;
+  const size_t E = h.E, nblocks = (nc + BLOCK_COLS - 1) / BLOCK_COLS;
   if(nr == 0 || nblocks == 0) return;
   const int nt = std::max(1, std::min<int>(threads, (int) nblocks));
-  std::vector<std::vector<double>> zt(nt, std::vector<double>(E * B));
+  std::vector<std::vector<double>> zt(nt, std::vector<double>(E * BLOCK_COLS));
   const double c = 1 - r, rc = r * c;
   run_tasks(nt, nblocks, [&](int w, size_t b){
     double *z = zt[w].data();
-    const size_t c0 = b * B, nb = std::min(B, nc - c0);
-    std::fill(z, z + E * B, 0.0);
+    const size_t c0 = b * BLOCK_COLS, nb = std::min(BLOCK_COLS, nc - c0);
+    std::fill(z, z + E * BLOCK_COLS, 0.0);
     for(size_t jj = 0; jj < nb; ++jj){
       const double *zc = Z + (size_t) cols[c0 + jj] * E;
-      for(size_t e = 0; e < E; ++e) z[e * B + jj] = zc[e];
+      for(size_t e = 0; e < E; ++e) z[e * BLOCK_COLS + jj] = zc[e];
     }
     for(size_t ii = 0; ii < nr; ++ii){
       const size_t i = rows[ii];
-      double acc[B] = {0};
+      double acc[BLOCK_COLS] = {0};
       for(size_t k = h.nptr[i]; k < h.nptr[i + 1]; ++k){
         const double y = ny[k];
-        const double *ze = z + (size_t) h.nedge[k] * B;
-        for(size_t jj = 0; jj < B; ++jj) acc[jj] += y * ze[jj];
+        const double *ze = z + (size_t) h.nedge[k] * BLOCK_COLS;
+        for(size_t jj = 0; jj < BLOCK_COLS; ++jj) acc[jj] += y * ze[jj];
       }
       for(size_t jj = 0; jj < nb; ++jj){
         const size_t j = cols[c0 + jj];
@@ -324,18 +327,19 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
   if(rs.size() != n) Rcpp::stop("influence_factors_cpp: one row sum per node");
   const size_t N = h.N, E = h.E;
   const double c = 1 - r;
-  const double *rsp = REAL(rs);
+  const double *rsp = REAL(rs), *hxp = REAL(hx);
+  const int *hpp = INTEGER(hp), *hip = INTEGER(hi);
 
   // Delta = D + (1 - r) diag(H H') with D checked against the hyperedges; Y = H / Delta
   std::vector<double> delta(N);
   for(size_t i = 0; i < N; ++i){
     double d = 0, sq = 0;
     for(size_t k = h.nptr[i]; k < h.nptr[i + 1]; ++k){
-      d += h.nh[k] * (h.size[h.nedge[k]] - h.nh[k]);
+      d += h.nh[k] * (h.edge_size[h.nedge[k]] - h.nh[k]);
       sq += h.nh[k] * h.nh[k];
     }
     if(!(rsp[i] > 0) || !std::isfinite(rsp[i])) Rcpp::stop("method \"woodbury\" needs a positive row sum for every node of adj");
-    if(std::fabs(d - rsp[i]) > 1e-12 * rsp[i]){
+    if(std::fabs(d - rsp[i]) > ROWSUM_TOL * rsp[i]){
       Rcpp::stop("hyperedges do not match adj: node %d has row sum %g in adj and %g from the hyperedges", (int) i + 1, rsp[i], d);
     }
     delta[i] = rsp[i] + c * sq;
@@ -352,9 +356,9 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
   double *cm = C.data();
   run_tasks(threads, E, [&](int, size_t f){
     double *col = cm + f * E;
-    for(int k = hp[f]; k < hp[f + 1]; ++k){
-      const size_t i = hi[k];
-      const double yf = hx[k] / delta[i];
+    for(int k = hpp[f]; k < hpp[f + 1]; ++k){
+      const size_t i = hip[k];
+      const double yf = hxp[k] / delta[i];
       const int *first = h.nedge.data() + h.nptr[i], *last = h.nedge.data() + h.nptr[i + 1];
       for(const int *q = std::lower_bound(first, last, (int) f); q < last; ++q) col[*q] += h.nh[q - h.nedge.data()] * yf;
     }
@@ -377,12 +381,10 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
   }
 
   // Z = C^-1 Y' D, column j summed over the node's hyperedges in ascending order
-  Rcpp::NumericMatrix Z(Rf_allocMatrix(REALSXP, (int) E, n));
+  Rcpp::NumericMatrix Z = alloc_numeric_matrix(E, n);
   double *zm = REAL(Z);
-  std::fill(zm, zm + E * N, 0.0);
-  constexpr size_t B = 64;
-  run_tasks(threads, (N + B - 1) / B, [&](int, size_t b){
-    for(size_t j = b * B; j < std::min(N, b * B + B); ++j){
+  run_tasks(threads, (N + Z_COLS - 1) / Z_COLS, [&](int, size_t b){
+    for(size_t j = b * Z_COLS; j < std::min(N, b * Z_COLS + Z_COLS); ++j){
       double *zc = zm + j * E;
       for(size_t k = h.nptr[j]; k < h.nptr[j + 1]; ++k){
         const double wj = ny[k] * rsp[j];
@@ -406,7 +408,7 @@ Rcpp::NumericMatrix influence_block_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVec
   const std::vector<double> ny = scaled_incidence(h, REAL(delta));
   const size_t nr = rows.size(), nc = cols.size();
 
-  Rcpp::NumericMatrix F(Rf_allocMatrix(REALSXP, (int) nr, (int) nc));
+  Rcpp::NumericMatrix F = alloc_numeric_matrix(nr, nc, false);
   fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, INTEGER(rows), nr, INTEGER(cols), nc, REAL(F), nr, threads);
 
   return F;
@@ -420,22 +422,21 @@ Rcpp::NumericVector influence_blocks_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVe
   check_factors(h, rs, delta, Z);
   check_nodes(cell, h.N);
   if(sample.size() != cell.size()) Rcpp::stop("influence_blocks_cpp: one sample per cell");
-  int n_samples = 0;
   for(R_xlen_t k = 0; k < sample.size(); ++k){
-    if(sample[k] < 1 || sample[k] == NA_INTEGER) Rcpp::stop("influence_blocks_cpp: sample ids must be positive integers");
-    n_samples = std::max(n_samples, (int) sample[k]);
+    if(sample[k] < 1) Rcpp::stop("influence_blocks_cpp: sample ids must be positive integers");
   }
   const std::vector<double> ny = scaled_incidence(h, REAL(delta));
 
-  // within-sample blocks as score_blocks_cpp reads them: samples ascending, cells of a sample in the given order, column-major
-  std::vector<std::vector<int>> members(n_samples);
-  for(R_xlen_t k = 0; k < cell.size(); ++k) members[sample[k] - 1].push_back(cell[k]);
+  // the within-sample blocks in the kernel's layout (grid_layout.h), each column-major, by node
+  std::vector<std::vector<int>> blocks = sample_blocks(INTEGER(sample), sample.size());
   size_t total = 0;
-  for(const auto &m : members) total += m.size() * m.size();
-  Rcpp::NumericVector out(Rcpp::no_init((R_xlen_t) total));
+  for(std::vector<int> &m : blocks){
+    for(int &k : m) k = cell[k];
+    total += m.size() * m.size();
+  }
+  Rcpp::NumericVector out = alloc_vector<REALSXP>((R_xlen_t) total, false);
   size_t off = 0;
-  for(const auto &m : members){
-    if(m.empty()) continue;
+  for(const auto &m : blocks){
     fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, m.data(), m.size(), m.data(), m.size(), REAL(out) + off, m.size(), threads);
     off += m.size() * m.size();
   }

@@ -19,10 +19,11 @@ test_that("hyperedges hold interaction, gene and expression edges", {
   expect_true(all(fx$output$lrs$interaction %in% hyperedges$edge))
 })
 
-test_that("generate_adjacency_matrix matches master", {
+test_that("generate_adjacency_matrix matches master, by value and as master's dsCMatrix", {
   adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
 
   expect_same_matrix(adj, fx$output$adj)
+  expect_identical(HyperCom:::adjacency_sparse(adj), fx$output$adj)
 })
 
 test_that("the adjacency matrix is symmetric with an empty diagonal and no isolated nodes", {
@@ -35,12 +36,9 @@ test_that("the adjacency matrix is symmetric with an empty diagonal and no isola
   expect_true(all(A >= 0 & A == round(A)))
 })
 
-test_that("generate_infMat matches master", {
-  infMat <- generate_infMat(fx$output$adj, outfile=NULL)
-  infMat.r03 <- generate_infMat(fx$output$adj, r=0.3, outfile=NULL)
-
-  expect_same_matrix(infMat, fx$output$infMat, tolerance=tol)
-  expect_same_matrix(infMat.r03, fx$output$infMat.r03, tolerance=tol)
+test_that("generate_infMat matches master bit for bit (lu, the default for an adjacency matrix without hyperedges)", {
+  expect_master_infmat(generate_infMat(fx$output$adj, outfile=NULL))
+  expect_master_infmat(generate_infMat(fx$output$adj, r=0.3, outfile=NULL), r=0.3)
 })
 
 test_that("influence matrix rows are random walk with restart distributions", {

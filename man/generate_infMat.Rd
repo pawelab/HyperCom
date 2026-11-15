@@ -18,7 +18,7 @@ generate_infMat(
 
 \item{r}{A double between 0 and 1 representing the restart probability}
 
-\item{outfile}{A string naming the output file}
+\item{outfile}{A string naming the output file, or NULL to write none}
 
 \item{method}{A string naming the method: "woodbury" (the default; "lu" for an adjacency matrix given without hyperedges), "lu"
 or "chol"}
@@ -26,27 +26,28 @@ or "chol"}
 \item{hyperedges}{A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
 matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own}
 
-\item{threads}{An integer number of threads for method "woodbury", NULL for one per physical core
-(\code{parallelly::availableCores(logical=FALSE)}; "lu" and "chol" run on the threads of the BLAS)}
+\item{threads}{An integer number of threads for method "woodbury", NULL for one per physical core; not used by "lu" and "chol"}
 }
 \value{
-An influence matrix: a hypercom_influence (method "woodbury") or a dense matrix
+An influence matrix with node names: a hypercom_influence (method "woodbury", unless there are at least as many hyperedges
+as nodes) or a dense matrix
 }
 \description{
 \code{generate_infMat} returns the influence matrix of the hypergraph
 }
 \details{
-This function takes an adjacency matrix and returns its influence matrix using heat diffusion, r (I - (1 - r) adj / D)^-1 with D
-the row sums of adj. Three methods give the same matrix. "woodbury", the default, is the hypergraph method: the adjacency of a
-hypergraph is its node x hyperedge incidence times its transpose (diagonal set to zero), so the Woodbury identity inverts it
-through a hyperedge x hyperedge matrix instead of a node x node one, and the matrix is returned factored, never stored: memory
-grows with nodes x hyperedges instead of nodes squared and work with nodes x incidences instead of nodes cubed. It needs the
-hyperedges: an adjacency from \code{generate_adjacency_matrix} holds them, an adjacency matrix needs \code{hyperedges} (without them, and
-without a method given, an adjacency matrix gets "lu"). The result works like a matrix for dim, dimnames and rownames,
-\code{infMat[i, j]} makes those entries and as.matrix the whole matrix. With at least as many hyperedges as nodes it gains nothing and
-returns "chol"'s dense matrix. "lu" solves the linear system with LAPACK in place as master's solve(), bit for bit: two dense
-node x node matrices at once. "chol" is
-v1-fast's symmetric Cholesky inverse: one dense matrix and about 3/8 of the arithmetic. "chol" and "woodbury" differ from "lu"
-by about 1e-15 relative, which can break exact ties in the rankings, and stop like "lu" when the system is computationally
-singular (r near 0).
+This function takes an adjacency matrix and returns its influence matrix by heat diffusion (a random walk with restart),
+r (I - (1 - r) adj / D)^-1 with D the row sums of adj. Three methods give the same matrix up to rounding (about 1e-15 relative,
+which can reorder exactly tied scores):
+\itemize{
+\item "woodbury" (the default) works through the hyperedges, so no node x node matrix is made: memory grows with the number of nodes
+instead of its square. The result works like a matrix for dim, dimnames and rownames; \code{infMat[i, j]} gives those entries and
+as.matrix the whole matrix. An adjacency from generate_adjacency_matrix holds its hyperedges; an adjacency matrix needs
+\code{hyperedges}, and without them (and without a method given) gets "lu". Small data with at least as many hyperedges as nodes get
+the dense matrix of "chol", which is then no bigger.
+\item "lu" makes the dense matrix with exactly the numbers of HyperCom 0.0.0.9000; it holds two node x node matrices at once.
+\item "chol" makes the dense matrix faster and with one node x node matrix.
+}
+
+All methods stop when the matrix cannot be inverted (r near 0).
 }

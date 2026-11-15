@@ -2,7 +2,7 @@
 % Please edit documentation in R/functions.R
 \name{prioritize_lr}
 \alias{prioritize_lr}
-\title{Order ligand receptor pairs based on signalling strength and specificity}
+\title{Order ligand-receptor pairs by signaling strength and specificity}
 \usage{
 prioritize_lr(
   lrs,
@@ -12,7 +12,6 @@ prioritize_lr(
   weights = c(1),
   significance = FALSE,
   parallel = FALSE,
-  cl = NULL,
   outdir = "6.priority",
   threads = NULL,
   seed = NULL,
@@ -20,28 +19,26 @@ prioritize_lr(
 )
 }
 \arguments{
-\item{lrs}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions with only interactions present in the counts matrix.}
+\item{lrs}{A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
+in the counts matrix}
 
 \item{adj}{An adjacency from generate_adjacency_matrix, or a named adjacency matrix}
 
 \item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
-\item{metadata}{A dataframe containing columns named cell, sample and group}
+\item{metadata}{A dataframe from generate_metadata, containing columns named cell, sample and group}
 
-\item{weights}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
+score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
-\item{parallel}{A boolean of whether to run in parallel: one thread per physical core (\code{parallelly::availableCores(logical=FALSE)};
-on Linux R does not tell physical from logical cores, so one per logical core)}
+\item{parallel}{A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
+not tell them apart)}
 
-\item{cl}{A cluster object, kept for compatibility: it is not used or stopped, only its size caps the number of threads}
+\item{outdir}{A string naming the output directory, or NULL to write no files}
 
-\item{outdir}{A string naming the output directory}
-
-\item{threads}{An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+\item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
 them all}
 
 \item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
@@ -50,16 +47,18 @@ them all}
 the time left, and the top pair of each weight}
 }
 \value{
-A list of dataframes named by weight, each the ligand-receptor pairs ordered by priority score, with columns p and p.adj
-when significance is TRUE
+A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
+p.adj when significance is TRUE
 }
 \description{
 \code{prioritize_lr} returns an ordered list of ligand-receptor pairs
 }
 \details{
-This function takes list of all ligand-receptor pairs in the influence matrix,
-the adjacency matrix, a named influence matrix, and the corresponding metadata
-to prioritize ligand-receptor pairs. Cell grids are scored in C++ threads, once for all weights.
+This function takes the ligand-receptor pairs, the adjacency matrix, a named influence matrix and the corresponding metadata
+and ranks the pairs by a priority score: the weighted geometric mean of five terms of the cells that express a pair's genes (their
+fraction of all cells, the smallest fraction of cells expressing one of its genes, the mean of each cell's larger score as sender
+or receiver, how evenly they split into senders and receivers, and how much they concentrate in some groups). Cells are scored once
+for all weights; parallel or threads use several CPU cores.
 With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 }

@@ -15,7 +15,6 @@ HyperCom_seurat(
   weights = c(1),
   significance = FALSE,
   parallel = FALSE,
-  cl = NULL,
   outdir = "HyperCom",
   threads = NULL,
   seed = NULL,
@@ -24,33 +23,33 @@ HyperCom_seurat(
 )
 }
 \arguments{
-\item{seurat}{A seurat object}
+\item{seurat}{A Seurat object}
 
 \item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}
+and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
+interactions, e.g. \code{cellchat.mm.lrdb}}
 
-\item{sample}{A string that is the column name for sample in the provided metadata}
+\item{sample}{A string that is the column name for sample in the cell metadata of the Seurat object}
 
-\item{assay}{assay to get data from}
+\item{assay}{A string naming the assay to read counts from}
 
-\item{layer}{layer to get data from}
+\item{layer}{A string naming the layer of the assay to read counts from}
 
-\item{group}{A string that is the column name for group in the provided metadata}
+\item{group}{A string that is the column name for group in the cell metadata of the Seurat object}
 
-\item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
+\item{keep}{A vector of strings that are additional column names to keep from the cell metadata of the Seurat object}
 
-\item{weights}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
+score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
 not tell them apart)}
 
-\item{cl}{A cluster object, kept for compatibility: only its size caps the number of threads}
+\item{outdir}{A string naming the output directory of the pipeline run}
 
-\item{outdir}{output directory of pipeline run}
-
-\item{threads}{An integer number of threads of at least 1, overriding parallel and cl; more than the available cores warns and uses
+\item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
 them all}
 
 \item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
@@ -58,18 +57,17 @@ them all}
 \item{verbose}{A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
 each weight}
 
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the hypergraph method, fastest, kept as its factors: no node x node
-matrix), "chol" (one dense matrix) or "lu" (master's numbers bit for bit, two dense matrices); "chol" and "woodbury" are about
-1e-15 from "lu"}
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default; fastest and least memory), "chol" or
+"lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15}
 }
 \value{
 Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
 (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
 }
 \description{
-\code{HyperCom_seurat} Runs the HyperCom pipeline on a seurat object
+\code{HyperCom_seurat} runs the HyperCom pipeline on a Seurat object
 }
 \details{
-This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat},
-\code{generate_metadata}, and \code{prioritize_lr} on one assay layer and the cell metadata of a Seurat object. Needs the SeuratObject package.
+This function runs \code{HyperCom} on one assay layer and the cell metadata of a Seurat object (v5 or older assays). Needs the
+SeuratObject package.
 }

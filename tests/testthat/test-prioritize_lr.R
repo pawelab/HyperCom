@@ -1,35 +1,9 @@
-run_priority <- function(metadata=fx$output$metadata, ...){
-  return(quietly(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, metadata, ...)))
-}
-
-test_that("prioritize_lr matches master for several weights", {
-  priority <- run_priority(weights=c(1, 0.5, 0), outdir=NULL)
-
-  expect_identical(names(priority), names(fx$output$priority))
-  for(w in names(priority)){
-    expect_same_priority(priority[[w]], fx$output$priority[[w]])
-  }
-})
-
 test_that("prioritize_lr matches master with a single group", {
-  priority <- run_priority(metadata=fx$output$metadata.none, outdir=NULL)
-
-  expect_same_priority(priority[["1"]], fx$output$priority.none[["1"]])
-})
-
-test_that("prioritize_lr p-values match master for the same seed and are BH adjusted", {
-  skip_on_cran()
-  set.seed(1)
-  priority <- run_priority(significance=TRUE, outdir=NULL)
-  df <- priority[["1"]]
-
-  expect_same_priority(df, fx$output$priority.sig[["1"]])
-  expect_true(all(df$p >= 0 & df$p <= 1, na.rm=TRUE))
-  expect_equal(df$p.adj, stats::p.adjust(df$p, method="BH"))
+  expect_master(run_priority(metadata=fx$output$metadata.none), fx$output$priority.none)
 })
 
 test_that("priority tables are sorted, bounded and keep the LR columns", {
-  priority <- run_priority(weights=c(1, 0), outdir=NULL)
+  priority <- run_priority(weights=c(1, 0))
 
   for(df in priority){
     expect_identical(colnames(df), c(colnames(fx$output$lrs), "priority"))
@@ -39,8 +13,8 @@ test_that("priority tables are sorted, bounded and keep the LR columns", {
   }
 })
 
-test_that("prioritize_lr writes one priority file per weight", {
-  outdir <- file.path(withr::local_tempdir(), "6.priority")
+test_that("prioritize_lr writes one priority file per weight, into a nested directory it creates (#9)", {
+  outdir <- file.path(withr::local_tempdir(), "run", "6.priority")
   priority <- run_priority(weights=c(1, 0.5), outdir=outdir)
 
   expect_setequal(list.files(outdir), c("priority.1.csv", "priority.0.5.csv"))
@@ -50,13 +24,59 @@ test_that("prioritize_lr writes one priority file per weight", {
   }
 })
 
-test_that("prioritize_lr gives the same priorities in parallel", {
-  skip_on_cran()
-  cl <- parallel::makeCluster(2)
-  on.exit(try(parallel::stopCluster(cl), silent=TRUE), add=TRUE)
-  priority <- run_priority(weights=c(1, 0.5), parallel=TRUE, cl=cl, outdir=NULL)
+test_that("prioritize_lr in parallel gives master's priorities", {
+  priority <- run_priority(weights=c(1, 0.5), parallel=TRUE)
 
-  for(w in names(priority)){
-    expect_same_priority(priority[[w]], fx$output$priority[[w]])
+  expect_master(priority, fx$output$priority[c("1", "0.5")])
+})
+
+test_that("parallel uses one thread per physical core, and one thread without parallel", {
+  physical <- min(parallelly::availableCores(), parallelly::availableCores(logical=FALSE), na.rm=TRUE)
+
+  expect_equal(HyperCom:::get_threads(parallel=TRUE), physical)
+  expect_equal(HyperCom:::get_threads(), 1)
+})
+
+test_that("prioritize_lr reports progress as messages, not printed lines, and verbose=FALSE is silent", {
+  dir <- withr::local_tempdir()
+  run <- function(verbose){
+    return(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, fx$output$metadata, weights=c(1, 0.5), threads=test_threads(2),
+                         outdir=dir, verbose=verbose))
   }
+
+  msgs <- character(0)
+  printed <- utils::capture.output(x <- withCallingHandlers(run(TRUE), message=function(m){
+    msgs <<- c(msgs, conditionMessage(m))
+    invokeRestart("muffleMessage")
+  }))
+
+  expect_length(printed, 0)
+  expect_equal(sum(grepl("pairs scored", msgs)), 1)
+  expect_equal(sum(grepl("Weight 0.5: top pair", msgs)), 1)
+  expect_silent(run(FALSE))
+})
+
+test_that("format_duration gives seconds, minutes or hours", {
+  expect_identical(HyperCom:::format_duration(30), "30 s")
+  expect_identical(HyperCom:::format_duration(300), "5 min")
+  expect_identical(HyperCom:::format_duration(9000), "2.5 h")
+})
+
+test_that("grids bigger than the kernel's cache budget are scored in about 20 batches or more, smaller ones in big batches", {
+  batch_size <- HyperCom:::batch_size
+
+  expect_equal(batch_size(16, 1000, c(500, 500), 4090), 512)
+  expect_equal(batch_size(1, 1000, c(500, 500), 4090), 256)
+  expect_equal(batch_size(16, 20000, c(10000, 6667, 3333), 400), 20)
+  expect_equal(batch_size(16, 20000, c(10000, 6667, 3333), 40), 16)
+  expect_equal(batch_size(1, 20000, c(10000, 6667, 3333), 4090), 205)
+})
+
+test_that("group purity is at least 0, so perfectly balanced groups give priority 0, not NaN", {
+  balanced <- factor(paste0("t", rep(1:5, 4)))
+
+  expect_lt(1 - 1 / 5 - HyperCom:::gini_impurity(balanced), 0)
+  expect_identical(HyperCom:::group_purity(balanced, 1 - 1 / 5), 0)
+  expect_identical(HyperCom:::group_purity(balanced[1:4], 0), 1)
+  expect_identical(HyperCom:::group_purity(factor(c("a", "a", "a", "b")), 0.5), 0.5 - HyperCom:::gini_impurity(factor(c("a", "a", "a", "b"))))
 })
