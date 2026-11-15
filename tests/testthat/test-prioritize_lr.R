@@ -30,6 +30,26 @@ test_that("prioritize_lr in parallel gives master's priorities", {
   expect_master(priority, fx$output$priority[c("1", "0.5")])
 })
 
+test_that("background pairs without a priority are left out of the p-values, with a warning", {
+  expect_identical(HyperCom:::permutation_test(0.5, c(0.2, NaN, 0.7, NA, 0.5)), 2 / 3)
+  expect_identical(HyperCom:::permutation_test(NaN, c(0.2, 0.7)), NA_real_)
+  expect_identical(HyperCom:::permutation_test(0.5, c(NaN, NA)), NA_real_)
+
+  calculate <- HyperCom:::calculate_priority
+  testthat::local_mocked_bindings(calculate_priority=function(...){
+    res <- calculate(...)
+    res$terms[nrow(res$terms) - 0:1, "max"] <- NaN
+    return(res)
+  }, .package="HyperCom")
+  expect_warning(priority <- run_priority(weights=c(1, 0.5), significance=TRUE, seed=1),
+                 "2 of 1000 background pairs have no priority .* use the other 998")
+  for(w in names(priority)){
+    p <- priority[[w]]$p
+    expect_false(anyNA(p))
+    expect_equal(p * 998, round(p * 998), tolerance=1e-12)
+  }
+})
+
 test_that("parallel uses one thread per physical core, and one thread without parallel", {
   physical <- min(parallelly::availableCores(), parallelly::availableCores(logical=FALSE), na.rm=TRUE)
 

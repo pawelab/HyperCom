@@ -61,6 +61,7 @@ or receiver, how evenly they split into senders and receivers, and how much they
 for all weights; parallel or threads use several CPU cores.
 With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
+Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

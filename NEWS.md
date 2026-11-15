@@ -82,6 +82,7 @@ fix. Results of valid inputs are unchanged.
 
 * Cells perfectly balanced over 5, 10 or 11 groups no longer give NaN priorities: the group purity term rounded to -1.1e-16, whose log
   is NaN, and every p-value then became NA. Purity below 0 now counts as 0, so such pairs get priority 0.
+* A background pair without a priority (NaN) no longer makes every p-value NA: it is left out of the p-values, with a warning.
 * Metadata rows are matched to the influence matrix by name, so metadata in another order gives the same scores (they were matched by
   position, giving wrong scores).
 * Ligand and receptor columns stored as factors (an lrdb read with `stringsAsFactors=TRUE`) are read by name; the adjacency matrix was

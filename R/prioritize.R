@@ -25,13 +25,19 @@ generate_background_lrs <- function(lrs, metadata, count=1000){
 #' `permutation_test` returns a numeric p-value
 #'
 #' This function takes a priority and the priorities of the background pairs and returns the fraction of background priorities at
-#' least as high in absolute value (NA if any of them is NA or x is).
+#' least as high in absolute value. Background pairs without a priority (NA or NaN) are left out; NA if x has no priority or no
+#' background pair has one.
 #' @param x A numeric priority
 #' @param background A numeric vector of background priorities
 #' @returns A numeric p-value
 #' @noRd
 permutation_test <- function(x, background){
-  sum(abs(background) >= abs(x)) / length(background)
+  background <- background[!is.na(background)]
+  if(length(background) == 0){
+    return(NA_real_)
+  }
+
+  return(sum(abs(background) >= abs(x)) / length(background))
 }
 
 #' Calculate the Gini impurity of a set of labels
@@ -330,6 +336,7 @@ priority_filename <- function(weights){
 #' for all weights; parallel or threads use several CPU cores.
 #' With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 #' high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
+#' Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning.
 #' @param lrs A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
 #' in the counts matrix
 #' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
@@ -381,6 +388,11 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     fg <- seq_len(nrow(lrs))
     priority.terms <- list(terms=all.terms$terms[fg, , drop=FALSE], title=all.terms$title[fg])
     background.terms <- list(terms=all.terms$terms[-fg, , drop=FALSE], title=all.terms$title[-fg])
+    no.priority <- sum(rowSums(is.na(background.terms$terms)) > 0)
+    if(no.priority > 0){
+      warning(no.priority, " of ", nrow(background.lrs), " background pairs have no priority (NaN) and are left out of the p-values, ",
+              "which use the other ", nrow(background.lrs) - no.priority)
+    }
   } else {
     priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose)
   }
