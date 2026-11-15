@@ -41,7 +41,8 @@ not tell them apart)}
 \item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
 them all}
 
-\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
+\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
+random state is restored afterwards}
 
 \item{verbose}{A boolean of whether to report progress as messages: the pairs scored about every 5 s with
 the time left, and the top pair of each weight}

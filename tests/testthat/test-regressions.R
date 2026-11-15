@@ -106,10 +106,15 @@ test_that("#23 metadata rows in another order give the same scores", {
   expect_same_scores(score, fx$output$scores$single)
 })
 
-test_that("#24 HyperCom warns about cells of the counts missing from the metadata", {
+test_that("#24 cells of the counts missing from the metadata are left out, with a warning, and never drawn as background genes", {
   dir <- withr::local_tempdir()
+  missing <- rownames(fx$input$metadata)[1:5]
+  expect_warning(res <- run_hypercom(file.path(dir, "run"), metadata=fx$input$metadata[-(1:5), ], significance=TRUE, seed=1),
+                 "5 cells of counts are not in metadata and are left out")
 
-  expect_warning(run_hypercom(file.path(dir, "run"), metadata=fx$input$metadata[-(1:5), ]), "not in metadata")
+  expect_false(any(missing %in% rownames(res$adj)))
+  expect_false(any(missing %in% res$metadata$cell))
+  expect_false(anyNA(res$priority[["1"]]$p))
 })
 
 test_that("#25 a missing count does not stop filter_counts", {

@@ -49,7 +49,8 @@ not tell them apart)}
 \item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
 them all}
 
-\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state}
+\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
+random state is restored afterwards}
 
 \item{verbose}{A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
 each weight}
@@ -69,7 +70,7 @@ This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{genera
 \code{generate_metadata}, and \code{prioritize_lr}, writing every step to outdir. By default no matrix with a row and a column for every
 cell and gene is made, so memory grows with the number of cells rather than its square (see \code{generate_infMat}).
 The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
-lrdb of another species). Priority files of other weights already in outdir are kept, with a warning. The results are returned as
+lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning. The results are returned as
 well as written, so they need not be read back: \code{res <- HyperCom(...)}, then \code{res$priority[["1"]]} or
 \code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}.
 }

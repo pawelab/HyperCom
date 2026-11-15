@@ -1,4 +1,4 @@
-# Helpers shared by several steps: thread counts and node indexing
+# Helpers shared by several steps: thread counts, node indexing, the output directory and the random number state
 
 #' Find nodes by name, position or logical
 #'
@@ -65,4 +65,47 @@ get_threads <- function(parallel=FALSE, threads=NULL){
   cores <- min(cores, parallelly::availableCores(logical=FALSE), na.rm=TRUE)
 
   return(as.integer(cores))
+}
+
+#' Check the output directory argument
+#'
+#' `check_outdir` stops unless outdir is one string, or NULL where it means writing no files
+#'
+#' This function takes the outdir argument of prioritize_lr or HyperCom and stops unless it is one string (or NULL when null.ok). A
+#' cluster or a number there usually comes from a call by position written for the cl argument, which 0.2.0 removed.
+#' @param outdir The outdir argument
+#' @param null.ok A boolean of whether NULL (write no files) is allowed
+#' @returns NULL, invisibly
+#' @noRd
+check_outdir <- function(outdir, null.ok=FALSE){
+  if(is.null(outdir) && null.ok){
+    return(invisible(NULL))
+  }
+  if(!(is.character(outdir) && length(outdir) == 1 && !is.na(outdir))){
+    stop("outdir must be one string naming the output directory", if(null.ok) " (or NULL to write no files)",
+         "; the cl argument before it was removed in 0.2.0, so drop the value given for cl from calls by position")
+  }
+
+  return(invisible(NULL))
+}
+
+#' Restore the state of the random number generator
+#'
+#' `restore_seed` puts back the random number state saved before a set.seed
+#'
+#' This function takes the value of .Random.seed saved before set.seed (NULL if there was none) and restores it, so that a seed
+#' argument does not change the random numbers of the calling session.
+#' @param old.seed An integer vector saved from .Random.seed, or NULL
+#' @returns NULL, invisibly
+#' @noRd
+restore_seed <- function(old.seed){
+  if(is.null(old.seed)){
+    if(exists(".Random.seed", envir=globalenv(), inherits=FALSE)){
+      rm(".Random.seed", envir=globalenv())
+    }
+  } else {
+    assign(".Random.seed", old.seed, envir=globalenv())
+  }
+
+  return(invisible(NULL))
 }

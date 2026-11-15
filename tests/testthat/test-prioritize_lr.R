@@ -38,7 +38,7 @@ test_that("background pairs without a priority are left out of the p-values, wit
   calculate <- HyperCom:::calculate_priority
   testthat::local_mocked_bindings(calculate_priority=function(...){
     res <- calculate(...)
-    res$terms[nrow(res$terms) - 0:1, "max"] <- NaN
+    res[nrow(res) - 0:1, "max"] <- NaN
     return(res)
   }, .package="HyperCom")
   expect_warning(priority <- run_priority(weights=c(1, 0.5), significance=TRUE, seed=1),
@@ -48,6 +48,16 @@ test_that("background pairs without a priority are left out of the p-values, wit
     expect_false(anyNA(p))
     expect_equal(p * 998, round(p * 998), tolerance=1e-12)
   }
+})
+
+test_that("seed does not change the random numbers of the session, and outdir must be one string or NULL", {
+  withr::local_seed(42)
+  before <- get(".Random.seed", envir=globalenv())
+  priority <- run_priority(significance=TRUE, seed=1)
+
+  expect_identical(get(".Random.seed", envir=globalenv()), before)
+  expect_identical(run_priority(significance=TRUE, seed=1), priority)
+  expect_error(run_priority(outdir=4), "outdir must be one string")
 })
 
 test_that("parallel uses one thread per physical core, and one thread without parallel", {

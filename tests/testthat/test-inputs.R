@@ -108,6 +108,10 @@ test_that("HyperCom checks its arguments before any step runs, and weights that 
   expect_error(run(sample=fx$input$metadata$sample), "one column name")
   expect_error(run(metadata=as.matrix(fx$input$metadata)), "dataframe")
   expect_error(run(weights=-1), "at least 0")
+  expect_error(run(outdir=4), "cl argument before it was removed")
+  expect_error(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", outdir=NULL), "outdir must be one string")
+  expect_error(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata[0, ], sample="sample", outdir=file.path(dir, "run")),
+               "no cell of counts is a row name of metadata")
   expect_error(run(weights="1"), "at least 0")
   expect_error(run(weights=c(0.3, 0.1 + 0.2)), "weights must differ")
   expect_error(run(infmat.method="qr"), "should be one of")

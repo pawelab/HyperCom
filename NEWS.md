@@ -28,8 +28,8 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
 ## New arguments
 
 * `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `threads` (number of threads; below 1 stops, more than the available cores warns and
-  uses them all), `seed` (set before drawing the background pairs, so p-values are reproducible; ignored without `significance`) and
-  `verbose`, after `outdir`.
+  uses them all), `seed` (set before drawing the background pairs, so p-values are reproducible; ignored without `significance`; the session's
+  random numbers are restored afterwards) and `verbose`, after `outdir`.
 * `score_hypercom`: `parallel` and `threads` as `prioritize_lr` (one thread by default). On 20,000 cells one pair took 4.6 s on 1 thread
   and 0.9 s on 16. Scores are the same at any number of threads.
 * `generate_infMat`: `method` (`"woodbury"`, the default, `"lu"` or `"chol"`), `hyperedges` and `threads`; `HyperCom` and
@@ -74,8 +74,9 @@ fix. Results of valid inputs are unchanged.
   all-zero scores), when `ligand` names more than one gene and when `receptors` is empty; `score_hypercom` and `prioritize_lr` name
   genes missing from the graph instead of failing with a subscript error.
 * `prioritize_lr` stops on weights that are not numbers of at least 0 (negative weights gave infinite priorities) or that would share
-  a name and an output file, and on a `threads` that is not one number.
-* `HyperCom` warns when cells of the counts are not in the metadata (they count as genes) and when `outdir` already holds priority
+  a name and an output file, on a `threads` that is not one number, and on an `outdir` that is not one string (or NULL).
+* `HyperCom` leaves out cells of the counts that are not in the metadata, with a warning (they used to become gene nodes and be
+  drawn as background genes, which skewed the p-values), stops when no cell is, and warns when `outdir` already holds priority
   files of other weights, which it keeps. `filter_counts` warns about gene names used by several rows (the first row is kept).
 
 ## Bug fixes

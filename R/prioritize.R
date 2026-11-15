@@ -122,7 +122,7 @@ pair_grids <- function(ligands, receptors){
 #' @param threads An integer number of threads
 #' @param verbose A boolean of whether to report the pairs scored, about every 5 s, with an estimate of the time left (pairs are
 #' scored in about 20 batches or more when grids are bigger than the kernel's 24 MB cache budget; see batch_size)
-#' @returns A list with terms, a matrix with one row per pair and columns frac, pct.min, max, balance and purity, and title, the pair names
+#' @returns A matrix with one row per pair and columns frac, pct.min, max, balance and purity
 #' @noRd
 calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE){
   num.groups <- length(unique(metadata$group)) - 1
@@ -156,7 +156,6 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
   }
 
   terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
-  title <- character(nrow(lrs))
   n.grids <- nrow(pair_grids(ligands, receptors))
   size <- batch_size(threads, length(cells), tabulate(as.integer(factor(metadata$sample[cells.idx]))), n.grids)
   done <- 0
@@ -195,7 +194,6 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
       balance <- gini_impurity(type[present]) / 0.5
 
       terms[i, ] <- c(frac, pct.min, max.score, balance, purity)
-      title[i] <- paste(c(l, rs), collapse="_")
     }
     rm(sr)
     done <- done + length(rows)
@@ -207,7 +205,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
     }
   }
 
-  return(list(terms=terms, title=title))
+  return(terms)
 }
 
 #' Choose the number of grids per batch
@@ -278,13 +276,12 @@ group_purity <- function(groups, gini.max){
 #' `score_priority` returns the priority score of each ligand-receptor pair for one weight
 #'
 #' This function takes the priority terms of calculate_priority and returns their weighted geometric mean.
-#' @param priority.terms A list from calculate_priority
+#' @param terms A matrix of priority terms from calculate_priority, one row per pair
 #' @param weight A weight of at least 0 for the fraction of cells expressing a pair's genes (frac), the first of the five terms
 #' @returns A numeric vector of priority scores
 #' @noRd
-score_priority <- function(priority.terms, weight=1){
+score_priority <- function(terms, weight=1){
   w <- c(weight, rep(1, 4))
-  terms <- priority.terms$terms
   priority <- numeric(nrow(terms))
   for(i in seq_len(nrow(terms))){
     priority[i] <- exp(stats::weighted.mean(log(terms[i, ]), w))
@@ -350,7 +347,8 @@ priority_filename <- function(weights){
 #' @param outdir A string naming the output directory, or NULL to write no files
 #' @param threads An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
 #' them all
-#' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state
+#' @param seed An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
+#' random state is restored afterwards
 #' @param verbose A boolean of whether to report progress as messages: the pairs scored about every 5 s with
 #' the time left, and the top pair of each weight
 #' @returns A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
@@ -371,8 +369,11 @@ priority_filename <- function(weights){
 prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, outdir="6.priority",
                           threads=NULL, seed=NULL, verbose=TRUE){
   check_weights(weights)
+  check_outdir(outdir, null.ok=TRUE)
   if(significance){
     if(!is.null(seed)){
+      old.seed <- get0(".Random.seed", envir=globalenv(), inherits=FALSE)
+      on.exit(restore_seed(old.seed), add=TRUE)
       set.seed(seed)
     }
     background.lrs <- generate_background_lrs(lrs, metadata)
@@ -386,9 +387,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
   if(significance){
     all.terms <- calculate_priority(rbind(lrs, background.lrs), adj, infMat, metadata, threads, verbose)
     fg <- seq_len(nrow(lrs))
-    priority.terms <- list(terms=all.terms$terms[fg, , drop=FALSE], title=all.terms$title[fg])
-    background.terms <- list(terms=all.terms$terms[-fg, , drop=FALSE], title=all.terms$title[-fg])
-    no.priority <- sum(rowSums(is.na(background.terms$terms)) > 0)
+    priority.terms <- all.terms[fg, , drop=FALSE]
+    background.terms <- all.terms[-fg, , drop=FALSE]
+    no.priority <- sum(rowSums(is.na(background.terms)) > 0)
     if(no.priority > 0){
       warning(no.priority, " of ", nrow(background.lrs), " background pairs have no priority (NaN) and are left out of the p-values, ",
               "which use the other ", nrow(background.lrs) - no.priority)
