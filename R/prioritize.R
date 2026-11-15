@@ -117,14 +117,16 @@ pair_grids <- function(ligands, receptors){
 #' and returns the five terms of each pair's priority score. Pairs are scored in batches of whole ligands: each ligand and receptor
 #' subunit grid is scored once, whatever the number of pairs using it, and only one batch of cell scores (about 64 MB at most, at least
 #' one grid per thread) is in memory at a time. The gene x cell counts of a symmetric sparse adjacency are read from its stored
-#' triangle, without expanding the whole matrix.
+#' triangle, without expanding the whole matrix. With a cache, pairs whose genes are in it take its terms and are not scored again,
+#' and the terms of all pairs scored so far are written to it after each batch.
 #' @inheritParams prioritize_lr
 #' @param threads An integer number of threads
 #' @param verbose A boolean of whether to report the pairs scored, about every 5 s, with an estimate of the time left (pairs are
 #' scored in about 20 batches or more when grids are bigger than the kernel's 24 MB cache budget; see batch_size)
+#' @param cached A list from open_cache, or NULL for no cache
 #' @returns A matrix with one row per pair and columns frac, pct.min, max, balance and purity
 #' @noRd
-calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE){
+calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, cached=NULL){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
   cells.idx <- metadata$sample != "gene"
@@ -150,19 +152,32 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
   names(expressed) <- colnames(gene.counts)
   rm(gene.counts)
 
+  terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
+  pair.keys <- pair_keys(ligands, receptors)
+  scored <- logical(nrow(lrs))
+  if(!is.null(cached$terms)){
+    hit <- match(pair.keys, rownames(cached$terms))
+    scored <- !is.na(hit)
+    terms[scored, ] <- cached$terms[hit[scored], , drop=FALSE]
+    if(verbose && any(scored)){
+      message("  Continuing from the cache in ", cached$dir, ": ", sum(scored), " of ", nrow(lrs), " pairs already scored")
+    }
+  }
+  todo <- which(!scored)
+
   blocks <- NULL
-  if(inherits(infMat, "hypercom_influence")){
+  if(inherits(infMat, "hypercom_influence") && length(todo) > 0){
     blocks <- influence_blocks(infMat, grid_cells(rownames(infMat), metadata), threads)
   }
 
-  terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
-  n.grids <- nrow(pair_grids(ligands, receptors))
+  n.grids <- nrow(pair_grids(ligands[todo], receptors[todo, , drop=FALSE]))
   size <- batch_size(threads, length(cells), tabulate(as.integer(factor(metadata$sample[cells.idx]))), n.grids)
-  done <- 0
+  done <- sum(scored)
   grids.done <- 0
   t0 <- Sys.time()
   shown <- t0
-  for(rows in batch_pairs(ligands, receptors, size)){
+  for(rows in batch_pairs(ligands[todo], receptors[todo, , drop=FALSE], size)){
+    rows <- todo[rows]
     pairs <- pair_grids(ligands[rows], receptors[rows, , drop=FALSE])
     keys <-paste(pairs$ligand, pairs$receptor, sep="\t")
     sr <- score_grids(infMat, metadata, pairs$ligand, pairs$receptor, threads, blocks)
@@ -196,6 +211,13 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
       terms[i, ] <- c(frac, pct.min, max.score, balance, purity)
     }
     rm(sr)
+    scored[rows] <- TRUE
+    if(!is.null(cached)){
+      keep <- scored & !duplicated(pair.keys)
+      cache.terms <- terms[keep, , drop=FALSE]
+      rownames(cache.terms) <- pair.keys[keep]
+      write_cache_file(cache.terms, cached$dir, "terms.rds")
+    }
     done <- done + length(rows)
     grids.done <- grids.done + nrow(pairs)
     if(verbose && (as.numeric(difftime(Sys.time(), shown, units="secs")) >= 5 | done == nrow(lrs))){
@@ -310,6 +332,22 @@ check_weights <- function(weights){
   return(invisible(NULL))
 }
 
+#' Check the cache argument
+#'
+#' `check_cache` stops unless cache is TRUE or FALSE
+#'
+#' This function takes the cache argument of prioritize_lr and stops unless it is one TRUE or FALSE.
+#' @inheritParams prioritize_lr
+#' @returns NULL, invisibly
+#' @noRd
+check_cache <- function(cache){
+  if(!(isTRUE(cache) || isFALSE(cache))){
+    stop("cache must be TRUE or FALSE")
+  }
+
+  return(invisible(NULL))
+}
+
 #' Name the priority file of a weight
 #'
 #' `priority_filename` returns the name of the file prioritize_lr writes the priorities of a weight to
@@ -334,6 +372,11 @@ priority_filename <- function(weights){
 #' With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 #' high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 #' Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning.
+#' With outdir set and cache=TRUE, the pairs scored so far are kept in `<outdir>/cache` while pairs are scored, and the folder is
+#' removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
+#' continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped; without
+#' seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs is
+#' discarded, with a warning.
 #' @param lrs A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
 #' in the counts matrix
 #' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
@@ -351,6 +394,8 @@ priority_filename <- function(weights){
 #' random state is restored afterwards
 #' @param verbose A boolean of whether to report progress as messages: the pairs scored about every 5 s with
 #' the time left, and the top pair of each weight
+#' @param cache A boolean of whether to keep the pairs scored so far in `<outdir>/cache`, so that a stopped run continues where it
+#' stopped when run again; ignored when outdir is NULL
 #' @returns A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
 #' p.adj when significance is TRUE
 #' @examples
@@ -367,25 +412,38 @@ priority_filename <- function(weights){
 #' head(priority[["1"]])
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, outdir="6.priority",
-                          threads=NULL, seed=NULL, verbose=TRUE){
+                          threads=NULL, seed=NULL, verbose=TRUE, cache=TRUE){
   check_weights(weights)
   check_outdir(outdir, null.ok=TRUE)
+  check_cache(cache)
+  cached <- NULL
+  if(cache && !is.null(outdir)){
+    cached <- open_cache(file.path(outdir, "cache"), adj, infMat, metadata)
+  }
   if(significance){
-    if(!is.null(seed)){
-      old.seed <- get0(".Random.seed", envir=globalenv(), inherits=FALSE)
-      on.exit(restore_seed(old.seed), add=TRUE)
-      set.seed(seed)
+    if(is.null(seed) && identical(colnames(cached$background), colnames(lrs))){
+      background.lrs <- cached$background
+    } else {
+      if(!is.null(seed)){
+        old.seed <- get0(".Random.seed", envir=globalenv(), inherits=FALSE)
+        on.exit(restore_seed(old.seed), add=TRUE)
+        set.seed(seed)
+      }
+      background.lrs <- generate_background_lrs(lrs, metadata)
     }
-    background.lrs <- generate_background_lrs(lrs, metadata)
   }
   threads <- get_threads(parallel, threads)
   if(verbose){
     message("Scoring ", nrow(lrs), " ligand-receptor pairs", if(significance) paste0(" and ", nrow(background.lrs), " background pairs"),
             " on ", threads, " thread", if(threads > 1) "s")
   }
+  if(!is.null(cached)){
+    cached$background <- if(significance) background.lrs else NULL
+    save_cache(cached)
+  }
 
   if(significance){
-    all.terms <- calculate_priority(rbind(lrs, background.lrs), adj, infMat, metadata, threads, verbose)
+    all.terms <- calculate_priority(rbind(lrs, background.lrs), adj, infMat, metadata, threads, verbose, cached)
     fg <- seq_len(nrow(lrs))
     priority.terms <- all.terms[fg, , drop=FALSE]
     background.terms <- all.terms[-fg, , drop=FALSE]
@@ -395,7 +453,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
               "which use the other ", nrow(background.lrs) - no.priority)
     }
   } else {
-    priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose)
+    priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose, cached)
   }
 
   if(!is.null(outdir)){
@@ -426,6 +484,9 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     }
 
     lrs.list[[i]] <- current.lrs
+  }
+  if(!is.null(cached)){
+    close_cache(cached$dir)
   }
 
   names(lrs.list) <- weights

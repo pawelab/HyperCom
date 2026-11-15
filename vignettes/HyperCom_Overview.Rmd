@@ -1,7 +1,14 @@
 ---
 title: "HyperCom Overview"
 author: "Justin K. Moy & Pawel F. Przytycki"
-format: html
+output:
+  rmarkdown::html_vignette:
+    fig_width: 6
+    fig_height: 4
+vignette: >
+  %\VignetteIndexEntry{HyperCom Overview}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
 ---
 
 #### Last Updated: `r Sys.Date()`
@@ -55,8 +62,6 @@ ggplot(cell.meta, aes(x=UMAP_1, y=UMAP_2, colour=celltype)) +
   geom_point(size=0.5) +
   theme_classic()
 ```
-
-{{< pagebreak >}}
 
 For the LR interactions we will use the CellChat murine database. The first column names the interaction, the second is the
 ligand and the others the receptor genes (NA where a receptor complex has fewer subunits).
@@ -114,6 +119,26 @@ size cost little. Measured with `parallel=TRUE` on 16 threads:
 The influence matrix is never built in full by default, so its memory grows with the number of cells rather than its square.
 `infmat.method="lu"` builds it in full and reproduces the numbers of HyperCom 0.0.0.9000 exactly (the default agrees with them to
 about 1e-15), at the cost of two matrices of all cells and genes squared.
+
+### Runs that stop
+Scoring the pairs takes almost all of the run time, hours on large data. While pairs are scored, `HyperCom` keeps the pairs
+scored so far in `<outdir>/6.priority/cache`, so a run that stops (the time limit of a cluster job, a crash, a closed R session)
+loses little. Run the same call again: the steps before the scoring are repeated (seconds for 50,000 cells) and the scoring
+continues from the cache, losing at most the last batch of pairs. The results are the same as those of a run that never stopped;
+without `seed`, the run continues with the background pairs it drew before the stop. A continued run says so in its messages, e.g.
+`Continuing from the cache in overview/6.priority/cache: 812 of 2042 pairs already scored`.
+
+The cache folder is removed once the priority files are written, and a cache made from other inputs (other counts, metadata or
+`infmat.method`) is discarded with a warning. `cache=FALSE` keeps no cache. `prioritize_lr` keeps it in `<outdir>/cache` the same
+way, and keeps none with `outdir=NULL`.
+
+On a cluster, a job can therefore ask for less time than the whole run and be submitted again, with the same script, until it
+finishes:
+```{r, eval=FALSE}
+res <- HyperCom(lrdb=cellchat.mm.lrdb, counts=counts, metadata=cell.meta,
+                sample="sample", group="condition", significance=TRUE, seed=1,
+                parallel=TRUE, outdir="overview")
+```
 
 ## Running HyperCom step by step
 The rest of this vignette runs each component function of the pipeline in turn, with `outfile=NULL` so nothing is written.
@@ -230,7 +255,7 @@ ggplot(umap, aes(x=UMAP_1, y=UMAP_2, colour=hypercom)) +
 ```
 
 If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.
-```{r, warning=FALSE}
+```{r, warning=FALSE, message=FALSE}
 Thbs1_Sdc4 <- left_join(Thbs1_Sdc4, node.meta, by=join_by(cell))
 melt.Thbs1_Sdc4 <- pivot_longer(dplyr::select(Thbs1_Sdc4, c(cell, group, sender, receiver)), !c(cell, group), names_to = "type", values_to = "score")
 
@@ -254,8 +279,6 @@ head(Tgfb1_Tgfbr[, c("cell", "sender", "receiver", "hypercom")])
 ```{r}
 citation("HyperCom")
 ```
-
-{{< pagebreak >}}
 
 ```{r}
 sessionInfo()

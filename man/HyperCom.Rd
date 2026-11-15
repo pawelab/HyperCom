@@ -18,7 +18,8 @@ HyperCom(
   threads = NULL,
   seed = NULL,
   verbose = TRUE,
-  infmat.method = "woodbury"
+  infmat.method = "woodbury",
+  cache = TRUE
 )
 }
 \arguments{
@@ -57,6 +58,9 @@ each weight}
 
 \item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default; fastest and least memory), "chol" or
 "lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15}
+
+\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
+stopped when run again; ignored when outdir is NULL}
 }
 \value{
 Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
@@ -70,7 +74,9 @@ This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{genera
 \code{generate_metadata}, and \code{prioritize_lr}, writing every step to outdir. By default no matrix with a row and a column for every
 cell and gene is made, so memory grows with the number of cells rather than its square (see \code{generate_infMat}).
 The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
-lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning. The results are returned as
+lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning.
+If a run stops while pairs are scored, the same call run again repeats the earlier steps and continues the scoring from the cache
+in \verb{<outdir>/6.priority/cache} (see \code{prioritize_lr}). The results are returned as
 well as written, so they need not be read back: \code{res <- HyperCom(...)}, then \code{res$priority[["1"]]} or
 \code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}.
 }

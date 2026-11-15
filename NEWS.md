@@ -34,6 +34,13 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
   and 0.9 s on 16. Scores are the same at any number of threads.
 * `generate_infMat`: `method` (`"woodbury"`, the default, `"lu"` or `"chol"`), `hyperedges` and `threads`; `HyperCom` and
   `HyperCom_seurat`: `infmat.method`. On a plain adjacency matrix given without its `hyperedges` the default is `"lu"`.
+* `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `cache` (default `TRUE`). With an output directory, the pairs scored so far are
+  kept in `<outdir>/cache` (`<outdir>/6.priority/cache` for `HyperCom`) while pairs are scored, and the folder is removed once the
+  priority files are written. A run that stops (time limit of a cluster job, crash) continues where it stopped when the same call
+  is run again, losing at most the last batch of pairs, with the same results as a run that never stopped; without `seed` it keeps
+  the background pairs drawn before the stop. A cache made from other inputs is discarded with a warning. The cache holds 5
+  numbers per pair (130 KB for the bundled data with significance) and the names of the cells (0.8 MB at 20,000 cells); on 20,000
+  cells its writes took 0.1 s of a 77 s scoring step, with the same peak memory.
 * `prioritize_lr` documents its p-values: the fraction of 1000 background pairs scoring at least as high, in steps of 0.001; 0 means
   none did.
 
@@ -110,8 +117,9 @@ fix. Results of valid inputs are unchanged.
 * README: prerequisites and installation per operating system, the common installation errors, memory and run time, and how
   to install the R-only version (0.0.0.9000) from the `base-R` branch. DESCRIPTION describes the method and has URL and BugReports; `citation("HyperCom")`
   gives the bioRxiv preprint. The bundled datasets are documented.
-* Every help page has examples on the bundled data (each runs in under a second). The overview vignette's HTML is
-  rendered from the current source; its outdated PDF is gone.
+* Every help page has examples on the bundled data (each runs in under a second). The overview vignette is part of the package
+  (`vignettes/HyperCom_Overview.Rmd`, R Markdown instead of Quarto), so R CMD build renders it and R CMD check runs it; it needs
+  knitr, rmarkdown, ggplot2 and ggridges (Suggests). The rendered HTML and the outdated PDF are no longer in the repository.
 * Docs: `filter_counts` returns a cell x gene matrix; `generate_metadata` returns a dataframe; the lrdb's first column may have any
   name; vignette `HyperCom_seurat` example fixed.
 

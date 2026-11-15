@@ -15,7 +15,8 @@ prioritize_lr(
   outdir = "6.priority",
   threads = NULL,
   seed = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  cache = TRUE
 )
 }
 \arguments{
@@ -46,6 +47,9 @@ random state is restored afterwards}
 
 \item{verbose}{A boolean of whether to report progress as messages: the pairs scored about every 5 s with
 the time left, and the top pair of each weight}
+
+\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
+stopped when run again; ignored when outdir is NULL}
 }
 \value{
 A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
@@ -63,6 +67,11 @@ for all weights; parallel or threads use several CPU cores.
 With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning.
+With outdir set and cache=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache} while pairs are scored, and the folder is
+removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
+continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped; without
+seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs is
+discarded, with a warning.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

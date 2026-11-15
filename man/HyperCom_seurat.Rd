@@ -19,7 +19,8 @@ HyperCom_seurat(
   threads = NULL,
   seed = NULL,
   verbose = TRUE,
-  infmat.method = "woodbury"
+  infmat.method = "woodbury",
+  cache = TRUE
 )
 }
 \arguments{
@@ -60,6 +61,9 @@ each weight}
 
 \item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default; fastest and least memory), "chol" or
 "lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15}
+
+\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
+stopped when run again; ignored when outdir is NULL}
 }
 \value{
 Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata

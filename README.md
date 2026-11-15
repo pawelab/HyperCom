@@ -2,7 +2,7 @@
 
 HyperCom is the R package implementation of the method described in [HyperCom: a hypergraph-based method to infer cell-resolved cell-cell communication](https://www.biorxiv.org/content/10.64898/2026.09.30.755742v1) on bioRxiv. It is a hypergraph-based method to understand cell-cell communication at a cluster-free single-cell resolution.
 
-HyperCom provides the following hypergraph-based features described in the [overview vignette](vignettes/articles/HyperCom_Overview.qmd):
+HyperCom provides the following hypergraph-based features described in the [overview vignette](vignettes/HyperCom_Overview.Rmd):
 
 1. Per Cell Ligand-Receptor Pair Scoring
 
@@ -47,7 +47,8 @@ stops with **`library 'quadmath' not found`** or a missing **`gfortran`** (macOS
 
 Memory grows with the number of cells per sample squared, since cells are compared within their sample. With `parallel=TRUE`
 (one thread per physical core), 1000 cells take seconds; 20,000 cells in 3 samples took about 1.5 minutes and 3.5 GB on 16
-threads, and 50,000 cells in 3 samples about 28 minutes and 19 GB.
+threads, and 50,000 cells in 3 samples about 28 minutes and 19 GB. A run that stops while pairs are scored (e.g. the time limit
+of a cluster job) continues where it stopped when the same call is run again (see the vignette).
 
 ### Pure R version
 

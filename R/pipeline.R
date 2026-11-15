@@ -8,7 +8,9 @@
 #' `generate_metadata`, and `prioritize_lr`, writing every step to outdir. By default no matrix with a row and a column for every
 #' cell and gene is made, so memory grows with the number of cells rather than its square (see `generate_infMat`).
 #' The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
-#' lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning. The results are returned as
+#' lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning.
+#' If a run stops while pairs are scored, the same call run again repeats the earlier steps and continues the scoring from the cache
+#' in `<outdir>/6.priority/cache` (see `prioritize_lr`). The results are returned as
 #' well as written, so they need not be read back: `res <- HyperCom(...)`, then `res$priority[["1"]]` or
 #' `score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")`.
 #' @inheritParams filter_counts
@@ -31,11 +33,12 @@
 #' scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE,
-                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
+                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
   check_lrdb(lrdb)
   check_columns(metadata, sample, group, keep)
   check_weights(weights)
   check_outdir(outdir)
+  check_cache(cache)
   infmat.method <- match_method(infmat.method)
   threads <- get_threads(parallel, threads)
   in.metadata <- colnames(counts) %in% rownames(metadata)
@@ -74,7 +77,7 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   }
   metadata <- generate_metadata(infMat, metadata, sample, group, keep, outfile=file.path(outdir, "5.metadata.csv"))
   priority <- prioritize_lr(lrs, adj, infMat, metadata, weights=weights, significance=significance, outdir=file.path(outdir, "6.priority"),
-                            threads=threads, seed=seed, verbose=verbose)
+                            threads=threads, seed=seed, verbose=verbose, cache=cache)
   if(verbose){
     message("Done: results in ", outdir)
   }
@@ -145,12 +148,12 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #' head(res$priority[["1"]])
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                            parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury"){
+                            parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
 
   res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
-                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method)
+                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)
 
   return(invisible(res))
 }
