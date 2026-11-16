@@ -45,10 +45,12 @@ stops with **`library 'quadmath' not found`** or a missing **`gfortran`** (macOS
 
 ### Memory and run time
 
-Memory grows with the number of cells per sample squared, since cells are compared within their sample. With `parallel=TRUE`
-(one thread per physical core), 1000 cells take seconds; 20,000 cells in 3 samples took about 1.5 minutes and 3.5 GB on 16
-threads, and 50,000 cells in 3 samples about 28 minutes and 19 GB. A run that stops while pairs are scored (e.g. the time limit
-of a cluster job) continues where it stopped when the same call is run again (see the vignette).
+Memory grows with the number of cells per sample squared, since cells are compared within their sample: about 16 bytes per pair of
+cells in the same sample, so one sample of 30,000 cells needs about 15 GB and one of 65,000 cells about 70 GB. With `parallel=TRUE`
+(one thread per physical core), 1000 cells take seconds. Scoring a tenth of the CellChat pairs (about 100, without p-values) took
+about 1.3 minutes and 3.5 GB for 20,000 cells in 3 samples on a 16-core desktop, and about 10 minutes and 17 GB for 50,000 cells in
+3 samples; all pairs take about ten times as long, and p-values add 1000 background pairs. A run that stops while pairs are
+scored (e.g. the time limit of a cluster job) continues where it stopped when the same call is run again (see the vignette).
 
 ### Pure R version
 

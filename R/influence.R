@@ -175,8 +175,8 @@ influence_slice <- function(infMat, rows, cols, threads=1){
 #' @returns A numeric vector
 #' @noRd
 influence_blocks <- function(infMat, g, threads=1){
-  if(sum(as.numeric(tabulate(g$sample))^2) >= 4294967295){
-    stop("too many cells per sample: the sum of squared sample sizes must stay below 2^32")
+  if(sum(as.numeric(tabulate(g$sample))^2) >= 2^52){
+    stop("too many cells per sample: the sum of squared sample sizes must stay below 2^52")
   }
   H <- infMat$H
 

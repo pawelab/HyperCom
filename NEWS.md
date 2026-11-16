@@ -37,7 +37,8 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
 * `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `cache` (default `TRUE`). With an output directory, the pairs scored so far are
   kept in `<outdir>/cache` (`<outdir>/6.priority/cache` for `HyperCom`) while pairs are scored, and the folder is removed once the
   priority files are written. A run that stops (time limit of a cluster job, crash) continues where it stopped when the same call
-  is run again, losing at most the last batch of pairs, with the same results as a run that never stopped; without `seed` it keeps
+  is run again, losing at most the last batch of pairs, with the same results as a run that never stopped on the same type of
+  computer (another CPU can change the last digits, about 1e-13); without `seed` it keeps
   the background pairs drawn before the stop. A cache made from other inputs is not used and is moved to `cache.old`, with a
   warning; a cache that cannot be written is skipped, with a warning. The cache holds 5
   numbers per pair (130 KB for the bundled data with significance) and the names of the cells (0.8 MB at 20,000 cells); on 20,000
@@ -47,8 +48,9 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
 
 ## Speed and memory
 
-On 20,000 synthetic cells in 3 samples (16 threads) the whole pipeline takes about 1.5 min and peaks at 3.5 GB; 0.0.0.9000 ran out of
-memory at this size. 50,000 cells take about 28 min and 19 GB. The bundled data take seconds.
+On 20,000 synthetic cells in 3 samples (16 threads, a tenth of the CellChat pairs, no p-values) the whole pipeline takes about 1.3 min
+and peaks at 3.5 GB; 0.0.0.9000 ran out of memory at this size. 50,000 cells take about 10 min and 17 GB. The bundled data take
+seconds.
 
 * Cells are scored by compiled code on threads that share one influence matrix, only within their sample (every cross-sample entry
   was NA), once per ligand and receptor subunit for all weights and pairs. Weights and significance no longer multiply the run time.
@@ -56,8 +58,11 @@ memory at this size. 50,000 cells take about 28 min and 19 GB. The bundled data 
   which grow with the number of cells rather than its square; only the within-sample cell blocks the scores need are made, while
   pairs are scored. Small data with at least as many hyperedges as nodes (with the full CellChat database, roughly under 1000 cells)
   get the dense influence matrix as before, which is then no bigger than the factors.
-* Memory grows with the sum of squared sample sizes (8 bytes per within-sample cell pair for the blocks, about 10 more while a grid is
+* Memory grows with the sum of squared sample sizes (8 bytes per within-sample cell pair for the blocks, 8 to 10 more while a grid is
   ranked) plus 8 bytes per hyperedge and node, so more samples of the same size cost little.
+* No limit on cells per sample but memory: earlier builds of this version stopped when the sum of squared sample sizes reached 2^32
+  (one sample of 65,535 cells). One sample of 65,535 cells needs about 70 GB, 100,000 cells about 160 GB. The run time grows with the
+  within-sample cell pairs times the grids: one sample of 65,540 cells took about 45 s per grid on 16 threads of a desktop.
 * Influence matrix methods: `"woodbury"` 0.4 s at 20,000 cells, `"chol"` 46 s with one dense node x node matrix, `"lu"` 105-121 s with
   two (0.0.0.9000 held five). `"chol"` and `"woodbury"` differ from `"lu"` by about 1e-15 relative, which can reorder exactly tied
   grid entries: on 20,000 cells the pairs keep their order and priorities move by at most 1.3e-13 (`"woodbury"`) and 1.9e-14

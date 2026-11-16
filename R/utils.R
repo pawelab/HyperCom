@@ -62,9 +62,35 @@ get_threads <- function(parallel=FALSE, threads=NULL){
   if(!parallel){
     return(1L)
   }
-  cores <- min(cores, parallelly::availableCores(logical=FALSE), na.rm=TRUE)
+  cores <- min(cores, physical_cores(), na.rm=TRUE)
 
   return(as.integer(cores))
+}
+
+#' Count the physical cores
+#'
+#' `physical_cores` returns the number of physical cores of the machine, or NA when it cannot be read
+#'
+#' This function asks parallelly, which counts physical cores on Windows and macOS but gives the logical count on Linux; there it
+#' counts the distinct (package, core) pairs of the CPUs in /sys/devices/system/cpu instead.
+#' @returns An integer or NA
+#' @noRd
+physical_cores <- function(){
+  if(Sys.info()[["sysname"]] != "Linux"){
+    return(suppressWarnings(as.integer(parallelly::availableCores(logical=FALSE))))
+  }
+  cpus <- list.files("/sys/devices/system/cpu", pattern="^cpu[0-9]+$", full.names=TRUE)
+  ids <- vapply(cpus, function(d){
+    tryCatch(paste(readLines(file.path(d, "topology", "physical_package_id"), warn=FALSE)[1],
+                   readLines(file.path(d, "topology", "core_id"), warn=FALSE)[1]),
+             error=function(e) NA_character_, warning=function(w) NA_character_)
+  }, character(1))
+  ids <- ids[!is.na(ids)]
+  if(length(ids) == 0){
+    return(NA_integer_)
+  }
+
+  return(length(unique(ids)))
 }
 
 #' Check the output directory argument

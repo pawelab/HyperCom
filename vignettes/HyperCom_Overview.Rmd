@@ -108,13 +108,14 @@ res <- HyperCom_seurat(seurat=seurat_object, lrdb=cellchat.mm.lrdb, sample="samp
 
 ### Run time and memory
 Memory grows with the number of cells per sample squared, since cells are compared within their sample: more samples of the same
-size cost little. Measured with `parallel=TRUE` on 16 threads:
+size cost little. Measured with `parallel=TRUE` on a 16-core desktop; the two larger rows score a tenth of the CellChat pairs (about
+100) without p-values, so all pairs take about ten times as long, and p-values add 1000 background pairs:
 
 | cells | samples | time | memory |
 |---|---|---|---|
 | 1,000 (this vignette) | 2 | seconds | under 1 GB |
-| 20,000 | 3 | about 1.5 min | about 3.5 GB |
-| 50,000 | 3 | about 28 min | about 19 GB |
+| 20,000 | 3 | about 1.3 min | about 3.5 GB |
+| 50,000 | 3 | about 10 min | about 17 GB |
 
 The influence matrix is never built in full by default, so its memory grows with the number of cells rather than its square.
 `infmat.method="lu"` builds it in full and reproduces the numbers of HyperCom 0.0.0.9000 exactly (the default agrees with them to
@@ -124,7 +125,8 @@ about 1e-15), at the cost of two matrices of all cells and genes squared.
 Scoring the pairs takes almost all of the run time, hours on large data. While pairs are scored, `HyperCom` keeps the pairs
 scored so far in `<outdir>/6.priority/cache`, so a run that stops (the time limit of a cluster job, a crash, a closed R session)
 loses little. Run the same call again: the steps before the scoring are repeated (seconds for 50,000 cells) and the scoring
-continues from the cache, losing at most the last batch of pairs. The results are the same as those of a run that never stopped;
+continues from the cache, losing at most the last batch of pairs. The results are the same as those of a run that never stopped
+on the same type of computer (on a cluster, ask for the same node type: another CPU can change the last digits, about 1e-13);
 without `seed`, the run continues with the background pairs it drew before the stop. A continued run says so in its messages, e.g.
 `Continuing from the cache in overview/6.priority/cache: 812 of 2042 pairs already scored`.
 

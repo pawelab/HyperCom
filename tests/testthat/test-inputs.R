@@ -156,3 +156,12 @@ test_that("HyperCom warns about priority files of other weights already in outdi
   expect_no_warning(run_hypercom(dir, weights=c(1, 0.5), threads=test_threads(2)))
   expect_warning(run_hypercom(dir, weights=1, threads=test_threads(2)), "priority.0.5.csv")
 })
+
+test_that("within-sample cell pairs may pass 2^32 and stop at 2^52, before any block is made", {
+  skip_on_cran()
+  past32 <- tryCatch(HyperCom:::influence_blocks(NULL, list(sample=rep(1L, 65537))), error=conditionMessage)
+  big <- list(sample=rep(1L, 2^26 + 1))
+
+  expect_false(grepl("sample sizes", past32))
+  expect_error(HyperCom:::influence_blocks(NULL, big), "below 2^52", fixed=TRUE)
+})

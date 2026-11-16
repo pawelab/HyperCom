@@ -76,6 +76,27 @@ const int NARROW_BITS = 48;             // key bits of a 6-byte pool slot: a big
 static_assert(((size_t) 1 << B1_LIMIT) + 1 < SKIP, "equal-width bucket ids must stay below SKIP");
 static_assert(BUCKETS_IDS + 1 < SKIP, "equal-count bucket ids must stay below SKIP");
 static_assert(NARROW_BITS == 8 * 6, "a 6-byte pool slot holds 48 key bits");
+// Ranks are uint32. A grid of LOCAL_FROM entries or more (run stores only) keeps each rank counted from its bucket's first and adds
+// the bucket's start (64-bit) when reading it, so a bucket holds at most BUCKET_MAX entries. A chunk holds fewer than CHUNK_MAX
+// entries, so its per-bucket counts (uint32) cannot wrap, and a slab-stored grid (one chunk) keeps global ranks. Test builds lower
+// them (-DHYPERCOM_LOCAL_FROM=0 -DHYPERCOM_BUCKET_MAX=... -DHYPERCOM_CHUNK_MAX=...).
+#ifndef HYPERCOM_LOCAL_FROM
+#define HYPERCOM_LOCAL_FROM 0xFFFFFFFFu
+#endif
+#ifndef HYPERCOM_BUCKET_MAX
+#define HYPERCOM_BUCKET_MAX 0xFFFFFFFFu
+#endif
+#ifndef HYPERCOM_CHUNK_MAX
+#define HYPERCOM_CHUNK_MAX 0xFFFFFFFFu
+#endif
+const size_t LOCAL_FROM = HYPERCOM_LOCAL_FROM;
+const size_t BUCKET_MAX = HYPERCOM_BUCKET_MAX;
+const size_t CHUNK_MAX = HYPERCOM_CHUNK_MAX;
+const size_t GRID_MAX = (size_t) 1 << 52;  // entries of a grid: R's longest vector; ranks and their count exact as doubles
+const char *const BUCKET_ERROR = "more than 2^32 - 1 entries fall in one value bucket (a sample far bigger than memory allows, or "
+                                 "very many equal values)";
+static_assert(LOCAL_FROM <= UINT32_MAX && BUCKET_MAX <= UINT32_MAX && CHUNK_MAX <= UINT32_MAX && CHUNK_MAX >= 4,
+              "ranks and bucket counts are uint32");
 
 // Tuning knobs: speed and memory only, never a result
 const size_t CACHE_BUDGET = (size_t) 24 << 20;  // team buffers that may be in flight at once (grid_bytes); a bigger grid gets all
@@ -86,7 +107,8 @@ const size_t SAMPLE = 61;               // bucket bounds from every 61st entry o
 const size_t SAMPLE_FIRST = 3;          // starting at its entry 3
 const int TABLE_BITS = 18;              // big grids: the sampled key range is cut into 2^18 cells whose counts set the buckets
 const size_t BUCKET_TARGET = 65536;     // big grids: entries per bucket aimed at, so a bucket's sort buffers stay in L2
-const size_t BUCKETS_MIN = 2048, BUCKETS_MAX = 32768;
+const size_t BUCKETS_MIN = 2048, BUCKETS_MAX = 8192;  // binds above ~5.4e8 entries: fewer, bigger buckets place faster (one sample on
+                                                      // 16 threads: 30k cells same, 40k -14%, 65k -15% vs 32768; 4096 -11% slower)
 const size_t SLAB = 64;                 // entries per pool slab on one thread: each bucket is a linked list of slabs
 const size_t RUN = 32;                  // a block whose nodes come in runs this long on average is read from F, others are copied
                                         // while all copies fit CACHE_BUDGET, else gathered from F
@@ -344,7 +366,10 @@ struct Chunk {
 struct Team {
   Team(const Cells &c, size_t size, bool alone) : size(size), bar(size), a(c.node.size()), b(c.node.size()),
                                                   rsum(c.node.size()), rcnt(c.node.size()), lo(size), hi(size) {
-    const size_t nblocks = c.block_start.size() - 1, target = (c.cap + size - 1) / size;
+    // a chunk holds at most 2 x target entries (a run of blocks) or target + s (rows of a block of s cells): only a grid of CHUNK_MAX
+    // entries or more needs smaller chunks, so smaller grids are cut as before (one thread: one chunk, slabs)
+    const size_t nblocks = c.block_start.size() - 1, even = (c.cap + size - 1) / size,
+                 target = c.cap >= CHUNK_MAX ? std::min(even, CHUNK_MAX / 2) : even;
     size_t open = 0, filled = 0;
     for(size_t blk = 0; blk < nblocks; ++blk){
       const size_t s = c.block_start[blk + 1] - c.block_start[blk];
@@ -370,6 +395,7 @@ struct Team {
     const size_t nchunks = chunks.size();
     slabbed = alone && nchunks == 1;
     big = !slabbed && grid_bytes(c) > CACHE_BUDGET;
+    local = !slabbed && c.cap >= LOCAL_FROM;
     if(slabbed){
       const size_t slabs = nbmax + c.cap / SLAB + 1;  // the one chunk holds every entry
       pool.reset(new uint64_t[slabs * SLAB]);
@@ -397,6 +423,7 @@ struct Team {
   size_t g = 0, nbmax, stride;
   int l = 0, r = 0, bucket_bits;        // bucket_bits: b1 of equal-width buckets before the key range is known
   bool slabbed, big;                   // big: runs of 6-byte keys with equal-count buckets (a grid above the cache budget on threads)
+  bool local;                          // ranks counted from the bucket's first (a grid of LOCAL_FROM entries or more)
   Buckets bk;                          // the grid's buckets, made by the leader
   std::vector<Chunk> chunks;
   std::unique_ptr<uint64_t[]> pool;    // slabs, or runs of a grid that fits the cache
@@ -412,7 +439,7 @@ struct Team {
   std::vector<uint32_t> map;           // equal-count buckets: the bucket of each cell
   std::vector<uint64_t> base;          // and the first key (rel) and key bits of each bucket
   std::vector<int> width;
-  std::vector<std::vector<uint32_t>> hist;  // big grids: each member's sampled entries per cell
+  std::vector<std::vector<uint64_t>> hist;  // big grids: each member's sampled entries per cell
   std::vector<double> a, b;
   std::vector<long double> rsum;
   std::vector<int64_t> rcnt;
@@ -543,7 +570,7 @@ struct SlabKeys {
 };
 
 // Ranks of one bucket of m entries, held in position order as their low t key bits: sort (key bits, index) words, then
-// give each entry its min rank - 1
+// give each entry its min rank - 1: s0 plus its rank in the bucket (s0 = the bucket's start, or 0 for local ranks)
 template <class K> void rank_bucket(K &keys, size_t m, size_t s0, int t, Work &w){
   const int I = bit_width(m - 1), cut = t + I > 64 ? t + I - 64 : 0, width = t - cut;
   const int want = std::min(RADIX_BITS, bit_width(m)), shift = width > want ? width - want : 0;
@@ -659,7 +686,7 @@ bool key_range(const Team &tm, uint64_t &lo, uint64_t &hi, int &R){
 
 // Member me: its share of the sample counted per cell of 2^tc keys from lo
 void sample_cells(const Cells &c, Team &tm, size_t me, uint64_t lo, int tc, size_t ncell){
-  std::vector<uint32_t> &h = tm.hist[me];
+  std::vector<uint64_t> &h = tm.hist[me];
   h.assign(ncell, 0u);
   each_sample(c, tm, me, [&](uint64_t k){
     ++h[(k - lo) >> tc];
@@ -669,9 +696,9 @@ void sample_cells(const Cells &c, Team &tm, size_t me, uint64_t lo, int tc, size
 // The leader: equal-count buckets from the members' cell counts. A bucket starts where the sampled entries below it reach the
 // next of target equal shares, and spans at most 2^(NARROW_BITS - tc) cells so its keys fit 6 bytes. False if nothing was sampled.
 bool count_buckets(Team &tm, size_t cap, uint64_t lo, int tc, size_t ncell){
-  std::vector<uint32_t> &h = tm.hist[0];
+  std::vector<uint64_t> &h = tm.hist[0];
   for(size_t me = 1; me < tm.size; ++me){
-    const uint32_t *hm = tm.hist[me].data();
+    const uint64_t *hm = tm.hist[me].data();
     for(size_t k = 0; k < ncell; ++k) h[k] += hm[k];
   }
   uint64_t total = 0;
@@ -819,7 +846,10 @@ void split_buckets(Team &tm, size_t NB){
         run[d - d0] += e;
       }
     }
-    for(size_t d = d0; d < d1; ++d) tm.tot[d] = run[d - d0];
+    for(size_t d = d0; d < d1; ++d){
+      if(run[d - d0] > BUCKET_MAX) throw std::runtime_error(BUCKET_ERROR);
+      tm.tot[d] = run[d - d0];
+    }
   }
 }
 
@@ -900,6 +930,8 @@ void rank_buckets(Team &tm, const Buckets &bk, Work &w){
     for(size_t d = std::lower_bound(start, start + NB, u * unit) - start; d < d1; ++d){
       const size_t m = start[d + 1] - start[d];
       if(m == 0) continue;
+      if(m > BUCKET_MAX) throw std::runtime_error(BUCKET_ERROR);
+      const size_t s0 = tm.local ? 0 : start[d];
       const int t = bk.bits(d);
       if(tm.slabbed){
         w.segs.clear();
@@ -914,13 +946,13 @@ void rank_buckets(Team &tm, const Buckets &bk, Work &w){
         rank_bucket(keys, m, start[d], t, w);
       } else if(!tm.big){
         RunKeys keys = {tm.pool.get() + start[d]};
-        rank_bucket(keys, m, start[d], t, w);
+        rank_bucket(keys, m, s0, t, w);
       } else if(tm.swide[d]){
         RunKeys keys = {tm.ext.data() + tm.sbase[d]};
-        rank_bucket(keys, m, start[d], t, w);
+        rank_bucket(keys, m, s0, t, w);
       } else {
         SixKeys keys = {tm.pool6.get() + 6 * tm.sbase[d]};
-        rank_bucket(keys, m, start[d], t, w);
+        rank_bucket(keys, m, s0, t, w);
       }
     }
   }
@@ -941,8 +973,9 @@ __attribute__((noinline)) void pull_slabs(const uint16_t *bc, size_t m, int64_t 
   }
 }
 
-// The same from their buckets' runs; rp[d] = the next uint32 rank of bucket d
-__attribute__((noinline)) void pull_runs(const uint16_t *bc, size_t m, int64_t *rk, const char **rp){
+// The same from their buckets' runs; rp[d] = the next uint32 rank of bucket d, plus its start base[d] when ranks are LOCAL
+template <bool LOCAL> __attribute__((noinline)) void pull_runs(const uint16_t *bc, size_t m, int64_t *rk, const char **rp,
+                                                         const size_t *base){
   for(size_t i = 0; i < m; ++i){
     const size_t d = bc[i];
     if(d == SKIP){
@@ -952,7 +985,7 @@ __attribute__((noinline)) void pull_runs(const uint16_t *bc, size_t m, int64_t *
     uint32_t rank;
     std::memcpy(&rank, rp[d], sizeof rank);
     rp[d] += sizeof rank;
-    rk[i] = rank;
+    rk[i] = LOCAL ? (int64_t) (base[d] + rank) : (int64_t) rank;
   }
 }
 
@@ -995,7 +1028,8 @@ template <Store STORE> void sum_chunk(const Cells &c, Team &tm, const Buckets &b
       for(size_t h = 0; h < ncol; ++h){
         const uint16_t *bc = tm.bucket.data() + off + (jj + h) * s + i0;
         if(STORE == Store::SLABS) pull_slabs(bc, m, h ? rk1 : rk0, pool, link, at);
-        else pull_runs(bc, m, h ? rk1 : rk0, rp);
+        else if(tm.local) pull_runs<true>(bc, m, h ? rk1 : rk0, rp, w.start.data());
+        else pull_runs<false>(bc, m, h ? rk1 : rk0, rp, nullptr);
       }
       if(ncol == 1) std::fill(rk1, rk1 + m, (int64_t) -1);
       long double r0 = 0.0L, r1 = 0.0L;
@@ -1125,7 +1159,7 @@ void run_team(const Cells &c, Team &tm, size_t me, const int *lig, const int *re
 
 
 // Cells grouped into within-sample blocks as in grid_layout.h (node = their index in F, out = their position). Ranks and
-// per-bucket counts are uint32, so a grid holds fewer than 2^32 - 1 entries.
+// per-bucket counts are uint32, counted per bucket in grids of 2^32 - 1 entries or more (LOCAL_FROM).
 void group_cells(Cells &c, const int *cell, const int *sample, size_t n){
   c.block_start.push_back(0);
   for(const std::vector<int> &members : sample_blocks(sample, n)){
@@ -1139,7 +1173,7 @@ void group_cells(Cells &c, const int *cell, const int *sample, size_t n){
     c.cap += size * size;
     c.max_block = std::max(c.max_block, size);
   }
-  if(c.cap >= UINT32_MAX) Rcpp::stop("grid scoring: too many cells per sample (the sum of squared sample sizes must stay below 2^32)");
+  if(c.cap >= GRID_MAX) Rcpp::stop("grid scoring: too many cells per sample (the sum of squared sample sizes must stay below 2^52)");
 }
 
 // Sender and receiver scores (cell x pair) of the grids of ligands lp and receptor subunits rp (negative: the network score)

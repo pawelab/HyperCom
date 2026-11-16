@@ -61,10 +61,14 @@ test_that("seed does not change the random numbers of the session, and outdir mu
 })
 
 test_that("parallel uses one thread per physical core, and one thread without parallel", {
-  physical <- min(parallelly::availableCores(), parallelly::availableCores(logical=FALSE), na.rm=TRUE)
+  physical <- min(parallelly::availableCores(), HyperCom:::physical_cores(), na.rm=TRUE)
 
   expect_equal(HyperCom:::get_threads(parallel=TRUE), physical)
   expect_equal(HyperCom:::get_threads(), 1)
+  expect_lte(HyperCom:::physical_cores(), parallel::detectCores())
+  if(Sys.info()[["sysname"]] != "Linux"){
+    expect_equal(HyperCom:::physical_cores(), as.integer(parallelly::availableCores(logical=FALSE)))
+  }
 })
 
 test_that("prioritize_lr reports progress as messages, not printed lines, and verbose=FALSE is silent", {
