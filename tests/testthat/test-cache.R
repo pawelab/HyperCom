@@ -1,5 +1,45 @@
 real.batch_pairs <- HyperCom:::batch_pairs
 real.score_grids <- HyperCom:::score_grids
+real.screen_grids <- HyperCom:::screen_grids
+
+#' Stop a run after some batches of screened grids
+#'
+#' `stop_screening_after` evaluates an expression in which background screening stops with an error after a number of batches
+#'
+#' This function takes a number of batches and an expression, screens 50 grids per batch so that the fixture's background has many
+#' batches, and lets screen_grids stop with "run stopped" once the given number of batches is screened.
+#' @param batches An integer number of batches screened before the stop
+#' @param expr An expression running prioritize_lr with significance
+#' @returns The value of the expression (never reached once the stop comes)
+#' @noRd
+stop_screening_after <- function(batches, expr){
+  calls <- 0
+
+  return(testthat::with_mocked_bindings(expr, screen_batch_size=function(threads, cells, sample.sizes, n.grids) 50L,
+                                        screen_grids=function(...){
+                                          calls <<- calls + 1
+                                          if(calls > batches){
+                                            stop("run stopped")
+                                          }
+                                          return(real.screen_grids(...))
+                                        }, .package="HyperCom"))
+}
+
+#' Count the grids a run screens
+#'
+#' `count_screened` returns the value of an expression and the number of grids screened while it ran
+#' @param expr An expression running prioritize_lr
+#' @returns A list with value and grids
+#' @noRd
+count_screened <- function(expr){
+  grids <- 0
+  value <- testthat::with_mocked_bindings(expr, screen_grids=function(infMat, metadata, ligands, receptors, ...){
+    grids <<- grids + length(ligands)
+    return(real.screen_grids(infMat, metadata, ligands, receptors, ...))
+  }, .package="HyperCom")
+
+  return(list(value=value, grids=grids))
+}
 
 #' Stop a run after some batches of grids
 #'
@@ -64,10 +104,52 @@ test_that("a stopped run continues from the cache, scores only the rest and give
 
   expect_master(resumed$value, fx$output$priority.sig)
   expect_lt(resumed$grids, full$grids)
-  expect_equal(sum(grepl(paste0("Continuing from the cache in .*: [1-9][0-9]* of ", nrow(fx$output$lrs) + 1000, " pairs already scored"),
+  expect_equal(sum(grepl(paste0("Continuing from the cache in .*: [1-9][0-9]* of ", nrow(fx$output$lrs), " pairs already scored"),
                          msgs)), 1)
   expect_false(dir.exists(cache.dir))
   expect_identical(list.files(outdir), "priority.1.csv")
+})
+
+test_that("a run stopped while screening background pairs continues from their cached bounds with the same p-values", {
+  skip_on_cran()
+  outdir <- withr::local_tempdir()
+  cache.dir <- file.path(outdir, "cache")
+
+  expect_error(stop_screening_after(5, run_priority(weights=c(1, 0.5), significance=TRUE, seed=1, outdir=outdir)), "run stopped")
+  expect_setequal(list.files(cache.dir), c("fingerprint.rds", "background.rds", "terms.rds", "bounds.rds"))
+  expect_gt(nrow(readRDS(file.path(cache.dir, "bounds.rds"))$lo), 0)
+
+  full <- count_screened(run_priority(weights=c(1, 0.5), significance=TRUE, seed=1))
+  msgs <- character(0)
+  resumed <- count_screened(withCallingHandlers(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, fx$output$metadata,
+                                                              weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(2),
+                                                              outdir=outdir),
+                                                message=function(m){
+                                                  msgs <<- c(msgs, conditionMessage(m))
+                                                  invokeRestart("muffleMessage")
+                                                }))
+
+  expect_identical(resumed$value, full$value)
+  expect_master(resumed$value["1"], fx$output$priority.sig)
+  expect_lt(resumed$grids, full$grids)
+  expect_equal(sum(grepl("Continuing from the cache in .*: [1-9][0-9]* of 1000 background pairs already screened", msgs)), 1)
+  expect_equal(sum(grepl(paste0(": ", nrow(fx$output$lrs), " of ", nrow(fx$output$lrs), " pairs already scored"), msgs)), 1)
+  expect_false(dir.exists(cache.dir))
+})
+
+test_that("a significance run stopped after scoring neither screens nor scores a grid again", {
+  skip_on_cran()
+  outdir <- withr::local_tempdir()
+
+  first <- testthat::with_mocked_bindings(run_priority(significance=TRUE, seed=1, outdir=outdir), close_cache=function(dir) invisible(NULL),
+                                          .package="HyperCom")
+  expect_true(file.exists(file.path(outdir, "cache", "bounds.rds")))
+  again <- count_screened(count_grids(run_priority(significance=TRUE, seed=1, outdir=outdir)))
+
+  expect_identical(again$value$value, first)
+  expect_equal(again$value$grids, 0)
+  expect_equal(again$grids, 0)
+  expect_false(dir.exists(file.path(outdir, "cache")))
 })
 
 test_that("without seed, a stopped run continues with the background pairs it drew", {

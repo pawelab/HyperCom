@@ -66,7 +66,9 @@ or receiver, how evenly they split into senders and receivers, and how much they
 for all weights; parallel or threads use several CPU cores.
 With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
-Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning.
+Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning. Background
+pairs are first screened: one pass over their cell grids bounds their priorities without ranking the cells, and only the few whose
+bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time.
 With outdir set and cache=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache} while pairs are scored, and the folder is
 removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
 continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped on the same

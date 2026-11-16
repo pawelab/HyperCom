@@ -41,7 +41,8 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
   computer (another CPU can change the last digits, about 1e-13); without `seed` it keeps
   the background pairs drawn before the stop. A cache made from other inputs is not used and is moved to `cache.old`, with a
   warning; a cache that cannot be written is skipped, with a warning. The cache holds 5
-  numbers per pair (130 KB for the bundled data with significance) and the names of the cells (0.8 MB at 20,000 cells); on 20,000
+  numbers per scored pair and 10 per screened background pair (about 200 KB for the bundled data with significance) and the names
+  of the cells (0.8 MB at 20,000 cells); on 20,000
   cells its writes took 0.1 s of a 77 s scoring step, with the same peak memory.
 * `prioritize_lr` documents its p-values: the fraction of 1000 background pairs scoring at least as high, in steps of 0.001; 0 means
   none did.
@@ -54,6 +55,12 @@ seconds.
 
 * Cells are scored by compiled code on threads that share one influence matrix, only within their sample (every cross-sample entry
   was NA), once per ligand and receptor subunit for all weights and pairs. Weights and significance no longer multiply the run time.
+* With `significance`, the 1000 background pairs are screened instead of scored: one pass over a background pair's cell grids bounds
+  its priority without ranking the cells, and only the few whose bounds hold a real pair's priority (about 1%) are scored in full.
+  The p-values are the same as with every background pair scored. On 16 threads a run with p-values took 1.7 s instead of 2.9 s on
+  the bundled data (12 s instead of 20 s on 1 thread), 31 s instead of 90 s on 3,000 cells, 85 s instead of 240 s on 5,000 cells
+  (one sample) and 8.4 min instead of 23 min on 20,000 cells in 3 samples, with no more memory. A stopped run keeps the screened
+  bounds in its cache too.
 * The adjacency and influence matrices are kept as their factors through the hyperedges (genes and ligand-receptor interactions),
   which grow with the number of cells rather than its square; only the within-sample cell blocks the scores need are made, while
   pairs are scored. Small data with at least as many hyperedges as nodes (with the full CellChat database, roughly under 1000 cells)

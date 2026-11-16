@@ -35,10 +35,18 @@ test_that("background pairs without a priority are left out of the p-values, wit
   expect_identical(HyperCom:::permutation_test(NaN, c(0.2, 0.7)), NA_real_)
   expect_identical(HyperCom:::permutation_test(0.5, c(NaN, NA)), NA_real_)
 
+  keys <- function(lrs) HyperCom:::pair_keys(as.character(lrs$ligand), as.matrix(lrs[, -(1:2), drop=FALSE]))
+  background <- withr::with_seed(1, HyperCom:::generate_background_lrs(fx$output$lrs, fx$output$metadata))
+  broken <- keys(background)[999:1000]
   calculate <- HyperCom:::calculate_priority
-  testthat::local_mocked_bindings(calculate_priority=function(...){
-    res <- calculate(...)
-    res[nrow(res) - 0:1, "max"] <- NaN
+  bound <- HyperCom:::bound_terms
+  testthat::local_mocked_bindings(calculate_priority=function(lrs, ...){
+    res <- calculate(lrs, ...)
+    res[keys(lrs) %in% broken, "max"] <- NaN
+    return(res)
+  }, bound_terms=function(lrs, ...){
+    res <- bound(lrs, ...)
+    res$lo[keys(lrs) %in% broken, "max"] <- res$hi[keys(lrs) %in% broken, "max"] <- NA
     return(res)
   }, .package="HyperCom")
   expect_warning(priority <- run_priority(weights=c(1, 0.5), significance=TRUE, seed=1),

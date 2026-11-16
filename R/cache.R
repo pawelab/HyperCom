@@ -1,24 +1,28 @@
-# Cache of prioritize_lr: the priority terms of the pairs scored so far, so that a stopped run continues where it stopped
+# Cache of prioritize_lr: the priority terms of the pairs scored so far and the term bounds of the background pairs screened so far,
+# so that a stopped run continues where it stopped
 
 #' Open the cache of a prioritize_lr run
 #'
 #' `open_cache` returns what the cache folder holds for these inputs
 #'
 #' This function takes the cache folder and the inputs of prioritize_lr and returns the cache: the folder, the fingerprint of the
-#' inputs with the token of the run that made the cache, and the priority terms and background pairs saved by an earlier call on the
-#' same inputs. A cache made from other inputs (or damaged) is not used: it is moved to `<dir>.old`, replacing an earlier one, with a
-#' warning, so that a call with mistaken inputs does not destroy it. Temporary files of a write that was stopped are deleted. Nothing
-#' else is written.
+#' inputs with the token of the run that made the cache, and the priority terms, term bounds and background pairs saved by an earlier
+#' call on the same inputs. A cache made from other inputs (or damaged) is not used: it is moved to `<dir>.old`, replacing an earlier
+#' one, with a warning, so that a call with mistaken inputs does not destroy it. Temporary files of a write that was stopped are
+#' deleted. Nothing else is written. The cache is an environment, so the steps of a run share what each writes and a failed write
+#' turns the cache off for all of them.
 #' @param dir A string naming the cache folder
 #' @inheritParams prioritize_lr
-#' @returns A list with dir, fingerprint, terms (a matrix of priority terms with one row per pair named by pair_keys, or NULL) and
-#' background (a dataframe of background pairs, or NULL)
+#' @returns An environment with dir, fingerprint, terms (a matrix of priority terms with one row per pair named by pair_keys, or NULL),
+#' bounds (a list of two such matrices, lo and hi, or NULL), background (a dataframe of background pairs, or NULL), saved (whether
+#' this run wrote the fingerprint) and failed (whether a write failed)
 #' @noRd
 open_cache <- function(dir, adj, infMat, metadata){
   fingerprint <- cache_fingerprint(adj, infMat, metadata)
   unlink(file.path(dir, paste0(cache_files(), ".tmp")))
   old <- read_cache_file(dir, "fingerprint.rds")
   terms <- NULL
+  bounds <- NULL
   background <- NULL
 
   if(same_fingerprint(old, fingerprint)){
@@ -26,6 +30,10 @@ open_cache <- function(dir, adj, infMat, metadata){
     saved <- read_cache_file(dir, "terms.rds")
     if(is.list(saved) && identical(saved$token, old$token)){
       terms <- saved$terms
+    }
+    saved <- read_cache_file(dir, "bounds.rds")
+    if(is.list(saved) && identical(saved$token, old$token) && is.matrix(saved$lo) && is.matrix(saved$hi)){
+      bounds <- saved[c("lo", "hi")]
     }
     background <- read_cache_file(dir, "background.rds")
   } else {
@@ -42,7 +50,48 @@ open_cache <- function(dir, adj, infMat, metadata){
     }
   }
 
-  return(list(dir=dir, fingerprint=fingerprint, terms=terms, background=background))
+  return(list2env(list(dir=dir, fingerprint=fingerprint, terms=terms, bounds=bounds, background=background, saved=FALSE,
+                       failed=FALSE)))
+}
+
+#' Check whether a cache is in use
+#'
+#' `cache_on` returns whether pairs are read from and written to a cache
+#'
+#' This function takes the cache from open_cache, or NULL, and returns FALSE for no cache or a cache whose writing failed.
+#' @param cached An environment from open_cache, or NULL
+#' @returns A boolean
+#' @noRd
+cache_on <- function(cached){
+  return(!is.null(cached) && !cached$failed)
+}
+
+#' Write the terms or term bounds of a cache
+#'
+#' `write_cache_terms` saves the priority terms or the term bounds of all pairs done so far into the cache folder
+#'
+#' This function takes the cache, the kind of rows and their new contents and writes them into terms.rds or bounds.rds under the run's
+#' token, writing the fingerprint and background pairs first if this run has not yet. On success the cache keeps the new rows, so later
+#' steps write them again with theirs; a failed write turns the cache off for the rest of the run.
+#' @param cached An environment from open_cache
+#' @param what A string, "terms" or "bounds"
+#' @param x A matrix of priority terms (terms), or a list of two matrices lo and hi (bounds), rows named by pair_keys
+#' @returns A boolean of whether the file was written
+#' @noRd
+write_cache_terms <- function(cached, what, x){
+  done <- cached$saved || save_cache(cached)
+  cached$saved <- done
+  if(done){
+    content <- if(what == "terms") list(token=cached$fingerprint$token, terms=x) else c(list(token=cached$fingerprint$token), x)
+    done <- write_cache_file(content, cached$dir, paste0(what, ".rds"))
+  }
+  if(done){
+    cached[[what]] <- x
+  } else {
+    cached$failed <- TRUE
+  }
+
+  return(done)
 }
 
 #' Fingerprint the inputs of a prioritize_lr run
@@ -93,8 +142,8 @@ same_fingerprint <- function(old, new){
 #' `save_cache` writes the fingerprint and the background pairs of a run into its cache folder
 #'
 #' This function takes the cache from open_cache, creates its folder and writes the fingerprint and, if any, the background pairs.
-#' It is called when the first batch of pairs is scored, so a call that stops before leaves no folder.
-#' @param cached A list from open_cache
+#' It is called when the first batch of pairs is scored or screened, so a call that stops before leaves no folder.
+#' @param cached An environment from open_cache
 #' @returns A boolean of whether the files were written
 #' @noRd
 save_cache <- function(cached){
@@ -128,11 +177,11 @@ close_cache <- function(dir){
 #'
 #' `cache_files` returns the names of the files prioritize_lr writes into its cache folder
 #'
-#' This function returns the file names of the fingerprint, the background pairs and the priority terms.
+#' This function returns the file names of the fingerprint, the background pairs, the priority terms and the term bounds.
 #' @returns A vector of strings of file names
 #' @noRd
 cache_files <- function(){
-  return(c("fingerprint.rds", "background.rds", "terms.rds"))
+  return(c("fingerprint.rds", "background.rds", "terms.rds", "bounds.rds"))
 }
 
 #' Read a cache file

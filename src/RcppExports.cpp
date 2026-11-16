@@ -142,6 +142,37 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// dense_blocks_cpp
+Rcpp::NumericVector dense_blocks_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample);
+RcppExport SEXP _HyperCom_dense_blocks_cpp(SEXP FSEXP, SEXP cellSEXP, SEXP sampleSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type F(FSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cell(cellSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
+    rcpp_result_gen = Rcpp::wrap(dense_blocks_cpp(F, cell, sample));
+    return rcpp_result_gen;
+END_RCPP
+}
+// screen_blocks_cpp
+Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, double id_budget);
+RcppExport SEXP _HyperCom_screen_blocks_cpp(SEXP blocksSEXP, SEXP ASEXP, SEXP BSEXP, SEXP sampleSEXP, SEXP ligSEXP, SEXP recSEXP, SEXP threadsSEXP, SEXP id_budgetSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type blocks(blocksSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type A(ASEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type B(BSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type lig(ligSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type rec(recSEXP);
+    Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
+    Rcpp::traits::input_parameter< double >::type id_budget(id_budgetSEXP);
+    rcpp_result_gen = Rcpp::wrap(screen_blocks_cpp(blocks, A, B, sample, lig, rec, threads, id_budget));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_adjacency_cpp", (DL_FUNC) &_HyperCom_adjacency_cpp, 4},
@@ -152,6 +183,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_influence_blocks_cpp", (DL_FUNC) &_HyperCom_influence_blocks_cpp, 11},
     {"_HyperCom_score_grids_cpp", (DL_FUNC) &_HyperCom_score_grids_cpp, 6},
     {"_HyperCom_score_blocks_cpp", (DL_FUNC) &_HyperCom_score_blocks_cpp, 7},
+    {"_HyperCom_dense_blocks_cpp", (DL_FUNC) &_HyperCom_dense_blocks_cpp, 3},
+    {"_HyperCom_screen_blocks_cpp", (DL_FUNC) &_HyperCom_screen_blocks_cpp, 8},
     {NULL, NULL, 0}
 };
 

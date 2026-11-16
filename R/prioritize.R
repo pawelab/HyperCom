@@ -119,12 +119,12 @@ pair_grids <- function(ligands, receptors){
 #' one grid per thread) is in memory at a time. The gene x cell counts of a symmetric sparse adjacency are read from its stored
 #' triangle, without expanding the whole matrix. With a cache, pairs whose genes are in it take its terms and are not scored again,
 #' and the terms of all pairs scored so far (and of cached pairs of other calls) are written to it after each batch; the first write
-#' also saves the inputs (save_cache). After a failed write the run goes on without the cache.
+#' of a run also saves the inputs (save_cache). After a failed write the run goes on without the cache.
 #' @inheritParams prioritize_lr
 #' @param threads An integer number of threads
 #' @param verbose A boolean of whether to report the pairs scored, about every 5 s, with an estimate of the time left (pairs are
 #' scored in about 20 batches or more when grids are bigger than the kernel's 24 MB cache budget; see batch_size)
-#' @param cached A list from open_cache, or NULL for no cache
+#' @param cached An environment from open_cache, or NULL for no cache
 #' @returns A matrix with one row per pair and columns frac, pct.min, max, balance and purity
 #' @noRd
 calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, cached=NULL){
@@ -138,26 +138,13 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
   receptors <- as.matrix(lrs[, -(1:2), drop=FALSE])
   genes <- unique(c(ligands, receptors[!is.na(receptors)]))
   check_genes(genes, rownames(infMat))
+  ge <- gene_expression(adj, cells, genes)
 
-  if(inherits(adj, "hypercom_adjacency")){
-    gene.counts <- adj[cells, genes, drop=FALSE]
-  } else if(methods::is(adj, "dsCMatrix") && !any(genes %in% cells)){
-    U <- methods::new("dgCMatrix", i=adj@i, p=adj@p, x=adj@x, Dim=adj@Dim, Dimnames=dimnames(adj))
-    gene.counts <- as.matrix(Matrix::t(U[genes, cells, drop=FALSE]) + U[cells, genes, drop=FALSE])
-    rm(U)
-  } else {
-    gene.counts <- as.matrix(Matrix::t(adj[genes, cells, drop=FALSE]))
-  }
-  gene.frac <- colSums(gene.counts) / length(cells)
-  expressed <- lapply(seq_len(ncol(gene.counts)), function(k) which(gene.counts[, k] > 0))
-  names(expressed) <- colnames(gene.counts)
-  rm(gene.counts)
-
-  terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, c("frac", "pct.min", "max", "balance", "purity")))
+  terms <- matrix(NA_real_, nrow(lrs), 5, dimnames=list(NULL, term_names()))
   pair.keys <- pair_keys(ligands, receptors)
   scored <- logical(nrow(lrs))
   other.terms <- NULL
-  if(!is.null(cached$terms)){
+  if(cache_on(cached) && !is.null(cached$terms)){
     hit <- match(pair.keys, rownames(cached$terms))
     scored <- !is.na(hit)
     terms[scored, ] <- cached$terms[hit[scored], , drop=FALSE]
@@ -199,30 +186,19 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
         type <- (rr - ss) > 0
       }
 
-      pair.genes <- c(l, rs)
-      present <- logical(length(cells))
-      for(g in pair.genes){
-        present[expressed[[g]]] <- TRUE
-      }
-      pct.min <- min(gene.frac[pair.genes])
-      frac <- sum(present) / length(cells)
-      max.score <- mean(pmax(ss, rr)[present])
+      pc <- pair_cells(c(l, rs), ge, groups, gini.max)
+      max.score <- mean(pmax(ss, rr)[pc$present])
+      balance <- gini_impurity(type[pc$present]) / 0.5
 
-      purity <- group_purity(groups[present], gini.max)
-      balance <- gini_impurity(type[present]) / 0.5
-
-      terms[i, ] <- c(frac, pct.min, max.score, balance, purity)
+      terms[i, ] <- c(pc$frac, pc$pct.min, max.score, balance, pc$purity)
     }
     rm(sr)
     scored[rows] <- TRUE
-    if(!is.null(cached)){
+    if(cache_on(cached)){
       keep <- scored & !duplicated(pair.keys)
       cache.terms <- terms[keep, , drop=FALSE]
       rownames(cache.terms) <- pair.keys[keep]
-      saved <- if(grids.done == 0) save_cache(cached) else TRUE
-      if(!(saved && write_cache_file(list(token=cached$fingerprint$token, terms=rbind(other.terms, cache.terms)), cached$dir, "terms.rds"))){
-        cached <- NULL
-      }
+      write_cache_terms(cached, "terms", rbind(other.terms, cache.terms))
     }
     done <- done + length(rows)
     grids.done <- grids.done + nrow(pairs)
@@ -234,6 +210,66 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
   }
 
   return(terms)
+}
+
+#' Name the priority terms
+#'
+#' `term_names` returns the names of the five terms of a priority score, in their order
+#' @returns A vector of strings
+#' @noRd
+term_names <- function(){
+  return(c("frac", "pct.min", "max", "balance", "purity"))
+}
+
+#' Find the cells that express each gene
+#'
+#' `gene_expression` returns the fraction of cells expressing each gene and the cells that do
+#'
+#' This function takes the adjacency, the cells and the genes and returns, from the gene x cell counts of the adjacency, the fraction
+#' of the cells expressing each gene and their positions. The counts of a symmetric sparse adjacency are read from its stored triangle,
+#' without expanding the whole matrix.
+#' @inheritParams prioritize_lr
+#' @param cells A vector of strings of cell names
+#' @param genes A vector of strings of gene names
+#' @returns A list with frac (a numeric vector named by gene) and expressed (a list named by gene of integer vectors of cell positions)
+#' @noRd
+gene_expression <- function(adj, cells, genes){
+  if(inherits(adj, "hypercom_adjacency")){
+    gene.counts <- adj[cells, genes, drop=FALSE]
+  } else if(methods::is(adj, "dsCMatrix") && !any(genes %in% cells)){
+    U <- methods::new("dgCMatrix", i=adj@i, p=adj@p, x=adj@x, Dim=adj@Dim, Dimnames=dimnames(adj))
+    gene.counts <- as.matrix(Matrix::t(U[genes, cells, drop=FALSE]) + U[cells, genes, drop=FALSE])
+    rm(U)
+  } else {
+    gene.counts <- as.matrix(Matrix::t(adj[genes, cells, drop=FALSE]))
+  }
+  expressed <- lapply(seq_len(ncol(gene.counts)), function(k) which(gene.counts[, k] > 0))
+  names(expressed) <- colnames(gene.counts)
+
+  return(list(frac=colSums(gene.counts) / length(cells), expressed=expressed))
+}
+
+#' Find the cells of a ligand-receptor pair
+#'
+#' `pair_cells` returns the cells expressing any gene of a pair and the priority terms that depend on them alone
+#'
+#' This function takes the genes of a pair, the expression from gene_expression, the group of each cell and the largest possible Gini
+#' impurity of the groups and returns which cells express any of the genes, their fraction of all cells (frac), the smallest fraction of
+#' cells expressing one of the genes (pct.min) and the group purity of the cells.
+#' @param genes A vector of strings, the ligand and the receptor subunits of the pair
+#' @param ge A list from gene_expression
+#' @param groups A vector of the group of each cell
+#' @param gini.max A double of the largest possible Gini impurity, 1 - 1 / the number of groups
+#' @returns A list with present (a logical vector over the cells), frac, pct.min and purity
+#' @noRd
+pair_cells <- function(genes, ge, groups, gini.max){
+  present <- logical(length(groups))
+  for(g in genes){
+    present[ge$expressed[[g]]] <- TRUE
+  }
+
+  return(list(present=present, frac=sum(present) / length(groups), pct.min=min(ge$frac[genes]),
+              purity=group_purity(groups[present], gini.max)))
 }
 
 #' Choose the number of grids per batch
@@ -377,7 +413,9 @@ priority_filename <- function(weights){
 #' for all weights; parallel or threads use several CPU cores.
 #' With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
 #' high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
-#' Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning.
+#' Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning. Background
+#' pairs are first screened: one pass over their cell grids bounds their priorities without ranking the cells, and only the few whose
+#' bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time.
 #' With outdir set and cache=TRUE, the pairs scored so far are kept in `<outdir>/cache` while pairs are scored, and the folder is
 #' removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
 #' continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped on the same
@@ -442,25 +480,20 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
   }
   threads <- get_threads(parallel, threads)
   if(verbose){
-    message("Scoring ", nrow(lrs), " ligand-receptor pairs", if(significance) paste0(" and ", nrow(background.lrs), " background pairs"),
+    message("Scoring ", nrow(lrs), " ligand-receptor pairs", if(significance) paste0(" and screening ", nrow(background.lrs), " background pairs"),
             " on ", threads, " thread", if(threads > 1) "s")
   }
   if(!is.null(cached) && significance){
     cached$background <- background.lrs
   }
 
+  priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose, cached)
   if(significance){
-    all.terms <- calculate_priority(rbind(lrs, background.lrs), adj, infMat, metadata, threads, verbose, cached)
-    fg <- seq_len(nrow(lrs))
-    priority.terms <- all.terms[fg, , drop=FALSE]
-    background.terms <- all.terms[-fg, , drop=FALSE]
-    no.priority <- sum(rowSums(is.na(background.terms)) > 0)
-    if(no.priority > 0){
-      warning(no.priority, " of ", nrow(background.lrs), " background pairs have no priority (NaN) and are left out of the p-values, ",
-              "which use the other ", nrow(background.lrs) - no.priority)
+    bp <- background_priority(background.lrs, lrs, priority.terms, weights, adj, infMat, metadata, threads, verbose, cached)
+    if(bp$no.priority > 0){
+      warning(bp$no.priority, " of ", nrow(background.lrs), " background pairs have no priority (NaN) and are left out of the p-values, ",
+              "which use the other ", nrow(background.lrs) - bp$no.priority)
     }
-  } else {
-    priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose, cached)
   }
 
   if(!is.null(outdir)){
@@ -476,8 +509,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     current.lrs <- dplyr::arrange(current.lrs, dplyr::desc(priority))
 
     if(significance){
-      background.priority <- score_priority(background.terms, weight)
-      current.lrs$p <- vapply(current.lrs$priority, permutation_test, numeric(1), background=background.priority)
+      current.lrs$p <- vapply(current.lrs$priority, permutation_test, numeric(1), background=bp$priority[, i])
       current.lrs$p.adj <- stats::p.adjust(current.lrs$p, method="BH")
     }
 
