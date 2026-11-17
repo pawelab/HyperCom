@@ -3,3 +3,4 @@
 ^images$
 ^LICENSE\.md$
 ^src/.*\.a$
+^AGENTS\.md$
