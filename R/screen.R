@@ -83,7 +83,9 @@ screen_blocks <- function(infMat, g, threads=1){
 #' possible numbers of receivers (cells
 #' whose receiver bounds lie above their sender bounds are receivers, cells whose bounds overlap may be). A pair with a cell without a
 #' score bound gets NA. Pairs are screened in batches of whole ligands; with a cache, pairs whose bounds are in it are not screened
-#' again, and the bounds of all pairs screened so far are written to it after each batch.
+#' again, and the bounds of all pairs screened so far are written to it after each batch. With blocks of 2^28 entries or more,
+#' garbage is collected after each batch: R holds the blocks, so it would otherwise let the score bounds of many batches pile up
+#' before collecting (~11 GB on 60,000 cells in one sample).
 #' @inheritParams calculate_priority
 #' @returns A list of two matrices, lo and hi, with one row per pair and columns frac, pct.min, max, balance and purity
 #' @noRd
@@ -165,6 +167,9 @@ bound_terms <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, ca
       hi[i, ] <- c(pc$frac, pc$pct.min, max.score[2], balance[2], pc$purity)
     }
     rm(sr.lo, sr.hi)
+    if(length(blocks) >= 2^28){
+      gc()
+    }
     screened[rows] <- TRUE
     if(cache_on(cached)){
       keep <- screened & !duplicated(pair.keys)
