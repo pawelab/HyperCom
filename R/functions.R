@@ -543,16 +543,32 @@ calculate_priority <- function(lrs, adj, infMat, metadata, weight=1){
     max.score <- mean(cc.expressed$max)
 
     if(gini.max > 0){
-      purity <- max(0, gini.max - mltools::gini_impurity(cc.expressed$group))
+      purity <- max(0, gini.max - gini_impurity(cc.expressed$group))
     }else{purity <- 1}
 
-    balance <- mltools::gini_impurity(cc.expressed$type) / 0.5
+    balance <- gini_impurity(cc.expressed$type) / 0.5
 
     score <- exp(stats::weighted.mean(log(c(frac, pct.min, max.score, balance, purity)), c(weight, rep(1, 4))))
     score
   })
 
   return(priority)
+}
+
+#' Calculate the Gini impurity of a set of labels
+#'
+#' `gini_impurity` returns the Gini impurity of a vector of labels
+#'
+#' This function takes a vector of labels and returns the probability that a label drawn at random is mislabelled
+#' when labelled according to the distribution of labels, computed as mltools::gini_impurity does for labels.
+#' @param vals A vector of labels, e.g. a factor or a logical vector
+#' @returns A numeric Gini impurity
+#' @noRd
+gini_impurity <- function(vals){
+  counts <- table(vals)
+  total <- sum(counts)
+
+  return(sum((counts/total) * (1 - counts/total)))
 }
 
 #' Check the weights of the priority scores

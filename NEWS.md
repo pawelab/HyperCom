@@ -46,4 +46,5 @@ except where 0.0.0.9000 was wrong, as listed below.
 * `HyperCom()` no longer changes the working directory; `outdir` may be a nested path.
 * `library(HyperCom)` loads Matrix, so the bundled counts can be subset at once.
 * SeuratObject 4 assays are read from the layer asked for (`GetAssayData(layer=)` ignored it there).
+* mltools (archived on CRAN) is no longer needed: the Gini impurity is computed by HyperCom itself, with the same numbers.
 * A test suite (testthat) compares every step with the outputs of 0.0.0.9000 and has one test per fixed bug.

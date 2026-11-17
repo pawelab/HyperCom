@@ -17,7 +17,6 @@ Imports:
   foreach,
   Matrix,
   methods,
-  mltools,
   parallel,
   parallelly,
   Rfast,
