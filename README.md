@@ -37,8 +37,7 @@ install.packages("pak")
 pak::pak("pawelab/HyperCom@speed-fixes")
 ```
 
-Without `@speed-fixes`, pak installs the default branch, which holds the R-only version described below. To check the
-installation, `library(HyperCom)` then `example(HyperCom)` runs a small analysis of the bundled data in a few seconds.
+To check the installation, `library(HyperCom)` then `example(HyperCom)` runs a small analysis of the bundled data in a few seconds.
 
 If the installation stops with **`'make' not found`** (Windows), Rtools is missing or does not match your version of R. If it
 stops with **`library 'quadmath' not found`** or a missing **`gfortran`** (macOS), install GNU Fortran as above.
@@ -54,18 +53,20 @@ scored (e.g. the time limit of a cluster job) continues where it stopped when th
 
 ### Pure R version
 
-The original, R-only implementation (HyperCom 0.0.0.9000) is kept on the [`base-R` branch](https://github.com/pawelab/HyperCom/tree/base-R).
-It needs no build tools on Windows and macOS, but it is much slower, needs far more memory (it runs out of memory around 20,000
-cells) and lacks the fixes listed in [NEWS](NEWS.md). Its results agree with this version to about 1e-15 (exactly with
-`HyperCom(..., infmat.method="lu")`).
+The R-only implementation is kept on the [`base-R` branch](https://github.com/pawelab/HyperCom/tree/base-R) as HyperCom 0.0.1, with
+the same bug fixes as this version (bad input stops with a message, factor inputs and reordered metadata give correct results, `seed`
+for reproducible p-values, results returned by `HyperCom()`; its own NEWS lists them). It needs no build tools on Windows and macOS,
+but it is much slower and needs far more memory (it runs out of memory around 20,000 cells), and it has no `threads` or `cache`. Its results agree with this version to about 1e-15
+(exactly with `HyperCom(..., infmat.method="lu")`).
 
 ```r
 pak::pak("pawelab/HyperCom@base-R")
 ```
 
-Both versions are the package `HyperCom`, so installing one replaces the other. In the R-only version, `HyperCom()` changes the
-working directory to `outdir`, and `parallel=TRUE` starts one R process per core: on machines with many cores, give it a smaller
-cluster, e.g. `cl=parallelly::makeClusterPSOCK(8)`.
+Both versions are the package `HyperCom`, so installing one replaces the other. The R-only version keeps the `cl` argument (a PSOCK
+cluster, left running when given) instead of `threads`. With `parallel=TRUE` and no `cl` it starts one R process per core (inside an
+SGE parallel job, the job's workers through qrsh): on machines with many cores, give it a smaller cluster, e.g.
+`cl=parallelly::makeClusterPSOCK(8)`.
 
 ## Usage
 Counts are a gene x cell matrix (raw or normalised, not scaled) and the metadata has one row per cell, named by its barcode:

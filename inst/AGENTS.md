@@ -8,7 +8,7 @@ For AI agent. Use HyperCom right. Installed copy: `system.file("AGENTS.md", pack
 
 - 0.2.x: this file. Threads, cache, compiled code.
 - 0.1.x (branch `v1-fast`): has `cores=`, `infMat.cell=`, `cell.info=`, `method="auto"`, spatial. 0.2.x has none.
-- 0.0.0.9000 (branch `base-R`): R only. Has `cl=`. Changes working dir.
+- 0.0.1 (branch `base-R`): R only, same bug fixes. Has `cl=`, `seed=`, `verbose=`; no `threads`, `cache`, `infmat.method`.
 
 Read for this version: `?HyperCom`, `news(package="HyperCom")`, vignette `HyperCom_Overview` (in repo `vignettes/` if not built).
 
@@ -71,11 +71,11 @@ Most failed run = bad input.
 ## Reproduce
 
 - `seed=` make p-values same. Session RNG restored after.
-- `infmat.method="woodbury"` default, fast. `"lu"` = exact 0.0.0.9000 numbers, full matrix memory. Differ about 1e-15.
+- `infmat.method="woodbury"` default, fast. `"lu"` = exact numbers of the R-only version (branch `base-R`), full matrix memory. Differ about 1e-15.
 
 ## Change package (source repo)
 
-- Outputs must match 0.0.0.9000 (branch `base-R`). Tests check bit for bit. Never loosen tolerance to pass.
+- Outputs must match the R-only version (branch `base-R`). Tests check bit for bit. Never loosen tolerance to pass.
 - Tests: testthat. `NOT_CRAN=true` run all. `HYPERCOM_REFERENCE=<golden dir>` add full-data test, else skip.
 - Docs: roxygen in `R/`. Regenerate `man/`, `NAMESPACE`. Never hand edit. C++ signature change: `Rcpp::compileAttributes()`.
 - `R CMD check --as-cran`: Status OK.
