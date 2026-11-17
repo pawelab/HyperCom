@@ -16,41 +16,53 @@ HyperCom_seurat(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "HyperCom"
+  outdir = "HyperCom",
+  seed = NULL,
+  verbose = TRUE
 )
 }
 \arguments{
 \item{seurat}{A seurat object}
 
-\item{lrdb}{A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor interactions}
+\item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
+and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
+interactions, e.g. \code{cellchat.mm.lrdb}}
 
 \item{sample}{A string that is the column name for sample in the provided metadata}
 
-\item{assay}{assay to get data from}
+\item{assay}{A string naming the assay to read counts from}
 
-\item{layer}{layer to get data from}
+\item{layer}{A string naming the layer of the assay to read counts from}
 
 \item{group}{A string that is the column name for group in the provided metadata}
 
 \item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
 
-\item{weights}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{weights}{A vector of distinct weights of at least 0, one result each, for the importance of number of cells involved in an
+interaction: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{A cluster object, which is left running. Default if parallel: inside an SGE parallel job (PE_HOSTFILE set)
+\code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")},
+elsewhere \code{parallelly::makeClusterPSOCK(parallelly::availableCores(), outfile = "")}; it is stopped at the end}
 
-\item{outdir}{output directory of pipeline run}
+\item{outdir}{A string naming the output directory of the pipeline run}
+
+\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
+random state is restored afterwards}
+
+\item{verbose}{A boolean of whether to report progress as messages}
 }
 \value{
-0 if run successfully
+Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
+(from generate_metadata), infMat (the influence matrix), adj (the adjacency matrix) and lrs (the interactions with all genes expressed)
 }
 \description{
 \code{HyperCom_seurat} Runs the HyperCom pipeline on a seurat object
 }
 \details{
-This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency-matrix}, \code{generate_infMat}, \code{generate-metadata}, and \code{prioritize_lr}.
+This function runs \code{HyperCom} on one assay layer and the cell metadata of a Seurat object (v5 or older assays).
 }

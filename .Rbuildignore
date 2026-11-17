@@ -3,3 +3,5 @@
 ^vignettes/articles$
 ^images$
 ^LICENSE\.md$
+^NEWS\.md$
+^tests/testthat/fixtures/make_.*\.R$

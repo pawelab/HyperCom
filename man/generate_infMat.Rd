@@ -11,10 +11,10 @@ generate_infMat(adj, r = 0.5, outfile = "4.infMat.rds")
 
 \item{r}{A double between 0 and 1 representing the restart probability}
 
-\item{outfile}{A string naming the output file}
+\item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
-An influence matrix
+A dense influence matrix with row and column names being the nodes of adj
 }
 \description{
 \code{generate_infMat} returns the influence matrix of the hypergraph

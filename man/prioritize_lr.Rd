@@ -13,13 +13,14 @@ prioritize_lr(
   significance = FALSE,
   parallel = FALSE,
   cl = NULL,
-  outdir = "6.priority"
+  outdir = "6.priority",
+  seed = NULL,
+  verbose = TRUE
 )
 }
 \arguments{
-\item{lrs}{A dataframe of ligand-receptor interactions where the first column is named edges, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions with only interactions present in the counts matrix.}
+\item{lrs}{A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
+in the counts matrix}
 
 \item{adj}{A named adjacency matrix}
 
@@ -27,18 +28,27 @@ interactions with only interactions present in the counts matrix.}
 
 \item{metadata}{A dataframe containing columns named cell, sample and group}
 
-\item{weights}{a vector of values between 0 to 1 for the importance of number of cells involved in an interaction}
+\item{weights}{A vector of distinct weights of at least 0, one result each, for the importance of number of cells involved in an
+interaction: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
 
 \item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
 
 \item{parallel}{A boolean of whether to run in parallel}
 
-\item{cl}{A cluster object. Default if parallel: \code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")}}
+\item{cl}{A cluster object, which is left running. Default if parallel: inside an SGE parallel job (PE_HOSTFILE set)
+\code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")},
+elsewhere \code{parallelly::makeClusterPSOCK(parallelly::availableCores(), outfile = "")}; it is stopped at the end}
 
-\item{outdir}{A string naming the output directory}
+\item{outdir}{A string naming the output directory, or NULL to write no files}
+
+\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
+random state is restored afterwards}
+
+\item{verbose}{A boolean of whether to report progress as messages}
 }
 \value{
-A dataframe of ligand-receptor pairs ordered by priority score for each weight
+A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
+p.adj when significance is TRUE
 }
 \description{
 \code{prioritize_lr} returns an ordered list of ligand-receptor pairs
@@ -47,4 +57,7 @@ A dataframe of ligand-receptor pairs ordered by priority score for each weight
 This function takes list of all ligand-receptor pairs in the influence matrix,
 the adjacency matrix, a named influence matrix, and the corresponding metadata
 to prioritize ligand-receptor pairs.
+With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
+high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
+Background pairs without a priority (NaN) are left out, with a warning.
 }
