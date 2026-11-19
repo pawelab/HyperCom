@@ -72,3 +72,36 @@ test_that("HyperCom matches the steps and writes what it returns", {
   expect_identical(readRDS(file.path(dir, "run", "4.infMat.rds")), res$infMat)
   expect_equal(utils::read.csv(file.path(dir, "run", "6.priority", "priority.0.5.csv")), plain_df(res$priority[["0.5"]]))
 })
+
+test_that("HyperCom_sce matches HyperCom on a SingleCellExperiment", {
+  skip_if_not_installed("SingleCellExperiment")
+  dir <- withr::local_tempdir()
+  sce <- SingleCellExperiment::SingleCellExperiment(assays=list(counts=fx$input$counts), colData=fx$input$metadata)
+  res <- quietly(HyperCom_sce(sce, fx$input$lrdb, sample="sample", group="condition", outdir=file.path(dir, "run"),
+                              weights=c(1, 0.5, 0)))
+
+  expect_identical(res$adj, fx$output$adj)
+  expect_identical(res$metadata, fx$output$metadata)
+  expect_identical(res$priority, fx$output$priority)
+})
+
+test_that("get_sce_assay reads delayed assays for the lrdb genes and stops on bad input", {
+  skip_if_not_installed("SingleCellExperiment")
+  skip_if_not_installed("DelayedArray")
+  counts <- fx$input$counts
+  sce <- SingleCellExperiment::SingleCellExperiment(assays=list(counts=DelayedArray::DelayedArray(as.matrix(counts))))
+  delayed <- get_sce_assay(sce, fx$input$lrdb, assay="counts")
+  genes <- unique(unlist(lapply(fx$input$lrdb[, -1, drop=FALSE], as.character), use.names=FALSE))
+
+  expect_s4_class(delayed, "dgCMatrix")
+  expect_identical(colnames(delayed), colnames(counts))
+  expect_true(all(rownames(delayed) %in% genes))
+  expect_equal(as.matrix(filter_counts(delayed, fx$input$lrdb, outfile=NULL)),
+               as.matrix(filter_counts(counts, fx$input$lrdb, outfile=NULL)))
+  expect_error(get_sce_assay(sce, fx$input$lrdb, assay="logcounts"), "no assay 'logcounts'")
+  expect_error(get_sce_assay(unname(sce), fx$input$lrdb), "no cell names")
+  expect_error(get_sce_assay(counts, fx$input$lrdb), "must be a SingleCellExperiment")
+  ensembl <- sce
+  rownames(ensembl) <- paste0("ENSMUSG", seq_len(nrow(ensembl)))
+  expect_error(get_sce_assay(ensembl, fx$input$lrdb), "must be gene symbols")
+})

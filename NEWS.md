@@ -3,6 +3,12 @@
 Bug fixes for the R-only version (base-R). On valid input every output is unchanged from 0.0.0.9000 (run under `LC_COLLATE=C`),
 except where 0.0.0.9000 was wrong, as listed below.
 
+## New function
+
+* `HyperCom_sce()` runs the pipeline on a SingleCellExperiment, as `HyperCom_seurat()` does on a Seurat object: one assay
+  (`assay="counts"` by default) and the cell metadata (`colData`). Assays held on disk (DelayedArray, HDF5Array) are read for the
+  genes of `lrdb` only. Needs SingleCellExperiment (Bioconductor).
+
 ## New arguments and return values
 
 * `prioritize_lr()`, `HyperCom()` and `HyperCom_seurat()` gain `seed` (reproducible p-values; the session's random state is restored

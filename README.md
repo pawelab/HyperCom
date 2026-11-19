@@ -15,5 +15,22 @@ install.packages("pak")
 pak::pak("pawelab/HyperCom@base-R")
 ```
 
+## Run
+Pick the line that matches your data:
+```r
+library(HyperCom)
+
+# Seurat object
+res <- HyperCom_seurat(seurat, cellchat.hs.lrdb, sample="sample", group="condition", parallel=TRUE)
+
+# SingleCellExperiment (needs pak::pak("SingleCellExperiment"))
+res <- HyperCom_sce(sce, cellchat.hs.lrdb, sample="sample", group="condition", parallel=TRUE)
+
+# Counts matrix (genes x cells) and a metadata table (one row per cell)
+res <- HyperCom(cellchat.hs.lrdb, counts, metadata, sample="sample", group="condition", parallel=TRUE)
+```
+`parallel=TRUE` starts one R process per core. On machines with many cores, pass a smaller cluster instead:
+`cl=parallelly::makeClusterPSOCK(8)`.
+
 ## Method Overview
 ![HyperCom Overview](images/MethodOverview.jpg)
