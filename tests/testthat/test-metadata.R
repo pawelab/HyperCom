@@ -1,4 +1,4 @@
-test_that("generate_metadata matches master", {
+test_that("generate_metadata matches handwritten", {
   infMat <- fx$output$infMat
   md <- fx$input$metadata
 

@@ -1,12 +1,12 @@
 # generate_infMat methods "chol" (v1-fast's Cholesky inverse) and "woodbury" (Woodbury through the incidence, kept factored): the
-# same matrix as "lu" (master, bit for bit) within ~1e-15 relative; scoring the factored matrix equals scoring its dense matrix bit for
+# same matrix as "lu" (handwritten, bit for bit) within ~1e-15 relative; scoring the factored matrix equals scoring its dense matrix bit for
 # bit. An adjacency and an influence matrix without node x node matrices index like the matrices they stand for.
 
 max_rel <- function(a, b){
   return(max(abs(as.matrix(a) - as.matrix(b)) / pmax(abs(as.matrix(b)), .Machine$double.xmin)))
 }
 
-test_that("methods chol and woodbury give master's influence matrix within 1e-13", {
+test_that("methods chol and woodbury give handwritten's influence matrix within 1e-13", {
   adj <- fx$output$adj
   for(r in c(0.5, 0.3)){
     expected <- if(r == 0.5) fx$output$infMat else fx$output$infMat.r03
@@ -125,16 +125,16 @@ test_that("methods chol and woodbury stop on a computationally singular system a
   expect_error(generate_infMat(nan, outfile=NULL, method="woodbury", hyperedges=hyperedges), "finite")
 })
 
-test_that("HyperCom with infmat.method lu writes master's adjacency and influence matrix bit for bit", {
+test_that("HyperCom with infmat.method lu writes handwritten's adjacency and influence matrix bit for bit", {
   rundir <- file.path(withr::local_tempdir(), "run")
   res <- run_hypercom(rundir, threads=test_threads(2), infmat.method="lu")
 
   expect_run_result(res, rundir)
   expect_identical(HyperCom:::adjacency_sparse(res$adj), fx$output$adj)
-  expect_master_infmat(res$infMat)
+  expect_handwritten_infmat(res$infMat)
 })
 
-test_that("generate_infMat on an adjacency without node x node matrix: factored by default, lu as master, chol as from the matrix", {
+test_that("generate_infMat on an adjacency without node x node matrix: factored by default, lu as handwritten, chol as from the matrix", {
   adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
   infMat <- generate_infMat(adj, outfile=NULL, threads=test_threads(2))
 
@@ -142,8 +142,8 @@ test_that("generate_infMat on an adjacency without node x node matrix: factored 
   expect_s3_class(infMat, "hypercom_influence")
   expect_identical(infMat, generate_infMat(fx$output$adj, outfile=NULL, method="woodbury", hyperedges=fx$output$hyperedges,
                                            threads=test_threads(3)))
-  expect_master_infmat(generate_infMat(adj, outfile=NULL, method="lu"))
-  expect_master_infmat(generate_infMat(adj, r=0.3, outfile=NULL, method="lu"), r=0.3)
+  expect_handwritten_infmat(generate_infMat(adj, outfile=NULL, method="lu"))
+  expect_handwritten_infmat(generate_infMat(adj, r=0.3, outfile=NULL, method="lu"), r=0.3)
   expect_identical(generate_infMat(adj, outfile=NULL, method="chol"), generate_infMat(fx$output$adj, outfile=NULL, method="chol"))
 })
 

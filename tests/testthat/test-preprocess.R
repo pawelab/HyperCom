@@ -1,4 +1,4 @@
-test_that("filter_counts matches master", {
+test_that("filter_counts matches handwritten", {
   counts <- filter_counts(fx$input$counts, fx$input$lrdb, outfile=NULL)
 
   expect_same_matrix(counts, fx$output$counts)
@@ -20,7 +20,7 @@ test_that("filter_counts gives the same values for dense and sparse input", {
   expect_same_matrix(counts, fx$output$counts)
 })
 
-test_that("generate_lrs_table matches master", {
+test_that("generate_lrs_table matches handwritten", {
   lrs <- generate_lrs_table(fx$output$counts, fx$input$lrdb, outfile=NULL)
 
   expect_s3_class(lrs, "data.frame")

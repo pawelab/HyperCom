@@ -1,4 +1,4 @@
-test_that("generate_hyperedges matches master", {
+test_that("generate_hyperedges matches handwritten", {
   hyperedges <- generate_hyperedges(fx$output$counts, fx$output$lrs, outfile=NULL)
 
   expect_s3_class(hyperedges, "data.frame")
@@ -19,7 +19,7 @@ test_that("hyperedges hold interaction, gene and expression edges", {
   expect_true(all(fx$output$lrs$interaction %in% hyperedges$edge))
 })
 
-test_that("generate_adjacency_matrix matches master, by value and as master's dsCMatrix", {
+test_that("generate_adjacency_matrix matches handwritten, by value and as handwritten's dsCMatrix", {
   adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
 
   expect_same_matrix(adj, fx$output$adj)
@@ -36,9 +36,9 @@ test_that("the adjacency matrix is symmetric with an empty diagonal and no isola
   expect_true(all(A >= 0 & A == round(A)))
 })
 
-test_that("generate_infMat matches master bit for bit (lu, the default for an adjacency matrix without hyperedges)", {
-  expect_master_infmat(generate_infMat(fx$output$adj, outfile=NULL))
-  expect_master_infmat(generate_infMat(fx$output$adj, r=0.3, outfile=NULL), r=0.3)
+test_that("generate_infMat matches handwritten bit for bit (lu, the default for an adjacency matrix without hyperedges)", {
+  expect_handwritten_infmat(generate_infMat(fx$output$adj, outfile=NULL))
+  expect_handwritten_infmat(generate_infMat(fx$output$adj, r=0.3, outfile=NULL), r=0.3)
 })
 
 test_that("influence matrix rows are random walk with restart distributions", {

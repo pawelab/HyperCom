@@ -1,5 +1,5 @@
-# Every step on the full bundled data against master's golden outputs (fixtures/make_reference.R). Skipped unless HYPERCOM_REFERENCE
-# names the golden folder. Each step gets master's own input, so a difference points at the step that made it. About 5 s.
+# Every step on the full bundled data against handwritten's golden outputs (fixtures/make_reference.R). Skipped unless HYPERCOM_REFERENCE
+# names the golden folder. Each step gets handwritten's own input, so a difference points at the step that made it. About 5 s.
 
 ref_path <- function(name){
   return(file.path(Sys.getenv("HYPERCOM_REFERENCE"), name))
@@ -10,7 +10,7 @@ skip_without_reference <- function(){
   testthat::skip_if_not(file.exists(ref_path("6.priority.rds")), "golden output folder is incomplete")
 }
 
-test_that("full data: preprocessing and hypergraph match master", {
+test_that("full data: preprocessing and hypergraph match handwritten", {
   skip_without_reference()
   counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
   lrs <- generate_lrs_table(readRDS(ref_path("0.counts.rds")), cellchat.mm.lrdb, outfile=NULL)
@@ -25,7 +25,7 @@ test_that("full data: preprocessing and hypergraph match master", {
   expect_same_matrix(adj, readRDS(ref_path("3.adj.rds")))
 })
 
-test_that("full data: influence matrix and metadata match master", {
+test_that("full data: influence matrix and metadata match handwritten", {
   skip_without_reference()
   infMat <- generate_infMat(readRDS(ref_path("3.adj.rds")), outfile=NULL)
   ref.inf <- readRDS(ref_path("4.infMat.rds"))
@@ -36,7 +36,7 @@ test_that("full data: influence matrix and metadata match master", {
   expect_equal(plain_df(data.frame(lapply(md, as.character))), plain_df(data.frame(lapply(ref.md, as.character))))
 })
 
-test_that("full data: scores and priorities match master", {
+test_that("full data: scores and priorities match handwritten", {
   skip_without_reference()
   skip_on_cran()
   ref.inf <- readRDS(ref_path("4.infMat.rds"))

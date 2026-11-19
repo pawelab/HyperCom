@@ -8,7 +8,7 @@ test_that("threads must be one number of at least 1 and is capped at the availab
   expect_error(run_priority(threads=0), "at least 1")
   expect_error(run_priority(threads=-3), "at least 1")
   expect_warning(priority <- run_priority(threads=1e10), paste0("available cores: using ", parallelly::availableCores()))
-  expect_master(priority, fx$output$priority["1"])
+  expect_handwritten(priority, fx$output$priority["1"])
 })
 
 test_that("a kept factor column, also listed twice, labels genes as gene without a warning (#16)", {
@@ -83,7 +83,7 @@ test_that("numeric node names are ordered as numbers and hyperedges need node an
 test_that("generate_infMat takes a dataframe and keeps an unnamed adjacency unnamed", {
   dense <- as.matrix(fx$output$adj)
 
-  expect_master_infmat(generate_infMat(as.data.frame(dense), outfile=NULL))
+  expect_handwritten_infmat(generate_infMat(as.data.frame(dense), outfile=NULL))
   expect_null(dimnames(generate_infMat(unname(dense), outfile=NULL)))
 })
 
@@ -91,7 +91,7 @@ test_that("an adjacency with one-sided dimnames gives the same priorities", {
   adj <- fx$output$adj
   adj@Dimnames <- list(NULL, rownames(adj))
 
-  expect_master(run_priority(adj=adj), fx$output$priority["1"])
+  expect_handwritten(run_priority(adj=adj), fx$output$priority["1"])
 })
 
 test_that("HyperCom checks its arguments before any step runs, and weights that print alike stop (#27)", {

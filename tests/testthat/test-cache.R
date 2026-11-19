@@ -82,7 +82,7 @@ count_grids <- function(expr){
   return(list(value=value, grids=grids))
 }
 
-test_that("a stopped run continues from the cache, scores only the rest and gives master's priorities and p-values", {
+test_that("a stopped run continues from the cache, scores only the rest and gives handwritten's priorities and p-values", {
   skip_on_cran()
   outdir <- file.path(withr::local_tempdir(), "6.priority")
   cache.dir <- file.path(outdir, "cache")
@@ -102,7 +102,7 @@ test_that("a stopped run continues from the cache, scores only the rest and give
                                                invokeRestart("muffleMessage")
                                              }))
 
-  expect_master(resumed$value, fx$output$priority.sig)
+  expect_handwritten(resumed$value, fx$output$priority.sig)
   expect_lt(resumed$grids, full$grids)
   expect_equal(sum(grepl(paste0("Continuing from the cache in .*: [1-9][0-9]* of ", nrow(fx$output$lrs), " pairs already scored"),
                          msgs)), 1)
@@ -130,7 +130,7 @@ test_that("a run stopped while screening background pairs continues from their c
                                                 }))
 
   expect_identical(resumed$value, full$value)
-  expect_master(resumed$value["1"], fx$output$priority.sig)
+  expect_handwritten(resumed$value["1"], fx$output$priority.sig)
   expect_lt(resumed$grids, full$grids)
   expect_equal(sum(grepl("Continuing from the cache in .*: [1-9][0-9]* of 1000 background pairs already screened", msgs)), 1)
   expect_equal(sum(grepl(paste0(": ", nrow(fx$output$lrs), " of ", nrow(fx$output$lrs), " pairs already scored"), msgs)), 1)
@@ -168,7 +168,7 @@ test_that("weights and threads may change when a run continues, also on a factor
   infMat <- generate_infMat(adj, outfile=NULL, threads=test_threads(2))
 
   expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
-  expect_master(run_priority(weights=c(1, 0.5, 0), threads=test_threads(2), outdir=outdir), fx$output$priority)
+  expect_handwritten(run_priority(weights=c(1, 0.5, 0), threads=test_threads(2), outdir=outdir), fx$output$priority)
 
   expect_error(stop_after(2, run_priority(adj=adj, infMat=infMat, threads=test_threads(2), outdir=outdir)), "run stopped")
   expect_identical(run_priority(adj=adj, infMat=infMat, weights=c(1, 0.5), outdir=outdir),
@@ -198,17 +198,17 @@ test_that("a cache made from other inputs, or damaged, is moved to cache.old wit
   expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
   expect_warning(priority <- run_priority(metadata=fx$output$metadata.none, outdir=outdir),
                  "made from other inputs, or is damaged, and is not used; it is moved to .*cache.old")
-  expect_master(priority, fx$output$priority.none)
+  expect_handwritten(priority, fx$output$priority.none)
   expect_false(dir.exists(cache.dir))
   expect_true(file.rename(old.dir, cache.dir))
   resumed <- count_grids(expect_no_warning(run_priority(outdir=outdir)))
-  expect_master(resumed$value, fx$output$priority["1"])
+  expect_handwritten(resumed$value, fx$output$priority["1"])
   expect_lt(resumed$grids, count_grids(run_priority())$grids)
 
   expect_error(stop_after(2, run_priority(outdir=outdir)), "run stopped")
   writeLines("not a cache", file.path(cache.dir, "fingerprint.rds"))
   expect_warning(priority <- run_priority(outdir=outdir), "made from other inputs, or is damaged")
-  expect_master(priority, fx$output$priority["1"])
+  expect_handwritten(priority, fx$output$priority["1"])
   expect_true(file.exists(file.path(old.dir, "terms.rds")))
 })
 
@@ -222,7 +222,7 @@ test_that("a half-written file is dropped silently, and metadata of other column
   writeLines("half written", file.path(outdir, "cache", "terms.rds.tmp"))
   resumed <- count_grids(expect_no_warning(run_priority(metadata=metadata, outdir=outdir)))
 
-  expect_master(resumed$value, fx$output$priority["1"])
+  expect_handwritten(resumed$value, fx$output$priority["1"])
   expect_lt(resumed$grids, count_grids(run_priority())$grids)
   expect_false(dir.exists(file.path(outdir, "cache")))
 })
@@ -238,7 +238,7 @@ test_that("terms written by a run on other inputs into the same cache folder are
   saveRDS(late, file.path(cache.dir, "terms.rds"))
   resumed <- count_grids(expect_no_warning(run_priority(metadata=fx$output$metadata.none, outdir=outdir)))
 
-  expect_master(resumed$value, fx$output$priority.none)
+  expect_handwritten(resumed$value, fx$output$priority.none)
   expect_equal(resumed$grids, count_grids(run_priority(metadata=fx$output$metadata.none))$grids)
 })
 
@@ -247,7 +247,7 @@ test_that("a cache that cannot be written warns and the run goes on; a call stop
   writeLines("a file where the cache folder would go", file.path(outdir, "cache"))
 
   expect_warning(priority <- run_priority(outdir=outdir), "could not write the cache file .*scoring goes on without the cache")
-  expect_master(priority, fx$output$priority["1"])
+  expect_handwritten(priority, fx$output$priority["1"])
 
   lrs <- fx$output$lrs
   lrs$ligand[1] <- "NotAGene"

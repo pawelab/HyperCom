@@ -44,20 +44,35 @@ stops with **`library 'quadmath' not found`** or a missing **`gfortran`** (macOS
 
 ### Memory and run time
 
-Memory grows with the number of cells per sample squared, since cells are compared within their sample: about 16 bytes per pair of
-cells in the same sample, so one sample of 30,000 cells needs about 15 GB and one of 65,000 cells about 70 GB. With `parallel=TRUE`
-(one thread per physical core), 1000 cells take seconds. Scoring a tenth of the CellChat pairs (about 100, without p-values) took
-about 1.3 minutes and 3.5 GB for 20,000 cells in 3 samples on a 16-core desktop, and about 10 minutes and 17 GB for 50,000 cells in
-3 samples; all pairs take about ten times as long, and p-values add 1000 background pairs. A run that stops while pairs are
-scored (e.g. the time limit of a cluster job) continues where it stopped when the same call is run again (see the vignette).
+Cells are compared within their sample, so memory and time grow with the number of cells per sample squared: memory is about 16
+bytes per pair of cells in the same sample, and the same cells split into more samples need less of both. Time also grows with the
+number of ligand-receptor pairs. Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian cancer slide, the
+CellChat human database (about 700 ligand-receptor pairs expressed) and p-values (`significance=TRUE`), `threads=8`, on 8 cores of
+an Intel Xeon Gold 6426Y node with a 64 GiB job (median of 5 runs; 3 at 60,000 cells):
+
+| Cells in the sample | Time | Peak memory |
+|---|---|---|
+| 1,000 | 6 s | 0.5 GiB |
+| 3,000 | 42 s | 0.8 GiB |
+| 10,000 | 8 min | 2.4 GiB |
+| 30,000 | 1.3 h | 15 GiB |
+| 60,000 | 5.9 h | 57 GiB |
+
+60,000 cells is about the largest single sample that fits in 64 GiB. The p-values (1000 background pairs) take about 40% of the
+time; without them a run takes about 60% as long. A run that stops while pairs are scored (e.g. the time limit of a cluster job)
+continues where it stopped when the same call is run again (see the vignette).
 
 ### Pure R version
 
-The R-only implementation is kept on the [`base-R` branch](https://github.com/pawelab/HyperCom/tree/base-R) as HyperCom 0.0.1, with
-the same bug fixes as this version (bad input stops with a message, factor inputs and reordered metadata give correct results, `seed`
-for reproducible p-values, results returned by `HyperCom()`; its own NEWS lists them). It needs no build tools on Windows and macOS,
-but it is much slower and needs far more memory (it runs out of memory around 20,000 cells), and it has no `threads` or `cache`. Its results agree with this version to about 1e-15
-(exactly with `HyperCom(..., infmat.method="lu")`).
+The R-only implementation is kept on the [`base-R` branch](https://github.com/pawelab/HyperCom/tree/base-R) as HyperCom 0.0.1: the
+original code of the paper (branch [`handwritten`](https://github.com/pawelab/HyperCom/tree/handwritten)) with the same bug fixes as
+this version (bad input stops with a message, factor inputs and reordered metadata give correct results, `seed` for reproducible
+p-values, `verbose`, results returned by `HyperCom()`; its own NEWS lists them). It no longer needs mltools, which was archived on
+CRAN, so it installs from CRAN packages only (collapse, doParallel, foreach, Rfast and SeuratObject besides the ones above) and
+needs no build tools on Windows and macOS. It is much slower and needs far more memory: the bundled data takes about 8 minutes on
+12 cores instead of seconds, and since it holds a dense matrix over all cells and genes of all samples (one copy per worker) it runs out
+of memory around 20,000 cells. It has no `threads` or `cache`. Its results agree with this version to about 1e-15 (exactly with
+`HyperCom(..., infmat.method="lu")`), and on valid input they equal the original code's except where that was wrong.
 
 ```r
 pak::pak("pawelab/HyperCom@base-R")

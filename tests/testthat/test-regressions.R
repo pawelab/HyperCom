@@ -1,4 +1,4 @@
-# Each test is a bug of master b999a01, numbered as in the project's findings list (wiki/findings.md), fixed on this branch. The fixes
+# Each test is a bug of handwritten b999a01, numbered as in the project's findings list (wiki/findings.md), fixed on this branch. The fixes
 # of #1, #14, #16, #20 and #27 are asserted in test-inputs.R, of #9 and #12 in test-prioritize_lr.R, of #10 (seeded p-values) in
 # test-exact.R; #13 has no behaviour to assert; #7 and #8 (the cluster) went with the cl argument.
 

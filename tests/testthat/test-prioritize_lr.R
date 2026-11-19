@@ -1,5 +1,5 @@
-test_that("prioritize_lr matches master with a single group", {
-  expect_master(run_priority(metadata=fx$output$metadata.none), fx$output$priority.none)
+test_that("prioritize_lr matches handwritten with a single group", {
+  expect_handwritten(run_priority(metadata=fx$output$metadata.none), fx$output$priority.none)
 })
 
 test_that("priority tables are sorted, bounded and keep the LR columns", {
@@ -24,10 +24,10 @@ test_that("prioritize_lr writes one priority file per weight, into a nested dire
   }
 })
 
-test_that("prioritize_lr in parallel gives master's priorities", {
+test_that("prioritize_lr in parallel gives handwritten's priorities", {
   priority <- run_priority(weights=c(1, 0.5), parallel=TRUE)
 
-  expect_master(priority, fx$output$priority[c("1", "0.5")])
+  expect_handwritten(priority, fx$output$priority[c("1", "0.5")])
 })
 
 test_that("background pairs without a priority are left out of the p-values, with a warning", {

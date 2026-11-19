@@ -9,6 +9,7 @@ For AI agent. Use HyperCom right. Installed copy: `system.file("AGENTS.md", pack
 - 0.2.x: this file. Threads, cache, compiled code.
 - 0.1.x (branch `spatial`, was `v1-fast`): has `cores=`, `infMat.cell=`, `cell.info=`, `method="auto"`, spatial. 0.2.x has none.
 - 0.0.1 (branch `base-R`): R only, same bug fixes. Has `cl=`, `seed=`, `verbose=`; no `threads`, `cache`, `infmat.method`.
+- 0.0.0.9000 (branch `handwritten`, b999a01): original code of paper. Bugs fixed in 0.0.1 still there. Needs mltools (archived on CRAN).
 
 Read for this version: `?HyperCom`, `news(package="HyperCom")`, vignette `HyperCom_Overview` (in repo `vignettes/` if not built).
 
@@ -43,10 +44,11 @@ Most failed run = bad input.
 
 ## Size: estimate before run
 
-- Memory about 16 bytes x sum over samples of (cells in sample)^2. One sample 30k cells about 15 GB. 65k about 70 GB.
-- More samples, same size: cheap. Split sample to save memory? Change which cells compared, so change results. Ask user first.
-- Time, 16 cores, all CellChat pairs, no p-values: 20k cells / 3 samples about 13 min. 50k about 100 min.
-- `significance=TRUE` add 1000 background pairs. Several times longer.
+- Memory about 16 bytes x sum over samples of (cells in sample)^2. More samples, same size: cheap.
+- Split sample to save memory? Change which cells compared, so change results. Ask user first.
+- Measured, one sample, 8 cores (Xeon Gold 6426Y), all CellChat human pairs (~700 expressed), with p-values: 1k 6 s 0.5 GiB. 10k 8 min
+  2.4 GiB. 30k 1.3 h 15 GiB. 60k 5.9 h 57 GiB (about max one sample for 64 GiB). Time grows with LR pairs too.
+- `significance=TRUE` add 1000 background pairs: about 40% of time. Without: about 60% as long.
 
 ## Long run, cluster
 
@@ -75,7 +77,7 @@ Most failed run = bad input.
 
 ## Change package (source repo)
 
-- Outputs must match the R-only version (branch `base-R`). Tests check bit for bit. Never loosen tolerance to pass.
+- Outputs must match the original code (branch `handwritten`, b999a01; fixture `tests/testthat/fixtures/handwritten.rds`). Tests check bit for bit. Never loosen tolerance to pass.
 - Tests: testthat. `NOT_CRAN=true` run all. `HYPERCOM_REFERENCE=<golden dir>` add full-data test, else skip.
 - Docs: roxygen in `R/`. Regenerate `man/`, `NAMESPACE`. Never hand edit. C++ signature change: `Rcpp::compileAttributes()`.
 - `R CMD check --as-cran`: Status OK.
