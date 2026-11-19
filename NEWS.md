@@ -25,6 +25,12 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
   `auto_grid_mem_gb`, `available_memory_gb`, `prioritize_lr(cores=, infMat.cell=, cell.info=)`, `method="auto"`). Its version is
   higher, so `update.packages()` moves spatial (v1-fast) installs to 0.2.0.
 
+## New function
+
+* `HyperCom_sce()` runs the pipeline on a SingleCellExperiment, as `HyperCom_seurat()` does on a Seurat object: one assay
+  (`assay="counts"` by default) and the cell metadata (`colData`); `sample`, `group` and `keep` name columns of `colData`. Assays held
+  on disk (DelayedArray, HDF5Array) are read for the genes of `lrdb` only. Needs SummarizedExperiment (Bioconductor).
+
 ## New arguments
 
 * `prioritize_lr`, `HyperCom`, `HyperCom_seurat`: `threads` (number of threads; below 1 stops, more than the available cores warns and

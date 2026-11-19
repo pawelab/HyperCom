@@ -1,4 +1,5 @@
-# The whole pipeline: HyperCom() on a counts matrix and cell metadata, HyperCom_seurat() on a Seurat object
+# The whole pipeline: HyperCom() on a counts matrix and cell metadata, HyperCom_seurat() on a Seurat object, HyperCom_sce() on a
+# SingleCellExperiment
 
 #' Run the HyperCom pipeline
 #'
@@ -151,6 +152,80 @@ HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", g
                             parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
+
+  res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
+                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)
+
+  return(invisible(res))
+}
+
+#' Get the counts matrix of a SingleCellExperiment assay
+#'
+#' `get_sce_assay` returns the matrix with dimnames for given assay
+#'
+#' This function takes a SingleCellExperiment (or any SummarizedExperiment) and returns one assay with genes as rows and cells as
+#' columns. Assays that are neither base nor Matrix matrices (e.g. a DelayedMatrix of HDF5-backed data) are read into a sparse
+#' matrix with only the genes of lrdb, so the rest of the assay is never loaded.
+#' @param sce A SingleCellExperiment object
+#' @param lrdb A dataframe of ligand-receptor interactions
+#' @param assay A string naming the assay to get data from
+#' @returns A matrix with row names being genes and column names being cells
+#' @noRd
+get_sce_assay <- function(sce, lrdb, assay="counts"){
+  if(!requireNamespace("SummarizedExperiment", quietly=TRUE)){
+    stop("reading a SingleCellExperiment needs the SummarizedExperiment package")
+  }
+  if(!methods::is(sce, "SummarizedExperiment")){
+    stop("sce must be a SingleCellExperiment (or SummarizedExperiment) object")
+  }
+  if(is.null(colnames(sce))){
+    stop("sce has no cell names: set colnames(sce) to the cell barcodes")
+  }
+  if(is.character(assay) && !(assay %in% SummarizedExperiment::assayNames(sce))){
+    stop("no assay '", assay, "' in sce; available: ", paste(SummarizedExperiment::assayNames(sce), collapse=", "))
+  }
+  genes <- unique(unlist(lapply(lrdb[, -1, drop=FALSE], as.character), use.names=FALSE))
+  if(!any(rownames(sce) %in% genes)){
+    stop("no row name of sce is a gene of lrdb: the row names must be gene symbols of the species of lrdb (cellchat.mm.lrdb mouse, ",
+         "cellchat.hs.lrdb human). With Ensembl IDs as row names and symbols in rowData: rownames(sce) <- rowData(sce)$Symbol")
+  }
+  counts <- SummarizedExperiment::assay(sce, assay, withDimnames=TRUE)
+
+  if(!is.matrix(counts) && !methods::is(counts, "Matrix")){
+    counts <- methods::as(counts[rownames(counts) %in% genes, , drop=FALSE], "dgCMatrix")
+  }
+
+  return(counts)
+}
+
+#' Run the HyperCom pipeline on a SingleCellExperiment object
+#'
+#' `HyperCom_sce` runs the HyperCom pipeline on a SingleCellExperiment object
+#'
+#' This function runs `HyperCom` on one assay and the cell metadata (`colData`) of a SingleCellExperiment, or of any
+#' SummarizedExperiment with genes as rows and cells as columns. The row names must be gene symbols and the column names cell names. Assays held
+#' on disk (DelayedArray, HDF5Array) are read for the genes of lrdb only. Needs the SummarizedExperiment package.
+#' @param sce A SingleCellExperiment object
+#' @param sample A string that is the column name for sample in the cell metadata (`colData`) of the SingleCellExperiment object
+#' @param assay A string naming the assay to read counts from ("counts" or "logcounts"; not a scaled assay)
+#' @param group A string that is the column name for group in the cell metadata of the SingleCellExperiment object
+#' @param keep A vector of strings that are additional column names to keep from the cell metadata of the SingleCellExperiment object
+#' @inheritParams HyperCom
+#' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
+#' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+#' @examplesIf requireNamespace("SingleCellExperiment", quietly=TRUE)
+#' sce <- SingleCellExperiment::SingleCellExperiment(assays=list(counts=alexanian2021.counts),
+#'                                                   colData=alexanian2021.metadata)
+#' lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
+#' res <- HyperCom_sce(sce, lrdb, sample="sample", group="condition",
+#'                     outdir=file.path(tempdir(), "HyperCom_sce"))
+#' head(res$priority[["1"]])
+#' @export
+HyperCom_sce <- function(sce, lrdb, sample, assay="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
+                         parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
+  check_lrdb(lrdb)
+  counts <- get_sce_assay(sce, lrdb, assay)
+  metadata <- as.data.frame(SummarizedExperiment::colData(sce), optional=TRUE)
 
   res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
                   parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)

@@ -30,6 +30,37 @@ test_that("HyperCom_seurat reproduces handwritten from a Seurat object", {
   expect_run_matches_handwritten(file.path(dir, "run"))
 })
 
+test_that("HyperCom_sce reproduces handwritten from a SingleCellExperiment", {
+  skip_if_not_installed("SingleCellExperiment")
+  dir <- withr::local_tempdir()
+  withr::local_dir(dir)
+  sce <- SingleCellExperiment::SingleCellExperiment(assays=list(counts=fx$input$counts), colData=fx$input$metadata)
+  res <- quietly(HyperCom_sce(sce, fx$input$lrdb, sample="sample", group="condition", outdir="run"))
+
+  expect_run_result(res, "run")
+  expect_run_matches_handwritten(file.path(dir, "run"))
+})
+
+test_that("get_sce_assay reads delayed assays for the lrdb genes and stops on bad input", {
+  skip_if_not_installed("SingleCellExperiment")
+  skip_if_not_installed("DelayedArray")
+  counts <- fx$input$counts
+  sce <- SingleCellExperiment::SingleCellExperiment(assays=list(counts=DelayedArray::DelayedArray(as.matrix(counts))))
+  delayed <- HyperCom:::get_sce_assay(sce, fx$input$lrdb, assay="counts")
+  genes <- unique(unlist(lapply(fx$input$lrdb[, -1, drop=FALSE], as.character), use.names=FALSE))
+
+  expect_s4_class(delayed, "dgCMatrix")
+  expect_equal(colnames(delayed), colnames(counts))
+  expect_true(all(rownames(delayed) %in% genes))
+  expect_same_matrix(filter_counts(delayed, fx$input$lrdb, outfile=NULL), filter_counts(counts, fx$input$lrdb, outfile=NULL))
+  expect_error(HyperCom:::get_sce_assay(sce, fx$input$lrdb, assay="logcounts"), "no assay 'logcounts'")
+  expect_error(HyperCom:::get_sce_assay(unname(sce), fx$input$lrdb), "no cell names")
+  expect_error(HyperCom:::get_sce_assay(counts, fx$input$lrdb), "must be a SingleCellExperiment")
+  ensembl <- sce
+  rownames(ensembl) <- paste0("ENSMUSG", seq_len(nrow(ensembl)))
+  expect_error(HyperCom:::get_sce_assay(ensembl, fx$input$lrdb), "must be gene symbols")
+})
+
 test_that("get_seurat_layer returns the counts of v3 and v5 assays", {
   skip_if_not_installed("SeuratObject")
   for(version in c("v3", "v5")){

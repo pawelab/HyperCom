@@ -15,8 +15,8 @@ Description: Infers cell-resolved cell-cell communication from single-cell
     receiver for each ligand-receptor pair. It then ranks ligand-receptor pairs
     by communication over the whole dataset or by condition, with optional
     permutation p-values. Input is a counts matrix with cell metadata, or a
-    'Seurat' object; 'CellChat' ligand-receptor databases for human and mouse
-    are included.
+    'Seurat' or 'SingleCellExperiment' object; 'CellChat' ligand-receptor
+    databases for human and mouse are included.
 URL: https://github.com/pawelab/HyperCom
 BugReports: https://github.com/pawelab/HyperCom/issues
 Encoding: UTF-8
@@ -34,11 +34,14 @@ Imports:
 LinkingTo:
   Rcpp
 Suggests:
+  DelayedArray,
   ggplot2,
   ggridges,
   knitr,
   rmarkdown,
   SeuratObject,
+  SingleCellExperiment,
+  SummarizedExperiment,
   testthat (>= 3.1.7),
   withr
 VignetteBuilder: knitr

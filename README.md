@@ -1,54 +1,83 @@
 # HyperCom
 
-HyperCom is the R package implementation of the method described in [HyperCom: a hypergraph-based method to infer cell-resolved cell-cell communication](https://www.biorxiv.org/content/10.64898/2026.09.30.755742v1) on bioRxiv. It is a hypergraph-based method to understand cell-cell communication at a cluster-free single-cell resolution.
+**See which single cells send and receive each ligand-receptor signal, with no clustering.**
 
-HyperCom provides the following hypergraph-based features described in the [overview vignette](vignettes/HyperCom_Overview.Rmd):
+HyperCom gives every cell a sender and receiver score for each ligand-receptor pair, then ranks the pairs that drive communication
+in your data, across the whole dataset or by condition. Start from a Seurat object, a SingleCellExperiment or a counts matrix.
 
-1. Per Cell Ligand-Receptor Pair Scoring
+Paper: [HyperCom: a hypergraph-based method to infer cell-resolved cell-cell communication](https://www.biorxiv.org/content/10.64898/2026.09.30.755742v1)
+(bioRxiv, 2026).
 
-2. Per Dataset Ligand-Receptor Pair Prioritization
+![HyperCom method overview](images/MethodOverview.jpg)
 
-## Method Overview
-![HyperCom Overview](images/MethodOverview.jpg)
-
-## Installation
-
-### Prerequisites
-
-- **R 4.1 or newer.**
-- **Build tools.** HyperCom contains C++ code that is compiled when it is installed from GitHub. Set the tools up once:
-  - **Windows:** install [Rtools](https://cran.r-project.org/bin/windows/Rtools/) for your version of R (Rtools 4.4 for R 4.4,
-    Rtools 4.5 for R 4.5) with its default options, then restart R.
-  - **macOS:** run `xcode-select --install` in the Terminal, then install GNU Fortran for your version of R from
-    [mac.r-project.org/tools](https://mac.r-project.org/tools/) (HyperCom uses R's linear algebra library, which needs it).
-  - **Linux:** install R's development package: `sudo apt install r-base-dev` (Ubuntu, Debian) or `sudo dnf install R-devel`
-    (Fedora, RHEL).
-
-  To check the tools from R: `install.packages("pkgbuild")`, then `pkgbuild::check_build_tools(debug=TRUE)`.
-- **R packages** are installed automatically: dplyr (1.1.0 or newer), Matrix, parallelly (1.23.0 or newer), Rcpp and tidyr.
-  `HyperCom_seurat()` also needs SeuratObject: `install.packages("SeuratObject")`.
-
-### Install
-
-This version lives on the `master` branch:
+## Install
 
 ```r
 install.packages("pak")
 pak::pak("pawelab/HyperCom")
 ```
 
-To check the installation, `library(HyperCom)` then `example(HyperCom)` runs a small analysis of the bundled data in a few seconds.
+Check that it works (takes a few seconds):
 
-If the installation stops with **`'make' not found`** (Windows), Rtools is missing or does not match your version of R. If it
-stops with **`library 'quadmath' not found`** or a missing **`gfortran`** (macOS), install GNU Fortran as above.
+```r
+library(HyperCom)
+example(HyperCom)
+```
 
-### Memory and run time
+HyperCom compiles C++ when it installs, so it needs R 4.1 or newer and build tools. Set them up once:
 
-Cells are compared within their sample, so memory and time grow with the number of cells per sample squared: memory is about 16
-bytes per pair of cells in the same sample, and the same cells split into more samples need less of both. Time also grows with the
-number of ligand-receptor pairs. Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian cancer slide, the
-CellChat human database (about 700 ligand-receptor pairs expressed) and p-values (`significance=TRUE`), `threads=8`, on 8 cores of
-an Intel Xeon Gold 6426Y node with a 64 GiB job (median of 5 runs; 3 at 60,000 cells):
+| System | Build tools |
+|---|---|
+| Windows | [Rtools](https://cran.r-project.org/bin/windows/Rtools/) for your R version (Rtools 4.4 for R 4.4), then restart R |
+| macOS | `xcode-select --install` in the Terminal, then GNU Fortran for your R version from [mac.r-project.org/tools](https://mac.r-project.org/tools/) |
+| Linux | `sudo apt install r-base-dev` (Ubuntu, Debian) or `sudo dnf install R-devel` (Fedora, RHEL) |
+
+**Install failed?**
+- `'make' not found` (Windows): Rtools is missing or doesn't match your R version.
+- `library 'quadmath' not found` or `gfortran` missing (macOS): install GNU Fortran (see the table).
+- Not sure? Run `install.packages("pkgbuild")`, then `pkgbuild::check_build_tools(debug=TRUE)`.
+
+## Run
+
+Pick the line that matches your data:
+
+```r
+library(HyperCom)
+
+# Seurat object (needs install.packages("SeuratObject"))
+res <- HyperCom_seurat(seurat, cellchat.hs.lrdb, sample="sample", group="condition", parallel=TRUE)
+
+# SingleCellExperiment (needs pak::pak("SingleCellExperiment"))
+res <- HyperCom_sce(sce, cellchat.hs.lrdb, sample="sample", group="condition", parallel=TRUE)
+
+# Counts matrix (genes x cells) and a metadata table (one row per cell)
+res <- HyperCom(cellchat.hs.lrdb, counts, metadata, sample="sample", group="condition", parallel=TRUE)
+```
+
+Then look at the results:
+
+```r
+res$priority[["1"]]    # ligand-receptor pairs, ranked
+scores <- score_hypercom(res$infMat, res$metadata, ligand="TGFB1", receptors=c("TGFBR1", "TGFBR2"))    # score per cell
+```
+
+**Check these four things before you run:**
+
+1. **Database matches your species:** `cellchat.hs.lrdb` for human, `cellchat.mm.lrdb` for mouse. Genes are gene symbols (`TGFB1`), not
+   Ensembl IDs.
+2. **`sample`** names the metadata column that holds the sample (library or replicate). Cells are compared only within their sample.
+   **`group`** (optional) names the condition column; use it to rank pairs by condition.
+3. **Counts are raw or normalized, not scaled.**
+4. **Cell names are unique.** When you merge samples, add the sample name to each barcode.
+
+- **P-values:** add `significance=TRUE, seed=1`.
+- **Output files:** every result is also saved to `outdir` (default `HyperCom/`).
+- **Run stopped?** Run the same call again. It continues where it stopped.
+
+## Run time and memory
+
+Time and memory depend on the number of cells **per sample** (they grow with its square). Splitting the same cells into more
+samples reduces both. One sample, with p-values, 8 cores:
 
 | Cells in the sample | Time | Peak memory |
 |---|---|---|
@@ -58,37 +87,37 @@ an Intel Xeon Gold 6426Y node with a 64 GiB job (median of 5 runs; 3 at 60,000 c
 | 30,000 | 1.3 h | 15 GiB |
 | 60,000 | 5.9 h | 57 GiB |
 
-60,000 cells is about the largest single sample that fits in 64 GiB. The p-values (1000 background pairs) take about 40% of the
-time; without them a run takes about 60% as long. A run that stops while pairs are scored (e.g. the time limit of a cluster job)
-continues where it stopped when the same call is run again (see the vignette).
+Time also grows with the number of ligand-receptor pairs expressed (about 700 here). P-values took about 40% of the time at
+every size from 3,000 cells up, so runs without them take about 60% as long; with fewer pairs, p-values are a larger share.
+60,000 cells is about the largest sample that fits in 64 GiB.
 
-### Pure R version
+<sub>Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian cancer slide: CellChat human database (about 700
+pairs expressed), `significance=TRUE`, `threads=8` on an Intel Xeon Gold 6426Y node with a 64 GiB job; median of 5 runs (3 at
+60,000 cells).</sub>
 
-The R-only implementation is kept on the [`base-R` branch](https://github.com/pawelab/HyperCom/tree/base-R) as HyperCom 0.0.1: the
-original code of the paper (branch [`handwritten`](https://github.com/pawelab/HyperCom/tree/handwritten)) with the same bug fixes as
-this version (bad input stops with a message, factor inputs and reordered metadata give correct results, `seed` for reproducible
-p-values, `verbose`, results returned by `HyperCom()`; its own NEWS lists them). It no longer needs mltools, which was archived on
-CRAN, so it installs from CRAN packages only (collapse, doParallel, foreach, Rfast and SeuratObject besides the ones above) and
-needs no build tools on Windows and macOS. It is much slower and needs far more memory: the bundled data takes about 8 minutes on
-12 cores instead of seconds, and since it holds a dense matrix over all cells and genes of all samples (one copy per worker) it runs out
-of memory around 20,000 cells. It has no `threads` or `cache`. Its results agree with this version to about 1e-15 (exactly with
-`HyperCom(..., infmat.method="lu")`), and on valid input they equal the original code's except where that was wrong.
+## Learn more
+
+- **Tutorial:** the [overview vignette](vignettes/HyperCom_Overview.Rmd) explains every step, the scores and how to plot them.
+- **Help:** `?HyperCom`, `?HyperCom_seurat`, `?HyperCom_sce`, `?score_hypercom`.
+- **Questions or bugs:** [open an issue](https://github.com/pawelab/HyperCom/issues).
+- **Cite:** `citation("HyperCom")`.
+
+<details>
+<summary><b>Pure R version (no build tools)</b></summary>
+
+Branch [`base-R`](https://github.com/pawelab/HyperCom/tree/base-R) (HyperCom 0.0.1) is the paper's original R code (branch
+[`handwritten`](https://github.com/pawelab/HyperCom/tree/handwritten)) with the same bug fixes as this version. It installs from
+CRAN packages only, so Windows and macOS need no build tools:
 
 ```r
 pak::pak("pawelab/HyperCom@base-R")
 ```
 
-Both versions are the package `HyperCom`, so installing one replaces the other. The R-only version keeps the `cl` argument (a PSOCK
-cluster, left running when given) instead of `threads`. With `parallel=TRUE` and no `cl` it starts one R process per core (inside an
-SGE parallel job, the job's workers through qrsh): on machines with many cores, give it a smaller cluster, e.g.
-`cl=parallelly::makeClusterPSOCK(8)`.
+- **Much slower:** about 8 minutes for the bundled data on 12 cores, instead of seconds.
+- **Much more memory:** it runs out of memory at about 20,000 cells.
+- **Same results** to about 1e-15 (exactly the same with `HyperCom(..., infmat.method="lu")` in this version).
+- **Uses `cl` instead of `threads`** for parallel runs. On machines with many cores, pass a small cluster, e.g.
+  `cl=parallelly::makeClusterPSOCK(8)`.
+- **It replaces this version:** both are the package `HyperCom`, so installing one removes the other.
 
-## Usage
-Counts are a gene x cell matrix (raw or normalised, not scaled) and the metadata has one row per cell, named by its barcode:
-```r
-library(HyperCom)
-res <- HyperCom(cellchat.mm.lrdb, alexanian2021.counts, alexanian2021.metadata, sample="sample", group="condition", parallel=TRUE)
-head(res$priority[["1"]])
-scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
-```
-Every step is also written to `outdir` (default `HyperCom/`). See `?HyperCom` and the vignette; cite with `citation("HyperCom")`.
+</details>

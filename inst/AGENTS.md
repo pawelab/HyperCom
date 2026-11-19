@@ -24,6 +24,7 @@ s <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4", 
 ```
 
 - Seurat: `HyperCom_seurat(seurat, lrdb, sample=, assay="RNA", layer="counts", ...)`. Need SeuratObject.
+- SingleCellExperiment: `HyperCom_sce(sce, lrdb, sample=, assay="counts", ...)`. Columns from `colData`. `colnames(sce)` = cell names. Need SummarizedExperiment (Bioconductor).
 - Install check: `example(HyperCom)`. Seconds.
 - Default 1 thread. Slow. Set `parallel=TRUE` (1 per physical core) or `threads=n`.
 - Set `outdir` yourself. Default `HyperCom/` in working dir.
