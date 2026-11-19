@@ -1,5 +1,6 @@
 ^HyperCom\.Rproj$
 ^\.Rproj\.user$
-^vignettes/articles$
 ^images$
 ^LICENSE\.md$
+^src/.*\.a$
+^AGENTS\.md$

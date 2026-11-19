@@ -1,0 +1,288 @@
+---
+title: "HyperCom Overview"
+author: "Justin K. Moy & Pawel F. Przytycki"
+output:
+  rmarkdown::html_vignette:
+    fig_width: 6
+    fig_height: 4
+vignette: >
+  %\VignetteIndexEntry{HyperCom Overview}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+#### Last Updated: `r Sys.Date()`
+
+```{r setup, message=FALSE, warning=FALSE}
+library(HyperCom)
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(Matrix)
+library(tidyr)
+```
+
+## Inputs
+HyperCom requires three inputs. Most failed runs come from one of these points, so check them first:
+
+1. **Counts:** a gene x cell matrix with genes as row names and cells as column names, sparse or dense. Raw or normalised counts
+   give the same results, since HyperCom only uses whether each gene is above 0 in each cell; never use scaled data (negative
+   values stop the run). Cell names must be unique across samples: prefix the barcodes with their sample when merging samples.
+
+2. **Cell metadata:** a dataframe with one row per cell, its row names being the cell names of the counts, with a sample column
+   and optionally a group column. The sample is the library or replicate: cells are only compared with cells of their own sample,
+   so every sample needs at least 2 cells that express a ligand or receptor gene. The group is the condition, for priorities
+   specific to a group. Cells of the counts without a row in the metadata are left out, with a warning.
+
+3. **Ligand-receptor (LR) interactions** whose gene symbols match the species of the counts. HyperCom contains 2 built in LR
+   databases formatted properly:
+
+    + CellChat human `cellchat.hs.lrdb` (gene symbols such as `TGFB1`)
+
+    + CellChat mouse `cellchat.mm.lrdb` (gene symbols such as `Tgfb1`)
+
+In this vignette we will use a 1000 cell subset of heart failure from [Alexanian et al, 2021](https://doi.org/10.1038/s41586-021-03674-1).
+This example subset is included in the package as `alexanian2021.counts` and `alexanian2021.metadata`; its counts are
+log-normalised.
+```{r}
+counts <- alexanian2021.counts
+dim(counts)
+head(rownames(counts))
+head(colnames(counts))
+```
+
+```{r}
+cell.meta <- alexanian2021.metadata
+head(cell.meta)
+table(cell.meta$sample, cell.meta$condition)
+```
+
+```{r}
+ggplot(cell.meta, aes(x=UMAP_1, y=UMAP_2, colour=celltype)) +
+  geom_point(size=0.5) +
+  theme_classic()
+```
+
+For the LR interactions we will use the CellChat murine database. The first column names the interaction, the second is the
+ligand and the others the receptor genes (NA where a receptor complex has fewer subunits).
+```{r}
+lrdb <- cellchat.mm.lrdb
+dim(lrdb)
+```
+
+```{r}
+head(lrdb, 2)
+```
+
+## Running HyperCom
+The whole pipeline runs with one call to `HyperCom`. It writes every step to `outdir` and returns the results as a list, so they
+need not be read back. `parallel=TRUE` uses one thread per physical core and `threads` sets the number directly (the default is
+one thread). `significance=TRUE` adds p-values and `seed` makes them reproducible.
+```{r}
+outdir <- file.path(tempdir(), "overview")
+res <- HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
+                metadata=alexanian2021.metadata, sample="sample",
+                group="condition", significance=TRUE, seed=1,
+                parallel=TRUE, outdir=outdir, verbose=FALSE)
+head(res$priority[["1"]])
+```
+
+The files are numbered in the order of the steps below: `0.counts.rds` (the filtered counts), `1.lrs.csv` (the interactions
+whose genes are all expressed), `2.hyperedges.csv`, `3.adj.rds` (the adjacency matrix), `4.infMat.rds` (the influence matrix),
+`5.metadata.csv` and one `6.priority/priority.<weight>.csv` per weight. CSV files read back with `read.csv`; the `.rds` files with
+`readRDS` after `library(HyperCom)`.
+```{r}
+list.files(outdir, recursive=TRUE)
+priority <- read.csv(file.path(outdir, "6.priority", "priority.1.csv"))
+infMat <- readRDS(file.path(outdir, "4.infMat.rds"))
+```
+
+For a Seurat object, `HyperCom_seurat` reads one layer of one assay (by default the `counts` layer of the `RNA` assay, Seurat v5 or
+older assays) and the cell metadata; `sample`, `group` and `keep` name columns of the cell metadata (`seurat[[]]`). It needs the
+SeuratObject package.
+```{r, eval=FALSE}
+res <- HyperCom_seurat(seurat=seurat_object, lrdb=cellchat.mm.lrdb, sample="sample",
+                       assay="RNA", layer="counts", group="condition",
+                       parallel=TRUE, outdir="overview")
+```
+
+### Run time and memory
+Memory grows with the number of cells per sample squared, since cells are compared within their sample: more samples of the same
+size cost little. Measured with `parallel=TRUE` on a 16-core desktop; the two larger rows score a tenth of the CellChat pairs (about
+100) without p-values, so all pairs take about ten times as long, and p-values add 1000 background pairs:
+
+| cells | samples | time | memory |
+|---|---|---|---|
+| 1,000 (this vignette) | 2 | seconds | under 1 GB |
+| 20,000 | 3 | about 1.3 min | about 3.5 GB |
+| 50,000 | 3 | about 10 min | about 17 GB |
+
+The influence matrix is never built in full by default, so its memory grows with the number of cells rather than its square.
+`infmat.method="lu"` builds it in full and reproduces the numbers of HyperCom 0.0.0.9000 exactly (the default agrees with them to
+about 1e-15), at the cost of two matrices of all cells and genes squared.
+
+### Runs that stop
+Scoring the pairs takes almost all of the run time, hours on large data. While pairs are scored, `HyperCom` keeps the pairs
+scored so far in `<outdir>/6.priority/cache`, so a run that stops (the time limit of a cluster job, a crash, a closed R session)
+loses little. Run the same call again: the steps before the scoring are repeated (seconds for 50,000 cells) and the scoring
+continues from the cache, losing at most the last batch of pairs. The results are the same as those of a run that never stopped
+on the same type of computer (on a cluster, ask for the same node type: another CPU can change the last digits, about 1e-13);
+without `seed`, the run continues with the background pairs it drew before the stop. A continued run says so in its messages, e.g.
+`Continuing from the cache in overview/6.priority/cache: 812 of 2042 pairs already scored`.
+
+The cache folder is removed once the priority files are written. A cache made from other inputs (other counts, metadata or
+`infmat.method`) is not used: it is moved to `cache.old`, with a warning, and can be renamed back to continue the run it belongs to.
+If the cache cannot be written (e.g. a full disk), scoring goes on without it. `cache=FALSE` keeps no cache. `prioritize_lr` keeps it in `<outdir>/cache` the same
+way, and keeps none with `outdir=NULL`.
+
+On a cluster, a job can therefore ask for less time than the whole run and be submitted again, with the same script, until it
+finishes:
+```{r, eval=FALSE}
+res <- HyperCom(lrdb=cellchat.mm.lrdb, counts=counts, metadata=cell.meta,
+                sample="sample", group="condition", significance=TRUE, seed=1,
+                parallel=TRUE, outdir="overview")
+```
+
+## Running HyperCom step by step
+The rest of this vignette runs each component function of the pipeline in turn, with `outfile=NULL` so nothing is written.
+
+### Preprocessing
+In order to reduce memory usage, we first filter the counts matrix to only genes present in the LR interactions with expression greater than 0.
+The function also transposes the matrix.
+```{r}
+lr.counts <- filter_counts(counts=counts, lrdb=lrdb, outfile=NULL)
+dim(lr.counts)
+```
+
+Next we filter the ligand receptor interactions to only interactions where all genes are present in the filtered expression matrix.
+```{r}
+lrs <- generate_lrs_table(counts=lr.counts, lrdb=lrdb, outfile=NULL)
+dim(lrs)
+```
+
+### Generating Hypergraph
+To generate the hyperedges, which are edges that contain multiple nodes, we use the expression matrix and the LR interactions to create 2 types of hyperedges:
+
+1. expression edges - edges containing a ligand or receptor gene and the cells that express it
+
+2. interaction edges - edges containing the genes that comprise an LR interaction
+
+HyperCom represents these hyperedges as a dataframe with an edge and node column where the node belongs to the edge. The weight is set to 1 for each edge.
+```{r}
+hyperedges <- generate_hyperedges(counts=lr.counts, lrs=lrs, outfile=NULL)
+head(hyperedges, 2)
+```
+
+We can represent this hypergraph as an adjacency matrix where the nodes are the cells, ligand genes, and receptor genes.
+Each entry is the number of hyperedges shared by nodes.
+The matrix is not stored: `adj` keeps which nodes are in which hyperedge, which is much smaller, and works like a matrix
+(`dim(adj)`, `adj[i, j]`, `as.matrix(adj)` for the whole matrix).
+```{r}
+adj <- generate_adjacency_matrix(hyperedges=hyperedges, outfile=NULL)
+dim(adj)
+adj[c("Thbs1", "Sdc4"), 1:3]
+```
+
+### Calculating Network Connectivity
+In order to calculate the network connectivity of the hypergraph we perform a random walk with restart on the adjacency matrix to
+produce an influence matrix: entry (i, j) is the share of a walk started at node i that ends at node j, so each row sums to 1. At
+every step the walk returns to its start with the restart probability `r`, so about `r` of each node's influence stays on the node
+itself and the rest spreads over the nodes it shares hyperedges with. `generate_infMat` takes `r` (default 0.5); `HyperCom` always
+uses 0.5. On this example the ranking of LR pairs hardly depends on it: `r` = 0.1 and 0.8 give the same top 20 pairs as 0.5. Like
+the adjacency matrix, the influence matrix works like a matrix without being stored in full.
+```{r}
+infMat <- generate_infMat(adj=adj, r=0.5, outfile=NULL)
+dim(infMat)
+infMat[c("Thbs1", "Sdc4"), 1:3]
+```
+
+### Preparing Metadata
+To account for genes now being present in the matrices, we then process the metadata to contain information on the genes as well as cell metadata.
+Additionally to reduce memory, we reduce the number of columns to just cell, sample, and group; gene nodes get `"gene"` in each.
+Optionally other metadata columns can be kept with `keep`.
+```{r}
+node.meta <- generate_metadata(infMat=infMat, metadata=cell.meta,
+                               sample="sample", group="condition",
+                               keep=NULL, outfile=NULL)
+head(node.meta)
+```
+
+## Downstream Analysis
+
+### Identifying Important LR Pairs
+We can also identify important LR pairs by using HyperCom scoring on LR pairs.
+This prioritization scores LR pairs to find highly communicative LR pairs that are optionally group specific.
+The priority of a pair is the weighted geometric mean of five terms of the cells that express its genes: their fraction of all
+cells, the smallest fraction of cells expressing one of its genes, the mean of each cell's larger score as sender or receiver, how
+evenly they split into senders and receivers, and how much they concentrate in some groups.
+The `weights` arg sets how much the fraction of cells counts: 1 (the default) weighs it like the other terms and smaller values
+favor pairs specific to fewer cells; a vector of weights gives one result each.
+```{r}
+priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=node.meta,
+                          weights=c(1, 0.5), parallel=TRUE, outdir=NULL,
+                          verbose=FALSE)
+head(priority[["1"]])
+```
+
+The result has one table per weight, with the columns of the LR table and the priority. With `significance=TRUE`, as in the
+`HyperCom` call above, it also has p and p.adj: p is the fraction of 1000 background pairs of random genes whose priority is at
+least as high, so it moves in steps of 0.001 and 0 means none was as high (background pairs that get no priority are left out, with
+a warning); p.adj is its Benjamini-Hochberg adjustment. This takes about four times as long.
+```{r}
+head(res$priority[["1"]][, c("interaction", "priority", "p", "p.adj")])
+```
+
+### Scoring Cells
+We see that Thbs1-Sdc4 is the highest scoring LR pair. We can calculate HyperCom scores for this pair. Each pair of cells i and j
+of a sample is scored by how strongly cell i reaches the ligand and the receptor reaches cell j, relative to how strongly i reaches
+j; these scores are percent-ranked together. A cell's `sender` score is its average rank as cell i and its `receiver` score its
+average rank as cell j (between 0 and 1); `dif` is receiver - sender, `avg` their mean and `max` the larger. The HyperCom score
+`hypercom` is the sign of `dif` times the percent rank of its size among the cells times `avg`: negative for senders, positive for
+receivers. Cells with no path to the pair's genes get NaN.
+```{r}
+Thbs1_Sdc4 <- score_hypercom(infMat=infMat, metadata=node.meta, ligand="Thbs1",
+                             receptors="Sdc4")
+head(Thbs1_Sdc4[, c("cell", "sender", "receiver", "max", "hypercom")])
+```
+
+On the UMAP, senders are blue and receivers orange; cells that express no ligand or receptor gene are not in the hypergraph and
+stay grey.
+```{r}
+umap <- data.frame(cell=rownames(cell.meta), UMAP_1=cell.meta$UMAP_1, UMAP_2=cell.meta$UMAP_2)
+umap <- left_join(umap, Thbs1_Sdc4[, c("cell", "hypercom")], by=join_by(cell))
+ggplot(umap, aes(x=UMAP_1, y=UMAP_2, colour=hypercom)) +
+  geom_point(size=0.5) +
+  scale_colour_gradient2(low="#0074a7", mid="grey90", high="#e69c25", na.value="grey70") +
+  ggtitle("Thbs1-Sdc4") +
+  theme_classic()
+```
+
+If we plot the sender and receiver score we see both higher densities of sender and receiver cells in TAC.
+```{r, warning=FALSE, message=FALSE}
+Thbs1_Sdc4 <- left_join(Thbs1_Sdc4, node.meta, by=join_by(cell))
+melt.Thbs1_Sdc4 <- pivot_longer(dplyr::select(Thbs1_Sdc4, c(cell, group, sender, receiver)), !c(cell, group), names_to = "type", values_to = "score")
+
+ggplot(melt.Thbs1_Sdc4, aes(x = score, y = type, fill=group)) +
+    geom_density_ridges(alpha=0.4) +
+    xlim(0.25, 1) +
+    xlab("Score") +
+    ylab("Score Type") +
+    ggtitle("Thbs1-Sdc4") +
+    theme_classic()
+```
+
+For a receptor complex, give all its subunits: the scores of the subunits are averaged.
+```{r}
+Tgfb1_Tgfbr <- score_hypercom(infMat=infMat, metadata=node.meta, ligand="Tgfb1",
+                              receptors=c("Tgfbr1", "Tgfbr2"))
+head(Tgfb1_Tgfbr[, c("cell", "sender", "receiver", "hypercom")])
+```
+
+## Citation
+```{r}
+citation("HyperCom")
+```
+
+```{r}
+sessionInfo()
+```

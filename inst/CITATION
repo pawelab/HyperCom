@@ -1,0 +1,9 @@
+bibentry(
+  bibtype="Article",
+  title="HyperCom: a hypergraph-based method to infer cell-resolved cell-cell communication",
+  author=c(person(c("Justin", "K."), "Moy"), person(c("Pawel", "F."), "Przytycki")),
+  journal="bioRxiv",
+  year="2026",
+  doi="10.64898/2026.09.30.755742",
+  url="https://www.biorxiv.org/content/10.64898/2026.09.30.755742v1"
+)
