@@ -21,9 +21,9 @@ p-values are the same either way), and pairs whose cells are perfectly balanced 
   the number. The `cl` argument of `prioritize_lr`, `HyperCom` and `HyperCom_seurat` is gone: remove `cl=` from calls (it now stops
   with "unused argument"), and in calls by position drop the value given for `cl`, which would otherwise be read as `outdir`.
 * The package has compiled code: installing from source needs build tools (see README).
-* Coming from branch v1-fast (0.1.x): 0.2.0 has none of its additions (spatial scores and adjacency, `generate_cell_info`,
+* Coming from branch spatial (was v1-fast, 0.1.x): 0.2.0 has none of its additions (spatial scores and adjacency, `generate_cell_info`,
   `auto_grid_mem_gb`, `available_memory_gb`, `prioritize_lr(cores=, infMat.cell=, cell.info=)`, `method="auto"`). Its version is
-  higher, so `update.packages()` moves v1-fast installs to 0.2.0.
+  higher, so `update.packages()` moves spatial (v1-fast) installs to 0.2.0.
 
 ## New arguments
 

@@ -7,7 +7,7 @@ For AI agent. Use HyperCom right. Installed copy: `system.file("AGENTS.md", pack
 `packageVersion("HyperCom")`. Same name, different API:
 
 - 0.2.x: this file. Threads, cache, compiled code.
-- 0.1.x (branch `v1-fast`): has `cores=`, `infMat.cell=`, `cell.info=`, `method="auto"`, spatial. 0.2.x has none.
+- 0.1.x (branch `spatial`, was `v1-fast`): has `cores=`, `infMat.cell=`, `cell.info=`, `method="auto"`, spatial. 0.2.x has none.
 - 0.0.1 (branch `base-R`): R only, same bug fixes. Has `cl=`, `seed=`, `verbose=`; no `threads`, `cache`, `infmat.method`.
 
 Read for this version: `?HyperCom`, `news(package="HyperCom")`, vignette `HyperCom_Overview` (in repo `vignettes/` if not built).
