@@ -37,6 +37,26 @@ HyperCom compiles C++ when it installs, so it needs R 4.1 or newer and build too
 - `library 'quadmath' not found` or `gfortran` missing (macOS): install GNU Fortran (see the table).
 - Not sure? Run `install.packages("pkgbuild")`, then `pkgbuild::check_build_tools(debug=TRUE)`.
 
+<details>
+<summary><b>Pure R version (no build tools)</b></summary>
+
+Branch [`base-R`](https://github.com/pawelab/HyperCom/tree/base-R) (HyperCom 0.0.1) is the paper's original R code (branch
+[`handwritten`](https://github.com/pawelab/HyperCom/tree/handwritten)) with the same bug fixes as this version. It installs from
+CRAN packages only, so Windows and macOS need no build tools:
+
+```r
+pak::pak("pawelab/HyperCom@base-R")
+```
+
+- **Much slower:** about 8 minutes for the bundled data on 12 cores, instead of seconds.
+- **Much more memory:** it runs out of memory at about 20,000 cells.
+- **Same results** to about 1e-15 (exactly the same with `HyperCom(..., infmat.method="lu")` in this version).
+- **Uses `cl` instead of `threads`** for parallel runs. On machines with many cores, pass a small cluster, e.g.
+  `cl=parallelly::makeClusterPSOCK(8)`.
+- **It replaces this version:** both are the package `HyperCom`, so installing one removes the other.
+
+</details>
+
 ## Run
 
 Pick the line that matches your data:
@@ -101,23 +121,3 @@ pairs expressed), `significance=TRUE`, `threads=8` on an Intel Xeon Gold 6426Y n
 - **Help:** `?HyperCom`, `?HyperCom_seurat`, `?HyperCom_sce`, `?score_hypercom`.
 - **Questions or bugs:** [open an issue](https://github.com/pawelab/HyperCom/issues).
 - **Cite:** `citation("HyperCom")`.
-
-<details>
-<summary><b>Pure R version (no build tools)</b></summary>
-
-Branch [`base-R`](https://github.com/pawelab/HyperCom/tree/base-R) (HyperCom 0.0.1) is the paper's original R code (branch
-[`handwritten`](https://github.com/pawelab/HyperCom/tree/handwritten)) with the same bug fixes as this version. It installs from
-CRAN packages only, so Windows and macOS need no build tools:
-
-```r
-pak::pak("pawelab/HyperCom@base-R")
-```
-
-- **Much slower:** about 8 minutes for the bundled data on 12 cores, instead of seconds.
-- **Much more memory:** it runs out of memory at about 20,000 cells.
-- **Same results** to about 1e-15 (exactly the same with `HyperCom(..., infmat.method="lu")` in this version).
-- **Uses `cl` instead of `threads`** for parallel runs. On machines with many cores, pass a small cluster, e.g.
-  `cl=parallelly::makeClusterPSOCK(8)`.
-- **It replaces this version:** both are the package `HyperCom`, so installing one removes the other.
-
-</details>
