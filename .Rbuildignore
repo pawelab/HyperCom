@@ -4,3 +4,4 @@
 ^LICENSE\.md$
 ^src/.*\.a$
 ^AGENTS\.md$
+^\.gitattributes$
