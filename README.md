@@ -30,11 +30,11 @@ HyperCom provides the following hypergraph-based features described in the [over
 
 ### Install
 
-This version lives on the `speed-fixes` branch:
+This version lives on the `master` branch:
 
 ```r
 install.packages("pak")
-pak::pak("pawelab/HyperCom@speed-fixes")
+pak::pak("pawelab/HyperCom")
 ```
 
 To check the installation, `library(HyperCom)` then `example(HyperCom)` runs a small analysis of the bundled data in a few seconds.
