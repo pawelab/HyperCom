@@ -156,8 +156,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // screen_blocks_cpp
-Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, double id_budget);
-RcppExport SEXP _HyperCom_screen_blocks_cpp(SEXP blocksSEXP, SEXP ASEXP, SEXP BSEXP, SEXP sampleSEXP, SEXP ligSEXP, SEXP recSEXP, SEXP threadsSEXP, SEXP id_budgetSEXP) {
+Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, double id_budget, bool keep_ids);
+RcppExport SEXP _HyperCom_screen_blocks_cpp(SEXP blocksSEXP, SEXP ASEXP, SEXP BSEXP, SEXP sampleSEXP, SEXP ligSEXP, SEXP recSEXP, SEXP threadsSEXP, SEXP id_budgetSEXP, SEXP keep_idsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -169,8 +169,18 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type rec(recSEXP);
     Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
     Rcpp::traits::input_parameter< double >::type id_budget(id_budgetSEXP);
-    rcpp_result_gen = Rcpp::wrap(screen_blocks_cpp(blocks, A, B, sample, lig, rec, threads, id_budget));
+    Rcpp::traits::input_parameter< bool >::type keep_ids(keep_idsSEXP);
+    rcpp_result_gen = Rcpp::wrap(screen_blocks_cpp(blocks, A, B, sample, lig, rec, threads, id_budget, keep_ids));
     return rcpp_result_gen;
+END_RCPP
+}
+// screen_release_cpp
+void screen_release_cpp();
+RcppExport SEXP _HyperCom_screen_release_cpp() {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    screen_release_cpp();
+    return R_NilValue;
 END_RCPP
 }
 
@@ -184,7 +194,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_score_grids_cpp", (DL_FUNC) &_HyperCom_score_grids_cpp, 6},
     {"_HyperCom_score_blocks_cpp", (DL_FUNC) &_HyperCom_score_blocks_cpp, 7},
     {"_HyperCom_dense_blocks_cpp", (DL_FUNC) &_HyperCom_dense_blocks_cpp, 3},
-    {"_HyperCom_screen_blocks_cpp", (DL_FUNC) &_HyperCom_screen_blocks_cpp, 8},
+    {"_HyperCom_screen_blocks_cpp", (DL_FUNC) &_HyperCom_screen_blocks_cpp, 9},
+    {"_HyperCom_screen_release_cpp", (DL_FUNC) &_HyperCom_screen_release_cpp, 0},
     {NULL, NULL, 0}
 };
 

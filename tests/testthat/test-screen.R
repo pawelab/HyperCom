@@ -58,6 +58,11 @@ test_that("screened bounds hold every cell's scores, the same at any number of t
     b <- HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, 1)
     expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(3)), b)
     expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(3), id.budget=0), b)
+    for(threads in c(test_threads(3), 1)){
+      expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, threads, keep.ids=TRUE), b)
+    }
+    HyperCom:::screen_release_cpp()
+    expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(3)), b)
     expect_bounds(b$sender.lo, b$sender.hi, exact$sender)
     expect_bounds(b$receiver.lo, b$receiver.hi, exact$receiver)
     expect_lt(stats::median(b$sender.hi - b$sender.lo), 1e-3)

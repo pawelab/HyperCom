@@ -14,7 +14,6 @@ read_fixture <- function(){
 withr::local_collate("C", .local_envir=testthat::teardown_env())
 fx <- read_fixture()
 tol <- 1e-10
-x87 <- identical(.Machine$longdouble.digits, 64L)
 fx_pairs <- list(network=list(NULL, NULL), single=list("Thbs1", "Sdc4"), complex=list("Tgfb1", c("Tgfbr1", "Tgfbr2")),
                  triple=list("Tgfb1", c("Acvr1", "Tgfbr1", "Tgfbr2")), same=as.list(fx$output$same.pair))
 
@@ -35,18 +34,14 @@ test_threads <- function(n){
 #'
 #' `expect_handwritten` checks a result of the grid kernel against handwritten's output in the fixture
 #'
-#' This function compares bit for bit where long double is the 80-bit x87 type of the x86-64 machine the fixture was made on, and
-#' within 1e-12 elsewhere: R's means and the kernel's sums use the platform's long double (double on arm64 macOS and Windows, 128 bits
-#' on arm64 Linux, absent on builds without long double), so their last bits differ from the fixture's there.
+#' This function compares within 1e-12. Since 0.2.1 the kernel divides each score's exact integer rank sum once (approved by J. Moy,
+#' 2026-11-20), so cell scores lie within one ulp of handwritten's long double means on every computer; priorities, p-values and their
+#' order were unchanged on the bundled and xenium test data.
 #' @param object A result from the build under test
 #' @param expected Handwritten's result from the fixture
 #' @noRd
 expect_handwritten <- function(object, expected){
-  if(x87){
-    testthat::expect_identical(object, expected)
-  } else {
-    testthat::expect_equal(object, expected, tolerance=1e-12)
-  }
+  testthat::expect_equal(object, expected, tolerance=1e-12)
 }
 
 #' Run an expression without its printed output

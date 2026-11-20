@@ -1,15 +1,15 @@
-# Scores and priorities equal handwritten's bit for bit (identical(), not within a tolerance), with one thread or several, where long
-# double is the x87 type the fixture was made with (x86-64; within 1e-12 elsewhere, see expect_handwritten). The influence matrix is
-# compared bit for bit with handwritten's formula run on this machine (its last bits depend on the BLAS) and within 1e-12 with the fixture.
+# Scores and priorities equal handwritten's within 1e-12, with one thread or several (the kernel's scores are within one ulp of
+# handwritten's since 0.2.1, see expect_handwritten). The influence matrix is compared bit for bit with handwritten's formula run on
+# this machine (its last bits depend on the BLAS) and within 1e-12 with the fixture.
 
-test_that("score_hypercom equals handwritten bit for bit", {
+test_that("score_hypercom equals handwritten within one ulp", {
   for(n in names(fx_pairs)){
     expect_handwritten(score_hypercom(fx$output$infMat, fx$output$metadata, ligand=fx_pairs[[n]][[1]], receptors=fx_pairs[[n]][[2]]),
                   fx$output$scores[[n]])
   }
 })
 
-test_that("prioritize_lr equals handwritten bit for bit with one thread and with several", {
+test_that("prioritize_lr equals handwritten with one thread and with several", {
   for(threads in c(1, test_threads(4))){
     expect_handwritten(run_priority(weights=c(1, 0.5, 0), threads=threads), fx$output$priority)
   }
@@ -26,7 +26,7 @@ test_that("seeded p-values equal handwritten's with seed=1 and after set.seed(1)
   expect_identical(df$p.adj, stats::p.adjust(df$p, method="BH"))
 })
 
-test_that("prioritize_lr reads an adjacency without node x node matrix as handwritten's matrix, bit for bit", {
+test_that("prioritize_lr reads an adjacency without node x node matrix as handwritten's matrix", {
   skip_on_cran()
   adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
 

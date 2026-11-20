@@ -37,7 +37,11 @@ dense_blocks_cpp <- function(F, cell, sample) {
     .Call(`_HyperCom_dense_blocks_cpp`, F, cell, sample)
 }
 
-screen_blocks_cpp <- function(blocks, A, B, sample, lig, rec, threads, id_budget) {
-    .Call(`_HyperCom_screen_blocks_cpp`, blocks, A, B, sample, lig, rec, threads, id_budget)
+screen_blocks_cpp <- function(blocks, A, B, sample, lig, rec, threads, id_budget, keep_ids = FALSE) {
+    .Call(`_HyperCom_screen_blocks_cpp`, blocks, A, B, sample, lig, rec, threads, id_budget, keep_ids)
+}
+
+screen_release_cpp <- function() {
+    invisible(.Call(`_HyperCom_screen_release_cpp`))
 }
 

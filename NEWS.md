@@ -1,3 +1,14 @@
+# HyperCom 0.2.1
+
+Faster scoring and screening (whole `prioritize_lr` with p-values 1.11-1.29x faster on 3,000-20,000 cells, 1.5x on one sample of
+30,000 cells), same priorities, p-values and order on the bundled data.
+
+* Cell scores are each sample's exact integer rank sum divided once, correctly rounded, instead of a long double running mean. They
+  are within one ulp (~1e-16) of 0.2.0's and the same on every computer. A cache made by an earlier version is not reused.
+* The grid kernel samples big grids more sparsely, writes keys to their buckets with non-temporal stores (x86), ranks with one wide
+  radix digit and, for big buckets, sorts and ranks each cache-sized piece at once; background screening keeps its bucket ids from
+  one batch to the next and sums with fewer operations. None of these changes a result.
+
 # HyperCom 0.2.0
 
 The same results as 0.0.0.9000, much faster and with far less memory. On the bundled data every step, the cell scores, the

@@ -19,9 +19,11 @@
 #' ids of all teams (2 bytes per within-sample cell pair each) fit in it, from one thread per grid for small grids to all threads on
 #' one grid for big ones (0); the bounds are the same either way. On 20,000 cells in 3 samples, teams of 4 threads screened 6% slower
 #' than one thread per grid (which needed 4 GB of ids instead of 1) and 7% faster than one team of 16
+#' @param keep.ids A boolean of whether to keep the bucket ids for the next call (freed by screen_release_cpp); new memory is slow to
+#' first touch, so batches of 60,000 cells screened 8-35% faster with kept ids on Windows
 #' @returns A list of four matrices, sender.lo, sender.hi, receiver.lo and receiver.hi, with one row per cell and one column per grid
 #' @noRd
-screen_grids <- function(infMat, metadata, ligands, receptors, threads=1, blocks=NULL, id.budget=NULL){
+screen_grids <- function(infMat, metadata, ligands, receptors, threads=1, blocks=NULL, id.budget=NULL, keep.ids=FALSE){
   ligands <- as.character(ligands)
   receptors <- as.character(receptors)
   nodes <- rownames(infMat)
@@ -42,7 +44,8 @@ screen_grids <- function(infMat, metadata, ligands, receptors, threads=1, blocks
     A <- infMat[g$idx + 1L, lig.genes, drop=FALSE]
     B <- infMat[rec.genes, g$idx + 1L, drop=FALSE]
   }
-  sb <- screen_blocks_cpp(blocks, A, B, g$sample, match(ligands, lig.genes) - 1L, match(receptors, rec.genes) - 1L, threads, id.budget)
+  sb <- screen_blocks_cpp(blocks, A, B, g$sample, match(ligands, lig.genes) - 1L, match(receptors, rec.genes) - 1L, threads, id.budget,
+                          keep.ids)
   back <- order(g$o)
 
   return(list(sender.lo=sb$sender_lo[back, , drop=FALSE], sender.hi=sb$sender_hi[back, , drop=FALSE],
@@ -76,13 +79,15 @@ screen_blocks <- function(infMat, g, threads=1){
 #' This function takes ligand-receptor pairs, the adjacency, a named influence matrix and the corresponding metadata and returns, for
 #' each pair, bounds of the terms calculate_priority would return. frac, pct.min and purity are exact. The cell score bounds of
 #' screen_grids, averaged over a complex's subunits as the scores are, are widened for rounding by 1e-12 plus the largest sample
-#' times 2^-52 (the kernel adds a score's entries in long double, which is only a double on some computers, e.g. Apple Silicon; the
-#' widening covers double sums everywhere, so the bounds and a cache of them do not depend on the computer); the mean of each cell's
+#' times 2^-52 (sized for the long double sums the kernel used before 0.2.1, which are only doubles on some computers; the kernel now
+#' divides exact integer sums once, as screening does, so the widening is more than enough and the bounds and a cache of them do not
+#' depend on the computer); the mean of each cell's
 #' larger score then lies between the means of the larger lower and of the larger upper bounds, widened by the pair's cells times
 #' 2^-52 (R's mean), and the balance between the smallest and largest Gini impurity of the
 #' possible numbers of receivers (cells
 #' whose receiver bounds lie above their sender bounds are receivers, cells whose bounds overlap may be). A pair with a cell without a
-#' score bound gets NA. Pairs are screened in batches of whole ligands; with a cache, pairs whose bounds are in it are not screened
+#' score bound gets NA. Pairs are screened in batches of whole ligands, the batches reusing one set of bucket ids (freed on return,
+#' before any background pair is scored exactly); with a cache, pairs whose bounds are in it are not screened
 #' again, and the bounds of all pairs screened so far are written to it after each batch. With blocks of 2^28 entries or more,
 #' garbage is collected after each batch: R holds the blocks, so it would otherwise let the score bounds of many batches pile up
 #' before collecting (~11 GB on 60,000 cells in one sample).
@@ -124,6 +129,7 @@ bound_terms <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, ca
   blocks <- NULL
   if(length(todo) > 0){
     blocks <- screen_blocks(infMat, grid_cells(rownames(infMat), metadata), threads)
+    on.exit(screen_release_cpp(), add=TRUE)
   }
   n.grids <- nrow(pair_grids(ligands[todo], receptors[todo, , drop=FALSE]))
   size <- screen_batch_size(threads, length(cells), tabulate(as.integer(factor(metadata$sample[cells.idx]))), n.grids)
@@ -135,7 +141,7 @@ bound_terms <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, ca
     rows <- todo[rows]
     pairs <- pair_grids(ligands[rows], receptors[rows, , drop=FALSE])
     keys <- paste(pairs$ligand, pairs$receptor, sep="\t")
-    sb <- screen_grids(infMat, metadata, pairs$ligand, pairs$receptor, threads, blocks)
+    sb <- screen_grids(infMat, metadata, pairs$ligand, pairs$receptor, threads, blocks, keep.ids=TRUE)
     sr.lo <- list(sender=sb$sender.lo, receiver=sb$receiver.lo)
     sr.hi <- list(sender=sb$sender.hi, receiver=sb$receiver.hi)
     rm(sb)

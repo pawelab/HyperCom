@@ -9,7 +9,8 @@
 // rounding of the divisions (~1e-16 relative; R/screen.R widens the bounds by 1e-12). Any partition of the keys into ordered buckets
 // gives valid bounds; the buckets only set how tight they are.
 //
-// Buckets: from a sample of the entries (every SAMPLE-th entry of each block, at least SAMPLE_MIN entries in all), the sampled key range
+// Buckets: from a sample of the entries (every SAMPLE-th entry of each block, at least SAMPLE_MIN entries in all, at most about
+// 2^SAMPLE_BITS), the sampled key range
 // is cut into 2^COARSE_BITS coarse cells, and each cell into the power of two of equal-width sub-buckets nearest above its sampled share
 // of NB_TARGET buckets; at most NB_CAP buckets, so their ids fit uint16, and keys outside the sampled range go to two catch-alls.
 // Locating a key reads one 8-byte coarse entry. Two passes per grid: the first counts the entries of each bucket and keeps each
@@ -17,7 +18,9 @@
 // grid per team at a time; the members of a team share its ids and split its columns, with per-member counts and row sums merged
 // (integers: the bounds do not depend on the threads or teams). Teams are as small as the ids of all teams at once fit id_budget
 // bytes: one thread each for small grids, all threads in one team for big ones. Memory: 2 B per within-sample entry per team, beside
-// the 8 B of the blocks, and 24 B per cell per thread for the row sums. A thread that cannot start ends the run with an error (the
+// the 8 B of the blocks, and 24 B per cell per thread for the row sums. The ids can be kept from one call to the next (keep_ids):
+// made once, never zero-filled (the count pass writes every id before the sum pass reads it), freed by screen_release_cpp; new
+// memory is slow to first touch, on Windows a batch of 60,000 cells screened 8-35% faster with kept ids. A thread that cannot start ends the run with an error (the
 // barriers let the others go). Worker threads take the calling thread's SSE control word, as in score_grids.cpp. Do not compile
 // with -ffast-math.
 
@@ -46,7 +49,8 @@ namespace {
 const size_t NB_TARGET = 32768;         // buckets aimed at (about 2x after rounding to powers of two, at most NB_CAP)
 const int COARSE_BITS = 12;             // coarse cells of the sampled key range
 const size_t SAMPLE = 61;               // bucket bounds from every 61st entry of a block
-const size_t SAMPLE_MIN = (size_t) 1 << 16;  // or more often, so that a grid gives at least this many
+const size_t SAMPLE_MIN = (size_t) 1 << 16;  // or more often, so that a grid gives at least this many,
+const int SAMPLE_BITS = 20;             // or less often, every (entries >> 20)-th (odd), when that is sparser: big grids sample faster
 const size_t CHUNK = 256;               // rows of Q made at once
 const size_t COLS = 8;                  // columns per unit of work
 const unsigned SPIN = 100;              // busy-wait rounds before a waiting thread yields
@@ -55,6 +59,10 @@ const size_t NB_CAP = 65533;            // buckets 1..nb and the catch-alls 0, n
 const uint16_t SKIP = 0xFFFF;           // id of a skipped entry
 
 typedef double v2d __attribute__((vector_size(16)));  // two doubles, one SSE2 instruction
+
+// Bucket ids kept across calls: one buffer per team, grown when a call needs more, freed by screen_release_cpp
+std::vector<std::unique_ptr<uint16_t[]>> kept_ids;
+std::vector<size_t> kept_size;
 
 unsigned get_mxcsr(){
 #ifdef HYPERCOM_X86
@@ -76,6 +84,16 @@ inline uint64_t sortable_key(double v){
   uint64_t u;
   std::memcpy(&u, &v, sizeof u);
   return (u >> 63) ? ~u : (u | ((uint64_t) 1 << 63));
+}
+
+// sortable_key on the bits u of a value, the sign flip as a mask: ~u if negative, else u | sign bit
+inline uint64_t flip_key(uint64_t u){
+  return u ^ ((uint64_t) ((int64_t) u >> 63) | ((uint64_t) 1 << 63));
+}
+
+// The value with bits u is 0 or NaN: shifted left by one, 0 wraps to the top and NaN lies above infinity's 0xFFE0...0
+inline bool zero_or_nan(uint64_t u){
+  return (u << 1) - 1 >= (uint64_t) 0xFFE0000000000000ULL;
 }
 
 inline int bit_width(uint64_t x){
@@ -103,6 +121,7 @@ inline void make_q(const double *a, double bj, const double *f, size_t m, double
 // The blocks: cells of each, offsets, and units of work (COLS columns of one block)
 struct Layout {
   std::vector<std::vector<int>> members;
+  std::vector<uint64_t> size_of;        // the block size of each cell
   std::vector<size_t> off;
   size_t total = 0;
   struct Unit {
@@ -114,6 +133,10 @@ struct Layout {
 Layout make_layout(const int *sample, size_t n){
   Layout L;
   L.members = sample_blocks(sample, n);
+  L.size_of.assign(n, 0);
+  for(const auto &m : L.members){
+    for(int k : m) L.size_of[k] = m.size();
+  }
   for(size_t blk = 0; blk < L.members.size(); ++blk){
     const size_t s = L.members[blk].size();
     L.off.push_back(L.total);
@@ -226,12 +249,15 @@ template <class S> void count_unit(const Layout &L, const double *F, const GridD
     for(size_t i0 = 0; i0 < s; i0 += CHUNK){
       const size_t m = std::min(CHUNK, s - i0);
       make_q(a + i0, b[jj], f + i0, m, q);
+      const size_t diag = jj - i0;     // wraps above m when the diagonal is not in these rows
       for(size_t k = 0; k < m; ++k){
-        if(skipped(i0 + k, jj, q[k])){
+        uint64_t v;
+        std::memcpy(&v, q + k, sizeof v);
+        if(zero_or_nan(v) || k == diag){
           id[i0 + k] = SKIP;
           continue;
         }
-        const size_t d = bk.locate(sortable_key(q[k]));
+        const size_t d = bk.locate(flip_key(v));
         ++cnt[d];
         id[i0 + k] = (uint16_t) d;
       }
@@ -239,29 +265,33 @@ template <class S> void count_unit(const Layout &L, const double *F, const GridD
   }
 }
 
-// Second pass over a unit: the bounds of each entry's rank added to its row (rl, rh, rn, by cell) and column (written as receiver
-// bounds, out by cell, lo then hi)
+// Second pass over a unit: the bounds of each entry's rank added to its row (rl, rh by cell) and column (written as receiver bounds, out
+// by cell, lo then hi). Two integer adds per entry and side: rh gets S_{d+1}, the - 1 per entry is taken off once per counted entry
+// at the end, and rn counts the skipped entries (rare: the diagonal), so the counts come from the block size
 template <class S> void sum_unit(const Layout &L, const Layout::Unit &u, const S *st, const uint16_t *ids, double denom, uint64_t *rl,
                                  uint64_t *rh, uint64_t *rn, double *rlo, double *rhi){
   const std::vector<int> &mem = L.members[u.blk];
   const size_t s = mem.size(), off = L.off[u.blk];
   for(size_t jj = u.j0; jj < u.j1; ++jj){
     const uint16_t *id = ids + off + jj * s;
-    uint64_t cl = 0, ch = 0, cn = 0;
+    uint64_t cl = 0, ch = 0, skip = 0;
     for(size_t ii = 0; ii < s; ++ii){
       const uint16_t d = id[ii];
-      if(d == SKIP) continue;
-      const uint64_t l = st[d], h = (uint64_t) st[d + 1] - 1;
       const int i = mem[ii];
+      if(d == SKIP){
+        ++rn[i];
+        ++skip;
+        continue;
+      }
+      const uint64_t l = st[d], h = st[d + 1];
       rl[i] += l;
       rh[i] += h;
-      ++rn[i];
       cl += l;
       ch += h;
-      ++cn;
     }
+    const uint64_t cn = s - skip;
     rlo[mem[jj]] = (double) cl / ((double) cn * denom);
-    rhi[mem[jj]] = (double) ch / ((double) cn * denom);
+    rhi[mem[jj]] = (double) (ch - cn) / ((double) cn * denom);
   }
 }
 
@@ -302,7 +332,8 @@ struct Output {
 // each member's bucket table has room for every coarse cell), so no team thread allocates.
 template <class S> struct Team {
   size_t size = 0;
-  std::vector<uint16_t> ids;
+  std::vector<uint16_t> own;            // the ids when not kept
+  uint16_t *ids = nullptr;
   std::vector<std::vector<S>> cnt;
   std::vector<S> start;
   std::vector<std::vector<uint64_t>> rl, rh, rn, hist, h;
@@ -315,11 +346,27 @@ template <class S> struct Team {
   size_t g = 0;
   double denom = 0;
 
-  Team(const Layout &L, const Input &in, size_t members) : size(members), ids(L.total), cnt(members, std::vector<S>(NB_CAP + 2, 0)),
+  Team(const Layout &L, const Input &in, size_t members, size_t t, bool keep) : size(members), cnt(members, std::vector<S>(NB_CAP + 2, 0)),
     start(NB_CAP + 3, 0), rl(members, std::vector<uint64_t>(in.n, 0)), rh(members, std::vector<uint64_t>(in.n, 0)),
     rn(members, std::vector<uint64_t>(in.n, 0)), hist(members, std::vector<uint64_t>((size_t) 1 << COARSE_BITS, 0)),
     h(members, std::vector<uint64_t>((size_t) 1 << COARSE_BITS, 0)), bk(members), lo(members), hi(members), b(in.n) {
     for(auto &x : bk) x.cell.reserve((size_t) 1 << COARSE_BITS);
+    if(keep){
+      if(kept_ids.size() <= t){
+        kept_ids.resize(t + 1);
+        kept_size.resize(t + 1, 0);
+      }
+      if(kept_size[t] < L.total){
+        kept_ids[t].reset();
+        kept_size[t] = 0;
+        kept_ids[t].reset(new uint16_t[L.total]);
+        kept_size[t] = L.total;
+      }
+      ids = kept_ids[t].get();
+    } else {
+      own.resize(L.total);
+      ids = own.data();
+    }
     for(size_t k = 0; k < in.n; ++k) b[k] = in.B[(size_t) in.rec[0] + k * in.nB];
     gather(L, in.A + (size_t) in.lig[0] * in.nA, b.data(), gd);
     for(auto &u : unit) u.store(0);
@@ -367,7 +414,7 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
 
     S *cm = tm.cnt[me].data();
     for(size_t x = tm.unit[2].fetch_add(1); x < U; x = tm.unit[2].fetch_add(1)){
-      count_unit(L, in.F, tm.gd, bk, L.units[x], cm, tm.ids.data());
+      count_unit(L, in.F, tm.gd, bk, L.units[x], cm, tm.ids);
     }
     if(!team_wait(tm.bar, k, failed)) return;
     const size_t nd = bk.nb + 2;
@@ -387,7 +434,7 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
     }
     if(!team_wait(tm.bar, k, failed)) return;
     for(size_t x = tm.unit[3].fetch_add(1); x < U; x = tm.unit[3].fetch_add(1)){
-      sum_unit(L, L.units[x], tm.start.data(), tm.ids.data(), tm.denom, tm.rl[me].data(), tm.rh[me].data(), tm.rn[me].data(),
+      sum_unit(L, L.units[x], tm.start.data(), tm.ids, tm.denom, tm.rl[me].data(), tm.rh[me].data(), tm.rn[me].data(),
                out.rlo + g * n, out.rhi + g * n);
     }
     if(!team_wait(tm.bar, k, failed)) return;
@@ -399,6 +446,8 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
         c += tm.rn[t][i];
         tm.rl[t][i] = tm.rh[t][i] = tm.rn[t][i] = 0;
       }
+      c = L.size_of[i] - c;
+      hh -= c;
       out.slo[g * n + i] = (double) l / ((double) c * tm.denom);
       out.shi[g * n + i] = (double) hh / ((double) c * tm.denom);
     }
@@ -407,10 +456,10 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
 }
 
 // Teams of about k threads (sizes differing by at most one), at most one per grid, all screening grids from one queue
-template <class S> void screen_teams(const Layout &L, const Input &in, const Output &out, size_t nt, size_t k, size_t step){
+template <class S> void screen_teams(const Layout &L, const Input &in, const Output &out, size_t nt, size_t k, size_t step, bool keep){
   const size_t nteams = std::max<size_t>(1, std::min(nt / k, in.G));
   std::vector<std::unique_ptr<Team<S>>> teams;
-  for(size_t t = 0; t < nteams; ++t) teams.emplace_back(new Team<S>(L, in, nt / nteams + (t < nt % nteams)));
+  for(size_t t = 0; t < nteams; ++t) teams.emplace_back(new Team<S>(L, in, nt / nteams + (t < nt % nteams), t, keep));
   std::atomic<size_t> next(0);
   std::atomic<bool> failed(false);
   const unsigned mxcsr = get_mxcsr();
@@ -465,7 +514,7 @@ Rcpp::NumericVector dense_blocks_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector 
 
 // [[Rcpp::export]]
 Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample,
-                             Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, double id_budget){
+                             Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, double id_budget, bool keep_ids=false){
   const size_t n = A.nrow(), G = lig.size();
   if((size_t) B.ncol() != n || (size_t) sample.size() != n || rec.size() != lig.size()){
     Rcpp::stop("grid screening: inputs of different sizes");
@@ -489,7 +538,7 @@ Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, 
   }
   const Input in = {REAL(blocks), REAL(A), REAL(B), INTEGER(lig), INTEGER(rec), (size_t) A.nrow(), (size_t) B.nrow(), n, G};
   const Output out = {REAL(slo), REAL(shi), REAL(rlo), REAL(rhi)};
-  const size_t step = std::max<size_t>(1, std::min<size_t>(SAMPLE, L.total / SAMPLE_MIN));
+  const size_t step = std::max(std::max<size_t>(1, std::min<size_t>(SAMPLE, L.total / SAMPLE_MIN)), (L.total >> SAMPLE_BITS) | 1);
   const int nt = std::max(1, threads);
 #ifdef HYPERCOM_SCREEN_WIDE
   const bool narrow = false;            // test builds: the uint64 counts that grids of 2^32 entries or more use
@@ -499,8 +548,8 @@ Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, 
   const double ids = (double) L.total * sizeof(uint16_t);
   const size_t k = id_budget > 0 ? (size_t) std::min<double>(nt, std::max(1.0, std::ceil(nt * ids / id_budget))) : (size_t) nt;
   try {
-    if(narrow) screen_teams<uint32_t>(L, in, out, nt, k, step);
-    else screen_teams<uint64_t>(L, in, out, nt, k, step);
+    if(narrow) screen_teams<uint32_t>(L, in, out, nt, k, step, keep_ids);
+    else screen_teams<uint64_t>(L, in, out, nt, k, step, keep_ids);
   } catch(const std::bad_alloc &){
     Rcpp::stop("grid screening: not enough memory for the bucket ids (" + std::to_string((size_t) ids >> 20) + " MB per team of threads)");
   } catch(const std::exception &){
@@ -509,4 +558,11 @@ Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, 
 
   return Rcpp::List::create(Rcpp::Named("sender_lo") = slo, Rcpp::Named("sender_hi") = shi, Rcpp::Named("receiver_lo") = rlo,
                             Rcpp::Named("receiver_hi") = rhi);
+}
+
+// Free the bucket ids that screen_blocks_cpp kept (keep_ids)
+// [[Rcpp::export]]
+void screen_release_cpp(){
+  kept_ids.clear();
+  kept_size.clear();
 }
