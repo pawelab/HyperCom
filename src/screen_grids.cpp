@@ -265,11 +265,13 @@ template <class S> void count_unit(const Layout &L, const double *F, const GridD
   }
 }
 
-// Second pass over a unit: the bounds of each entry's rank added to its row (rl, rh by cell) and column (written as receiver bounds, out
-// by cell, lo then hi). Two integer adds per entry and side: rh gets S_{d+1}, the - 1 per entry is taken off once per counted entry
-// at the end, and rn counts the skipped entries (rare: the diagonal), so the counts come from the block size
-template <class S> void sum_unit(const Layout &L, const Layout::Unit &u, const S *st, const uint16_t *ids, double denom, uint64_t *rl,
-                                 uint64_t *rh, uint64_t *rn, double *rlo, double *rhi){
+// Second pass over a unit: the bounds of each entry's rank added to its row and column (written as receiver bounds, out by cell, lo
+// then hi). Two integer adds per entry and side: the high sum gets S_{d+1}, the - 1 per entry is taken off once per counted entry at
+// the end, and a third sum counts the skipped entries (rare: the diagonal), so the counts come from the block size. A row's three
+// sums sit together, rows[3 i .. 3 i + 2] (low, high, skipped): one cache line per entry, where three arrays of n each start on a
+// page boundary and alias
+template <class S> void sum_unit(const Layout &L, const Layout::Unit &u, const S *st, const uint16_t *ids, double denom, uint64_t *rows,
+                                 double *rlo, double *rhi){
   const std::vector<int> &mem = L.members[u.blk];
   const size_t s = mem.size(), off = L.off[u.blk];
   for(size_t jj = u.j0; jj < u.j1; ++jj){
@@ -277,15 +279,15 @@ template <class S> void sum_unit(const Layout &L, const Layout::Unit &u, const S
     uint64_t cl = 0, ch = 0, skip = 0;
     for(size_t ii = 0; ii < s; ++ii){
       const uint16_t d = id[ii];
-      const int i = mem[ii];
+      uint64_t *r = rows + 3 * (size_t) mem[ii];
       if(d == SKIP){
-        ++rn[i];
+        ++r[2];
         ++skip;
         continue;
       }
       const uint64_t l = st[d], h = st[d + 1];
-      rl[i] += l;
-      rh[i] += h;
+      r[0] += l;
+      r[1] += h;
       cl += l;
       ch += h;
     }
@@ -336,7 +338,7 @@ template <class S> struct Team {
   uint16_t *ids = nullptr;
   std::vector<std::vector<S>> cnt;
   std::vector<S> start;
-  std::vector<std::vector<uint64_t>> rl, rh, rn, hist, h;
+  std::vector<std::vector<uint64_t>> rows, hist, h;     // rows: each member's row sums, 3 per cell (sum_unit)
   std::vector<Buckets> bk;
   std::vector<uint64_t> lo, hi;
   std::vector<double> b;
@@ -347,8 +349,8 @@ template <class S> struct Team {
   double denom = 0;
 
   Team(const Layout &L, const Input &in, size_t members, size_t t, bool keep) : size(members), cnt(members, std::vector<S>(NB_CAP + 2, 0)),
-    start(NB_CAP + 3, 0), rl(members, std::vector<uint64_t>(in.n, 0)), rh(members, std::vector<uint64_t>(in.n, 0)),
-    rn(members, std::vector<uint64_t>(in.n, 0)), hist(members, std::vector<uint64_t>((size_t) 1 << COARSE_BITS, 0)),
+    start(NB_CAP + 3, 0), rows(members, std::vector<uint64_t>(3 * in.n, 0)),
+    hist(members, std::vector<uint64_t>((size_t) 1 << COARSE_BITS, 0)),
     h(members, std::vector<uint64_t>((size_t) 1 << COARSE_BITS, 0)), bk(members), lo(members), hi(members), b(in.n) {
     for(auto &x : bk) x.cell.reserve((size_t) 1 << COARSE_BITS);
     if(keep){
@@ -434,17 +436,17 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
     }
     if(!team_wait(tm.bar, k, failed)) return;
     for(size_t x = tm.unit[3].fetch_add(1); x < U; x = tm.unit[3].fetch_add(1)){
-      sum_unit(L, L.units[x], tm.start.data(), tm.ids, tm.denom, tm.rl[me].data(), tm.rh[me].data(), tm.rn[me].data(),
-               out.rlo + g * n, out.rhi + g * n);
+      sum_unit(L, L.units[x], tm.start.data(), tm.ids, tm.denom, tm.rows[me].data(), out.rlo + g * n, out.rhi + g * n);
     }
     if(!team_wait(tm.bar, k, failed)) return;
     for(size_t i = n * me / k; i < n * (me + 1) / k; ++i){
       uint64_t l = 0, hh = 0, c = 0;
       for(size_t t = 0; t < k; ++t){
-        l += tm.rl[t][i];
-        hh += tm.rh[t][i];
-        c += tm.rn[t][i];
-        tm.rl[t][i] = tm.rh[t][i] = tm.rn[t][i] = 0;
+        uint64_t *r = tm.rows[t].data() + 3 * i;
+        l += r[0];
+        hh += r[1];
+        c += r[2];
+        r[0] = r[1] = r[2] = 0;
       }
       c = L.size_of[i] - c;
       hh -= c;

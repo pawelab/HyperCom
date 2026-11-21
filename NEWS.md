@@ -1,3 +1,10 @@
+# HyperCom 0.2.2
+
+Faster background screening on big samples (13% less time per screening batch on one sample of 30,000 cells), same results.
+
+* Screening keeps each cell's two rank sums and skipped count side by side instead of in three arrays, so each entry touches one cache
+  line. Priorities, p-values and order are unchanged. A cache made by an earlier version is not reused (the version changed).
+
 # HyperCom 0.2.1
 
 Faster scoring and screening (whole `prioritize_lr` with p-values 1.11-1.29x faster on 3,000-20,000 cells, 1.5x on one sample of
