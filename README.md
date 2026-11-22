@@ -1,5 +1,7 @@
 # HyperCom
 
+[![r-universe](https://pawelab.r-universe.dev/badges/HyperCom)](https://pawelab.r-universe.dev/HyperCom)
+
 **See which single cells send and receive each ligand-receptor signal, with no clustering.**
 
 HyperCom gives every cell a sender and receiver score for each ligand-receptor pair, then ranks the pairs that drive communication
@@ -13,8 +15,7 @@ Paper: [HyperCom: a hypergraph-based method to infer cell-resolved cell-cell com
 ## Install
 
 ```r
-install.packages("pak")
-pak::pak("pawelab/HyperCom")
+install.packages("HyperCom", repos = c("https://pawelab.r-universe.dev", "https://cloud.r-project.org"))
 ```
 
 Check that it works (takes a few seconds):
@@ -24,7 +25,18 @@ library(HyperCom)
 example(HyperCom)
 ```
 
-HyperCom compiles C++ when it installs, so it needs R 4.1 or newer and build tools. Set them up once:
+| Your setup | What happens |
+|---|---|
+| Windows or macOS, current or previous R release (4.6 or 4.5 as of November 2026) | Installs a ready-built binary in seconds. Nothing else needed. |
+| **Older R (4.1 to 4.4), or Linux** | **Builds from source: set up build tools first (below).** |
+
+Not sure which R you have? Run `R.version.string`.
+
+### Older R or Linux: set up build tools first
+
+HyperCom compiles C++ when it installs from source. Set up build tools once, then run the same `install.packages()` line above.
+On older R, some dependencies also build from source, so the first install can take 10 minutes or more. Installing straight from
+GitHub (`pak::pak("pawelab/HyperCom")`) also builds from source.
 
 | System | Build tools |
 |---|---|
