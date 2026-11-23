@@ -5,6 +5,7 @@
 // sets Stop::failed, which the workers check at their barriers and between work units, and return. After the join the calling thread
 // raises the first error as an R error, or the interrupt as R's own interrupt (Rcpp's export wrapper signals it again), so nothing
 // a worker does can end the R session.
+// Workers run at a lower scheduling priority than other programs (priority.cpp), so a run on all cores leaves the computer responsive.
 #ifndef HYPERCOM_THREADS_H
 #define HYPERCOM_THREADS_H
 
@@ -23,6 +24,9 @@
 namespace hc {
 
 const int POLL_MS = 100;                // how often the waiting thread asks R for an interrupt
+
+// Lowers the calling worker thread's scheduling priority, so other programs stay responsive (priority.cpp)
+void lower_thread_priority();
 
 // Whether the user has interrupted R; main thread only. R_CheckUserInterrupt longjmps on an interrupt, so Rcpp runs it inside
 // R_ToplevelExec, which turns the jump into an exception here
@@ -136,6 +140,7 @@ template <class Fn> void run_threads(size_t n, Stop &stop, Fn fn){
   size_t done = 0;
   auto body = [&](size_t k){
     try {
+      lower_thread_priority();
       fn(k);
     } catch(...){
       stop.caught();

@@ -15,7 +15,8 @@ Bigger samples in less memory, faster p-values and simpler arguments.
 
 * **All cores by default.** `parallel` is gone from every function, and every function now uses one thread per physical core by
   default (`threads=NULL`); before, the default was one thread. Give `threads=1` to run on one thread, or another number. Results
-  do not depend on the number of threads.
+  do not depend on the number of threads. The threads run at a lower priority than other programs, so the computer stays
+  responsive; cluster jobs and containers use only their allocated cores, and `options(mc.cores=)` caps the default.
 * **`cache` is now `resume`**, in `HyperCom()`, `prioritize_lr()` and the wrappers.
 * **R 4.2 or later** (64-bit) and Matrix 1.5 or later are needed.
 * **Esc / Ctrl-C now stops a running step** within about a second; a run stopped while pairs are scored continues from its cache

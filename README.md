@@ -111,7 +111,8 @@ scores <- score_hypercom(res$infMat, res$metadata, ligand="TGFB1", receptors=c("
   p < 0.001. Its `p.adj` is then 0 too and is also only a bound.
 - **Output files:** every result is also saved to `outdir` (default `HyperCom/` in the working directory; `outdir=NULL` writes none).
   Running again with the same `outdir` overwrites its files.
-- **Threads:** HyperCom uses one thread per physical core; `threads=4` uses 4.
+- **Threads:** HyperCom uses one thread per physical core, at a lower priority than your other programs, so the computer stays
+  responsive; `threads=4` uses 4, `threads=1` one. On a cluster it uses only the job's cores.
 - **Run stopped?** Run the same call again. It continues where it stopped.
 
 ## Run time and memory

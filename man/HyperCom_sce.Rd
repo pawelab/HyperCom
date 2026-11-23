@@ -55,7 +55,9 @@ the real pairs, in the same or less time: priorities typically within ~1e-9 of e
 measured on the full bundled run; more with a very small lrdb, e.g. 3e-5 with 15 pairs); p-values, p.adj and order exact. TRUE
 gives exact values. Without significance every pair is scored exactly}
     \item{\code{threads}}{An integer number of threads, NULL (the default) for one per physical core, or 1 to run on one thread; a number above
-the cores available to R warns and uses them all. Results do not depend on it}
+the cores available to R warns and uses them all. The threads run at a lower priority than other programs, so the computer stays
+responsive while HyperCom uses all cores. A cluster job or container gets only its allocated cores, and \code{options(mc.cores=4)} (or
+the environment variable MC_CORES) caps the default. Results do not depend on it}
     \item{\code{memory.gb}}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
 of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It decides between exact scoring and
 memory mode (see the Memory section of \code{prioritize_lr}). On a cluster give the job's memory request, as the computer's memory may
