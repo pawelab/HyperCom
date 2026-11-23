@@ -1,1 +1,1 @@
-utils::globalVariables(c("cell", "hypercom", "i", "node", "present", "receiver", "sender"))
+utils::globalVariables(c("b", "cell", "hypercom"))

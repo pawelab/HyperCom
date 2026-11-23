@@ -1,10 +1,10 @@
-# Golden outputs of HyperCom master (b999a01) on the bundled data, for test-full-reference.R (about 23 MB, not in git)
-# Run with R_LIBS=<library holding master> so PSOCK workers load master too (about 8 min on 12 workers):
+# Golden outputs of HyperCom handwritten (b999a01) on the bundled data, for test-full-reference.R (about 23 MB, not in git)
+# Run with R_LIBS=<library holding handwritten> so PSOCK workers load handwritten too (about 8 min on 12 workers):
 #   Rscript tests/testthat/fixtures/make_reference.R <outdir> <workers>
 library(HyperCom)
 
 args <- commandArgs(trailingOnly=TRUE)
-outdir <- if(length(args) > 0) args[1] else "reference/master_b999a01"
+outdir <- if(length(args) > 0) args[1] else "reference/handwritten_b999a01"
 workers <- if(length(args) > 1) as.integer(args[2]) else 20
 
 stopifnot(packageVersion("HyperCom") == "0.0.0.9000")

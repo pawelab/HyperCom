@@ -3,9 +3,18 @@
 \docType{data}
 \name{alexanian2021.counts}
 \alias{alexanian2021.counts}
-\title{Example 1000 subset scRNA-seq Counts}
+\title{Example counts of 1000 mouse heart cells}
+\format{
+A sparse gene x cell matrix (dgCMatrix) of 17083 genes (mouse gene symbols) and 1000 cells (barcodes with the sample as
+suffix, e.g. "AACCGCGTCCAGAGGA-2"), in the order of the rows of \code{alexanian2021.metadata}
+}
 \description{
-Example 1000 subset scRNA-seq Counts
+Log-normalised expression of 1000 cells from mouse hearts after sham surgery or transverse aortic constriction (TAC), a subset of
+Alexanian et al. 2021, for trying HyperCom with \code{cellchat.mm.lrdb}.
+}
+\examples{
+dim(alexanian2021.counts)
+alexanian2021.counts[1:5, 1:3]
 }
 \references{
 \url{https://doi.org/10.1038/s41586-021-03674-1}

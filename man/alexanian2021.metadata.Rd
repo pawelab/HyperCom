@@ -3,9 +3,17 @@
 \docType{data}
 \name{alexanian2021.metadata}
 \alias{alexanian2021.metadata}
-\title{Example 1000 subset scRNA-seq Metadata}
+\title{Example metadata of 1000 mouse heart cells}
+\format{
+A dataframe with row names being the cells of \code{alexanian2021.counts} and columns sample (integer), condition ("SHAM" or
+"TAC"), celltype (10 cell types) and UMAP_1, UMAP_2 (UMAP coordinates)
+}
 \description{
-Example 1000 subset scRNA-seq Metadata
+Cell metadata of \code{alexanian2021.counts}: 500 cells of a sham heart (sample 2) and 500 of a TAC heart (sample 3).
+}
+\examples{
+head(alexanian2021.metadata)
+table(alexanian2021.metadata$sample, alexanian2021.metadata$condition)
 }
 \references{
 \url{https://doi.org/10.1038/s41586-021-03674-1}

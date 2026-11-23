@@ -1,6 +1,6 @@
-# Build tests/testthat/fixtures/master.rds: a small input set and the master branch's output for every step
-# Master (b999a01) is the truth for outputs. Run from the package root with master installed:
-#   R_LIBS=<library holding master> Rscript tests/testthat/fixtures/make_fixtures.R
+# Build tests/testthat/fixtures/handwritten.rds: a small input set and the handwritten branch's output for every step
+# Handwritten (b999a01) is the truth for outputs. Run from the package root with branch handwritten installed:
+#   R_LIBS=<library holding handwritten> Rscript tests/testthat/fixtures/make_fixtures.R
 library(Matrix)
 library(HyperCom)
 
@@ -57,6 +57,6 @@ output$priority.sig <- prioritize_lr(output$lrs, output$adj, output$infMat, outp
 
 about <- list(commit="b999a01", version=as.character(packageVersion("HyperCom")), made=format(Sys.time()), R=R.version.string,
               platform=R.version$platform, collate=Sys.getlocale("LC_COLLATE"))
-saveRDS(list(about=about, input=input, output=output), "tests/testthat/fixtures/master.rds", compress="xz")
+saveRDS(list(about=about, input=input, output=output), "tests/testthat/fixtures/handwritten.rds", compress="xz")
 print(paste0("pairs ", nrow(output$lrs), ", nodes ", nrow(output$infMat), ", cells ", ncol(counts),
              ", NaN priorities ", sum(is.na(output$priority[["1"]]$priority))))

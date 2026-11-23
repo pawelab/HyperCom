@@ -3,9 +3,16 @@
 \docType{data}
 \name{cellchat.hs.lrdb}
 \alias{cellchat.hs.lrdb}
-\title{CellChat H. sapiens Ligand-Receptor Interactions}
+\title{CellChat human ligand-receptor interactions}
+\format{
+A dataframe of 2240 interactions with columns interaction (its name), ligand (a human gene symbol) and r1 to r4 (the
+receptor genes, NA where a receptor complex has fewer subunits)
+}
 \description{
-CellChat H. sapiens Ligand-Receptor Interactions
+The ligand-receptor interactions of the CellChat database for H. sapiens, in the format HyperCom reads as \code{lrdb}.
+}
+\examples{
+head(cellchat.hs.lrdb)
 }
 \references{
 \url{https://doi.org/10.1038/s41467-021-21246-9}
