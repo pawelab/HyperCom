@@ -25,12 +25,24 @@ influence_blocks_cpp <- function(hp, hi, hx, n, rs, delta, Z, r, cell, sample, t
     .Call(`_HyperCom_influence_blocks_cpp`, hp, hi, hx, n, rs, delta, Z, r, cell, sample, threads)
 }
 
+influence_lambda_cpp <- function(hp, hi, hx, n, rs, delta, Z, r, cell, sample, p, threads) {
+    .Call(`_HyperCom_influence_lambda_cpp`, hp, hi, hx, n, rs, delta, Z, r, cell, sample, p, threads)
+}
+
+physical_memory_cpp <- function() {
+    .Call(`_HyperCom_physical_memory_cpp`)
+}
+
 score_grids_cpp <- function(F, cell, sample, lig, rec, threads) {
     .Call(`_HyperCom_score_grids_cpp`, F, cell, sample, lig, rec, threads)
 }
 
-score_blocks_cpp <- function(blocks, A, B, sample, lig, rec, threads) {
-    .Call(`_HyperCom_score_blocks_cpp`, blocks, A, B, sample, lig, rec, threads)
+score_blocks_cpp <- function(blocks, A, B, sample, lig, rec, threads, passes = 1L) {
+    .Call(`_HyperCom_score_blocks_cpp`, blocks, A, B, sample, lig, rec, threads, passes)
+}
+
+score_lambda_cpp <- function(bytes, base, toff, D, A, B, sample, lig, rec, threads, p, passes) {
+    .Call(`_HyperCom_score_lambda_cpp`, bytes, base, toff, D, A, B, sample, lig, rec, threads, p, passes)
 }
 
 dense_blocks_cpp <- function(F, cell, sample) {
@@ -39,6 +51,10 @@ dense_blocks_cpp <- function(F, cell, sample) {
 
 screen_blocks_cpp <- function(blocks, A, B, sample, lig, rec, threads, id_budget, keep_ids = FALSE) {
     .Call(`_HyperCom_screen_blocks_cpp`, blocks, A, B, sample, lig, rec, threads, id_budget, keep_ids)
+}
+
+screen_lambda_cpp <- function(bytes, base, toff, D, A, B, sample, lig, rec, threads, id_budget, keep_ids, p) {
+    .Call(`_HyperCom_screen_lambda_cpp`, bytes, base, toff, D, A, B, sample, lig, rec, threads, id_budget, keep_ids, p)
 }
 
 screen_release_cpp <- function() {

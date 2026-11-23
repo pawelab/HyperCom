@@ -121,7 +121,9 @@ samples reduces both. One sample, with p-values, 8 cores:
 
 Time also grows with the number of ligand-receptor pairs expressed (about 700 here). P-values took about 40% of the time at
 every size from 3,000 cells up, so runs without them take about 60% as long; with fewer pairs, p-values are a larger share.
-60,000 cells is about the largest sample that fits in 64 GiB.
+Samples whose exact kernels do not fit are scored in memory mode (argument `memory`; priorities within ~1e-11 of exact): about
+100,000 cells in one sample fit in 64 GB. With p-values, real pairs are screened too (argument `exact.priority`): priorities within
+~1e-8 of exact, the same p-values and order, in the same or less time.
 
 <sub>Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian cancer slide: CellChat human database (about 700
 pairs expressed), `significance=TRUE`, `threads=8` on an Intel Xeon Gold 6426Y node with a 64 GiB job; median of 5 runs (3 at

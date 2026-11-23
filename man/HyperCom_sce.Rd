@@ -19,7 +19,9 @@ HyperCom_sce(
   seed = NULL,
   verbose = TRUE,
   infmat.method = "woodbury",
-  cache = TRUE
+  cache = TRUE,
+  memory = NULL,
+  exact.priority = FALSE
 )
 }
 \arguments{
@@ -61,6 +63,16 @@ each weight}
 
 \item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
 stopped when run again; ignored when outdir is NULL}
+
+\item{memory}{A number of gigabytes the run may use, NULL for 90\% of the computer's memory, or Inf for no limit. When the exact
+grid kernels (about 17.6 bytes per within-sample cell pair, the sum of squared sample sizes) do not fit, a "woodbury" influence matrix
+is scored in memory mode (log-domain tiles, about 5.5 bytes per pair, priorities within ~1e-11 of exact); if that does not
+fit either, the run stops with the estimate. On a cluster give the memory of the job: the scheduler may not stop a job that uses more}
+
+\item{exact.priority}{A boolean of whether to score every real pair exactly. FALSE (with significance) screens the real pairs too and
+scores exactly only those whose p-value or rank, or whose balance term, the bounds leave undecided: the other priorities are the
+midpoints of their bounds (measured within ~1e-8 of exact, median ~1e-9), and p-values, p.adj and order are those of exact scoring, in the same
+or less time. Without significance every pair is scored exactly}
 }
 \value{
 Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata

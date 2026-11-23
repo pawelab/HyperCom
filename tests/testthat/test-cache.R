@@ -96,7 +96,8 @@ test_that("a stopped run continues from the cache, scores only the rest and give
   full <- count_grids(run_priority(significance=TRUE, seed=1))
   msgs <- character(0)
   resumed <- count_grids(withCallingHandlers(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, fx$output$metadata,
-                                                           significance=TRUE, seed=1, threads=test_threads(2), outdir=outdir),
+                                                           significance=TRUE, seed=1, threads=test_threads(2), outdir=outdir,
+                                                           exact.priority=TRUE),
                                              message=function(m){
                                                msgs <<- c(msgs, conditionMessage(m))
                                                invokeRestart("muffleMessage")
@@ -123,7 +124,7 @@ test_that("a run stopped while screening background pairs continues from their c
   msgs <- character(0)
   resumed <- count_screened(withCallingHandlers(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, fx$output$metadata,
                                                               weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(2),
-                                                              outdir=outdir),
+                                                              outdir=outdir, exact.priority=TRUE),
                                                 message=function(m){
                                                   msgs <<- c(msgs, conditionMessage(m))
                                                   invokeRestart("muffleMessage")

@@ -61,17 +61,20 @@ quietly <- function(expr){
 #'
 #' `run_priority` returns the priorities of prioritize_lr, by default on handwritten's inputs in the fixture, without writing them
 #'
-#' This function takes any input that replaces the fixture's and further arguments of prioritize_lr, and runs it quietly.
+#' This function takes any input that replaces the fixture's and further arguments of prioritize_lr, and runs it quietly. Every real
+#' pair is scored exactly unless exact.priority is FALSE (prioritize_lr's default screens them), so priorities compare with handwritten's.
 #' @param lrs A dataframe of ligand-receptor interactions
 #' @param adj An adjacency
 #' @param infMat An influence matrix
 #' @param metadata A dataframe containing columns named cell, sample and group
 #' @param ... Further arguments of prioritize_lr
 #' @param outdir A string naming the output directory, NULL to write nothing
+#' @param exact.priority A boolean of whether to score every real pair exactly
 #' @returns A list of dataframes named by weight
 #' @noRd
-run_priority <- function(lrs=fx$output$lrs, adj=fx$output$adj, infMat=fx$output$infMat, metadata=fx$output$metadata, ..., outdir=NULL){
-  return(quietly(prioritize_lr(lrs, adj, infMat, metadata, ..., outdir=outdir)))
+run_priority <- function(lrs=fx$output$lrs, adj=fx$output$adj, infMat=fx$output$infMat, metadata=fx$output$metadata, ..., outdir=NULL,
+                         exact.priority=TRUE){
+  return(quietly(prioritize_lr(lrs, adj, infMat, metadata, ..., outdir=outdir, exact.priority=exact.priority)))
 }
 
 #' Run HyperCom on the fixture
@@ -79,15 +82,17 @@ run_priority <- function(lrs=fx$output$lrs, adj=fx$output$adj, infMat=fx$output$
 #' `run_hypercom` returns the results of HyperCom on the fixture's input, by sample and condition
 #'
 #' This function takes the output directory, any input that replaces the fixture's and further arguments of HyperCom, and runs it
-#' quietly.
+#' quietly, every real pair scored exactly unless exact.priority is FALSE.
 #' @param outdir A string naming the output directory
 #' @param ... Further arguments of HyperCom
 #' @param counts A matrix with row names being genes and column names being cells
 #' @param metadata A dataframe containing cell metadata with row names being cells
+#' @param exact.priority A boolean of whether to score every real pair exactly
 #' @returns The list HyperCom returns
 #' @noRd
-run_hypercom <- function(outdir, ..., counts=fx$input$counts, metadata=fx$input$metadata){
-  return(quietly(HyperCom(fx$input$lrdb, counts, metadata, sample="sample", group="condition", outdir=outdir, ...)))
+run_hypercom <- function(outdir, ..., counts=fx$input$counts, metadata=fx$input$metadata, exact.priority=TRUE){
+  return(quietly(HyperCom(fx$input$lrdb, counts, metadata, sample="sample", group="condition", outdir=outdir, exact.priority=exact.priority,
+                          ...)))
 }
 
 #' Expect a matrix to hold the same values as handwritten's

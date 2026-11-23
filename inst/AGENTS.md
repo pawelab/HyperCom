@@ -46,6 +46,10 @@ Most failed run = bad input.
 ## Size: estimate before run
 
 - Memory about 16 bytes x sum over samples of (cells in sample)^2. More samples, same size: cheap.
+- Not fit? Memory mode by itself (~5.5 bytes per pair, priorities ~1e-11 off exact): ~100k cells one sample in 64 GB. Need
+  `infmat.method="woodbury"` (default). Cluster: pass `memory=<job GB>`. Not fit even so: stop at start with estimate.
+- With p-values: real pairs screened by default (priorities up to ~1e-8 off, same p-values and order, same or less time). Need exact
+  priority values (compare with old version)? `exact.priority=TRUE`.
 - Split sample to save memory? Change which cells compared, so change results. Ask user first.
 - Measured, one sample, 8 cores (Xeon Gold 6426Y), all CellChat human pairs (~700 expressed), with p-values: 1k 6 s 0.5 GiB. 10k 8 min
   2.4 GiB. 30k 1.3 h 15 GiB. 60k 5.9 h 57 GiB (about max one sample for 64 GiB). Time grows with LR pairs too.

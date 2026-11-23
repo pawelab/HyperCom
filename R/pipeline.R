@@ -34,12 +34,15 @@
 #' scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
 #' @export
 HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE,
-                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
+                     outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE,
+                     memory=NULL, exact.priority=FALSE){
   check_lrdb(lrdb)
   check_columns(metadata, sample, group, keep)
   check_weights(weights)
   check_outdir(outdir)
   check_cache(cache)
+  check_memory(memory)
+  check_exact_priority(exact.priority)
   infmat.method <- match_method(infmat.method)
   threads <- get_threads(parallel, threads)
   in.metadata <- colnames(counts) %in% rownames(metadata)
@@ -78,7 +81,8 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
   }
   metadata <- generate_metadata(infMat, metadata, sample, group, keep, outfile=file.path(outdir, "5.metadata.csv"))
   priority <- prioritize_lr(lrs, adj, infMat, metadata, weights=weights, significance=significance, outdir=file.path(outdir, "6.priority"),
-                            threads=threads, seed=seed, verbose=verbose, cache=cache)
+                            threads=threads, seed=seed, verbose=verbose, cache=cache, memory=memory,
+                            exact.priority=exact.priority)
   if(verbose){
     message("Done: results in ", outdir)
   }
@@ -149,12 +153,14 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #' head(res$priority[["1"]])
 #' @export
 HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                            parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
+                            parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE,
+                            memory=NULL, exact.priority=FALSE){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
 
   res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
-                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)
+                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache,
+                  memory=memory, exact.priority=exact.priority)
 
   return(invisible(res))
 }
@@ -222,13 +228,15 @@ get_sce_assay <- function(sce, lrdb, assay="counts"){
 #' head(res$priority[["1"]])
 #' @export
 HyperCom_sce <- function(sce, lrdb, sample, assay="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                         parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
+                         parallel=FALSE, outdir="HyperCom", threads=NULL, seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE,
+                         memory=NULL, exact.priority=FALSE){
   check_lrdb(lrdb)
   counts <- get_sce_assay(sce, lrdb, assay)
   metadata <- as.data.frame(SummarizedExperiment::colData(sce), optional=TRUE)
 
   res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
-                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)
+                  parallel=parallel, outdir=outdir, threads=threads, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache,
+                  memory=memory, exact.priority=exact.priority)
 
   return(invisible(res))
 }

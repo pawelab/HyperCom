@@ -1,3 +1,21 @@
+# HyperCom 0.3.0
+
+Bigger samples in less memory and time: 100,000 cells in one sample with p-values took 8.4 h and 52 GB (16 threads). Runs with
+p-values are as fast or faster at every size; their priorities differ from 0.2.2's by at most about 1e-8, never in order (`exact.priority=TRUE` gives 0.2.2's).
+Runs without p-values that fit in memory are unchanged.
+
+* **Memory mode.** When the exact grid kernels (about 17.6 bytes per within-sample cell pair) do not fit, `prioritize_lr()` scores from
+  log-domain integer keys of the influence matrix, stored as tiles of each block's upper triangle and ranked in up to 3 passes (about
+  5.5 bytes per pair). Priorities are within ~1e-11 of exact. New argument `memory`: the gigabytes a run may use (default 90% of the
+  computer's memory; give a cluster job's request). Needs the default `"woodbury"` influence matrix. A run that cannot fit stops at
+  once with the estimate, and verbose runs report it.
+* **Screened real pairs.** With `significance=TRUE`, real pairs are screened like background pairs, and only those whose p-value, rank
+  or balance term the bounds leave undecided (5-10%) are scored exactly; the others' priorities are the midpoints of their bounds
+  (within ~1e-8 of exact as measured, median ~1e-9). P-values, p.adj and order are those of exact scoring. New argument `exact.priority` (default
+  `FALSE`): `TRUE` scores every pair exactly.
+* Both arguments are also in `HyperCom()`, `HyperCom_seurat()` and `HyperCom_sce()`. A cache made by an earlier version, or by the
+  other kernels, is not reused.
+
 # HyperCom 0.2.2
 
 Faster background screening on big samples (13% less time per screening batch on one sample of 30,000 cells), same results.

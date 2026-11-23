@@ -125,9 +125,10 @@ pair_grids <- function(ligands, receptors){
 #' @param verbose A boolean of whether to report the pairs scored, about every 5 s, with an estimate of the time left (pairs are
 #' scored in about 20 batches or more when grids are bigger than the kernel's 24 MB cache budget; see batch_size)
 #' @param cached An environment from open_cache, or NULL for no cache
+#' @param kernel An environment from choose_kernel (exact or memory mode, with the run's tiles), or NULL for the exact kernels
 #' @returns A matrix with one row per pair and columns frac, pct.min, max, balance and purity
 #' @noRd
-calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, cached=NULL){
+calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FALSE, cached=NULL, kernel=NULL){
   num.groups <- length(unique(metadata$group)) - 1
   gini.max <- 1-(1/num.groups)
   cells.idx <- metadata$sample != "gene"
@@ -157,7 +158,7 @@ calculate_priority <- function(lrs, adj, infMat, metadata, threads=1, verbose=FA
 
   blocks <- NULL
   if(inherits(infMat, "hypercom_influence") && length(todo) > 0){
-    blocks <- influence_blocks(infMat, grid_cells(rownames(infMat), metadata), threads)
+    blocks <- grid_blocks(infMat, grid_cells(rownames(infMat), metadata), threads, kernel)
   }
 
   n.grids <- nrow(pair_grids(ligands[todo], receptors[todo, , drop=FALSE]))
@@ -390,6 +391,38 @@ check_cache <- function(cache){
   return(invisible(NULL))
 }
 
+#' Check the memory argument
+#'
+#' `check_memory` stops unless memory is NULL or one positive number
+#'
+#' This function takes the memory argument of prioritize_lr and stops unless it is NULL or one positive number of gigabytes (Inf allowed).
+#' @inheritParams prioritize_lr
+#' @returns NULL, invisibly
+#' @noRd
+check_memory <- function(memory){
+  if(!is.null(memory) && !(is.numeric(memory) && length(memory) == 1 && !is.na(memory) && memory > 0)){
+    stop("memory must be NULL or one positive number of gigabytes")
+  }
+
+  return(invisible(NULL))
+}
+
+#' Check the exact.priority argument
+#'
+#' `check_exact_priority` stops unless exact.priority is TRUE or FALSE
+#'
+#' This function takes the exact.priority argument of prioritize_lr and stops unless it is one TRUE or one FALSE.
+#' @inheritParams prioritize_lr
+#' @returns NULL, invisibly
+#' @noRd
+check_exact_priority <- function(exact.priority){
+  if(!(isTRUE(exact.priority) || isFALSE(exact.priority))){
+    stop("exact.priority must be TRUE or FALSE")
+  }
+
+  return(invisible(NULL))
+}
+
 #' Name the priority file of a weight
 #'
 #' `priority_filename` returns the name of the file prioritize_lr writes the priorities of a weight to
@@ -415,7 +448,8 @@ priority_filename <- function(weights){
 #' high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 #' Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning. Background
 #' pairs are first screened: one pass over their cell grids bounds their priorities without ranking the cells, and only the few whose
-#' bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time.
+#' bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time. Real pairs
+#' are screened too unless exact.priority is TRUE, and data whose grids do not fit in memory are scored in memory mode (memory).
 #' With outdir set and cache=TRUE, the pairs scored so far are kept in `<outdir>/cache` while pairs are scored, and the folder is
 #' removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
 #' continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped on the same
@@ -442,6 +476,14 @@ priority_filename <- function(weights){
 #' the time left, and the top pair of each weight
 #' @param cache A boolean of whether to keep the pairs scored so far in `<outdir>/cache`, so that a stopped run continues where it
 #' stopped when run again; ignored when outdir is NULL
+#' @param memory A number of gigabytes the run may use, NULL for 90% of the computer's memory, or Inf for no limit. When the exact
+#' grid kernels (about 17.6 bytes per within-sample cell pair, the sum of squared sample sizes) do not fit, a "woodbury" influence matrix
+#' is scored in memory mode (log-domain tiles, about 5.5 bytes per pair, priorities within ~1e-11 of exact); if that does not
+#' fit either, the run stops with the estimate. On a cluster give the memory of the job: the scheduler may not stop a job that uses more
+#' @param exact.priority A boolean of whether to score every real pair exactly. FALSE (with significance) screens the real pairs too and
+#' scores exactly only those whose p-value or rank, or whose balance term, the bounds leave undecided: the other priorities are the
+#' midpoints of their bounds (measured within ~1e-8 of exact, median ~1e-9), and p-values, p.adj and order are those of exact scoring, in the same
+#' or less time. Without significance every pair is scored exactly
 #' @returns A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
 #' p.adj when significance is TRUE
 #' @examples
@@ -458,13 +500,16 @@ priority_filename <- function(weights){
 #' head(priority[["1"]])
 #' @export
 prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance=FALSE, parallel=FALSE, outdir="6.priority",
-                          threads=NULL, seed=NULL, verbose=TRUE, cache=TRUE){
+                          threads=NULL, seed=NULL, verbose=TRUE, cache=TRUE, memory=NULL, exact.priority=FALSE){
   check_weights(weights)
   check_outdir(outdir, null.ok=TRUE)
   check_cache(cache)
+  check_memory(memory)
+  check_exact_priority(exact.priority)
+  kernel <- choose_kernel(infMat, metadata, memory, verbose)
   cached <- NULL
   if(cache && !is.null(outdir)){
-    cached <- open_cache(file.path(outdir, "cache"), adj, infMat, metadata)
+    cached <- open_cache(file.path(outdir, "cache"), adj, infMat, metadata, kernel$type)
   }
   if(significance){
     if(is.null(seed) && identical(colnames(cached$background), colnames(lrs))){
@@ -487,9 +532,21 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
     cached$background <- background.lrs
   }
 
-  priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose, cached)
+  screened <- significance && !exact.priority
+  if(screened){
+    sp <- screened_priority(lrs, background.lrs, weights, adj, infMat, metadata, threads, verbose, cached, kernel)
+    bp <- sp$background
+    if(verbose){
+      message("  ", sp$refined.real, " of ", nrow(lrs), " real pairs scored exactly; the priorities of the others are the midpoints of ",
+              "their bounds (p-values and order as exact scoring)")
+    }
+  } else {
+    priority.terms <- calculate_priority(lrs, adj, infMat, metadata, threads, verbose, cached, kernel)
+    if(significance){
+      bp <- background_priority(background.lrs, lrs, priority.terms, weights, adj, infMat, metadata, threads, verbose, cached, kernel)
+    }
+  }
   if(significance){
-    bp <- background_priority(background.lrs, lrs, priority.terms, weights, adj, infMat, metadata, threads, verbose, cached)
     if(bp$no.priority > 0){
       warning(bp$no.priority, " of ", nrow(background.lrs), " background pairs have no priority (NaN) and are left out of the p-values, ",
               "which use the other ", nrow(background.lrs) - bp$no.priority)
@@ -503,7 +560,7 @@ prioritize_lr <- function(lrs, adj, infMat, metadata, weights=c(1), significance
 
   for(i in seq_along(weights)){
     weight <- weights[i]
-    priority <- score_priority(priority.terms, weight)
+    priority <- if(screened) sp$priority[, i] else score_priority(priority.terms, weight)
     current.lrs <- lrs
     current.lrs$priority <- priority
     current.lrs <- dplyr::arrange(current.lrs, dplyr::desc(priority))

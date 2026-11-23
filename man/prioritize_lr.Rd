@@ -16,7 +16,9 @@ prioritize_lr(
   threads = NULL,
   seed = NULL,
   verbose = TRUE,
-  cache = TRUE
+  cache = TRUE,
+  memory = NULL,
+  exact.priority = FALSE
 )
 }
 \arguments{
@@ -50,6 +52,16 @@ the time left, and the top pair of each weight}
 
 \item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
 stopped when run again; ignored when outdir is NULL}
+
+\item{memory}{A number of gigabytes the run may use, NULL for 90\% of the computer's memory, or Inf for no limit. When the exact
+grid kernels (about 17.6 bytes per within-sample cell pair, the sum of squared sample sizes) do not fit, a "woodbury" influence matrix
+is scored in memory mode (log-domain tiles, about 5.5 bytes per pair, priorities within ~1e-11 of exact); if that does not
+fit either, the run stops with the estimate. On a cluster give the memory of the job: the scheduler may not stop a job that uses more}
+
+\item{exact.priority}{A boolean of whether to score every real pair exactly. FALSE (with significance) screens the real pairs too and
+scores exactly only those whose p-value or rank, or whose balance term, the bounds leave undecided: the other priorities are the
+midpoints of their bounds (measured within ~1e-8 of exact, median ~1e-9), and p-values, p.adj and order are those of exact scoring, in the same
+or less time. Without significance every pair is scored exactly}
 }
 \value{
 A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
@@ -68,7 +80,8 @@ With significance, the p-value of a pair is the fraction of 1000 background pair
 high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
 Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning. Background
 pairs are first screened: one pass over their cell grids bounds their priorities without ranking the cells, and only the few whose
-bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time.
+bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time. Real pairs
+are screened too unless exact.priority is TRUE, and data whose grids do not fit in memory are scored in memory mode (memory).
 With outdir set and cache=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache} while pairs are scored, and the folder is
 removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
 continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped on the same

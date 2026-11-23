@@ -13,12 +13,13 @@
 #' turns the cache off for all of them.
 #' @param dir A string naming the cache folder
 #' @inheritParams prioritize_lr
+#' @inheritParams cache_fingerprint
 #' @returns An environment with dir, fingerprint, terms (a matrix of priority terms with one row per pair named by pair_keys, or NULL),
 #' bounds (a list of two such matrices, lo and hi, or NULL), background (a dataframe of background pairs, or NULL), saved (whether
 #' this run wrote the fingerprint) and failed (whether a write failed)
 #' @noRd
-open_cache <- function(dir, adj, infMat, metadata){
-  fingerprint <- cache_fingerprint(adj, infMat, metadata)
+open_cache <- function(dir, adj, infMat, metadata, kernel="exact"){
+  fingerprint <- cache_fingerprint(adj, infMat, metadata, kernel)
   unlink(file.path(dir, paste0(cache_files(), ".tmp")))
   old <- read_cache_file(dir, "fingerprint.rds")
   terms <- NULL
@@ -101,15 +102,17 @@ write_cache_terms <- function(cached, what, x){
 #' This function takes the inputs of prioritize_lr and returns the package version, the class of the influence matrix, the node
 #' names, the cell, sample and group of every metadata row as strings (their type does not change the priorities, e.g. metadata read
 #' back from 5.metadata.csv), and the entries of the adjacency and the influence matrix between 16 nodes spread over them. Other
-#' data, another restart probability or another influence matrix method change these.
+#' data, another restart probability or another influence matrix method change these. It also holds the grid kernels: memory mode's
+#' terms and bounds differ from the exact kernels' by ~1e-11, so a cache never mixes them.
 #' @inheritParams prioritize_lr
+#' @param kernel A string naming the grid kernels of the run, "exact" or "tiles" (memory mode)
 #' @returns A list
 #' @noRd
-cache_fingerprint <- function(adj, infMat, metadata){
+cache_fingerprint <- function(adj, infMat, metadata, kernel="exact"){
   nodes <- rownames(infMat)
   probe <- nodes[unique(round(seq(1, length(nodes), length.out=16)))]
 
-  return(list(format=1L, version=as.character(utils::packageVersion("HyperCom")), class=class(infMat), nodes=nodes,
+  return(list(format=1L, version=as.character(utils::packageVersion("HyperCom")), kernel=kernel, class=class(infMat), nodes=nodes,
               cell=as.character(metadata$cell), sample=as.character(metadata$sample), group=as.character(metadata$group),
               adj=as.matrix(adj[probe, probe, drop=FALSE]), infMat=as.matrix(infMat[probe, probe, drop=FALSE])))
 }

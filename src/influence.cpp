@@ -20,7 +20,8 @@
 // nonnegative terms (no cancellation). F is never stored: the factors (H, Delta, Z) take O(e n) memory, and any block F[rows, cols]
 // is made from them on demand at |rows| x |cols| x (hyperedges per row node), each entry the same at any `threads` and in any block.
 // Cost O(e^3 + n nnz(H)) for the factors instead of O(n^3). Not bit-identical to lu (~1e-15 relative); the BLAS's own thread count
-// can change the last bits of the e x e inverse, as it does for lu and chol.
+// can change the last bits of the e x e inverse, as it does for lu and chol. In memory mode (influence_lambda_cpp) the blocks are
+// made a panel at a time and kept only as Λ = -ln F tiles of 6-byte integer keys (f2.h) for the grid kernel.
 //
 // chol and woodbury stop as solve() does when the system is computationally singular (LAPACK dpocon, reciprocal condition number
 // below the machine epsilon), e.g. for r near 0.
@@ -32,8 +33,11 @@
 #include <atomic>
 #include <cfloat>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <thread>
 #include <vector>
+#include "f2.h"
 #include "grid_layout.h"
 #include "r_alloc.h"
 
@@ -442,4 +446,103 @@ Rcpp::NumericVector influence_blocks_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVe
   }
 
   return out;
+}
+
+// Memory mode: Λ of the within-sample blocks straight from the factors, no F block held. Λ[i, j] = -round((ln(F[i, j] / D[j]) +
+// ln(F[j, i] / D[i])) / 2 at 2^p), the logs by f2::fixlog52 (integers only, so the same bits on every computer), stored as 6-byte
+// offsets from a per-block base in the tiles of f2.h: the upper triangle (F is symmetric up to rounding, so Λ is made symmetric by
+// the average), diagonal tiles whole (their lower half too, read as stored), the diagonal and padding 0. toff: each block's byte
+// offset; base: each block's int64 base, its bits in a double. A panel of W columns at a time: F[cells, panel] and F[panel, cells]
+// by fill_block; a first pass with libm logs finds each block's smallest Λ less a margin (libm and fixlog52 differ by far less) as
+// base, the second writes. Stops if a block's span does not fit 48 bits.
+// [[Rcpp::export]]
+Rcpp::List influence_lambda_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs,
+                                Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector cell,
+                                Rcpp::IntegerVector sample, int p, int threads){
+  const Incidence h = node_incidence(hp, hi, hx, n);
+  check_factors(h, rs, delta, Z);
+  check_nodes(cell, h.N);
+  if(sample.size() != cell.size()) Rcpp::stop("influence_lambda_cpp: one sample per cell");
+  for(R_xlen_t k = 0; k < sample.size(); ++k){
+    if(sample[k] < 1) Rcpp::stop("influence_lambda_cpp: sample ids must be positive integers");
+  }
+  if(p < 0 || p > 52) Rcpp::stop("influence_lambda_cpp: p must be in 0..52");
+  const std::vector<double> ny = scaled_incidence(h, REAL(delta));
+  std::vector<std::vector<int>> blocks = sample_blocks(INTEGER(sample), sample.size());
+  const size_t nblocks = blocks.size(), TL = f2::TILE;
+  size_t total = 0;                     // bytes
+  Rcpp::NumericVector toff(nblocks), base(nblocks);
+  for(size_t b = 0; b < nblocks; ++b){
+    std::vector<int> &m = blocks[b];
+    for(int &k : m) k = cell[k];
+    const size_t T = (m.size() + TL - 1) / TL;
+    toff[b] = (double) total;
+    total += f2::TILE_BYTES * (T * (T + 1) / 2);
+  }
+  Rcpp::RawVector bytes = alloc_vector<RAWSXP>((R_xlen_t) (total + f2::SLACK), true);  // zeroed: diagonal, padding, slack
+  char *out = reinterpret_cast<char *>(RAW(bytes));
+  const size_t W = 256;                 // panel columns, a multiple of TILE (a panel's rows end on a tile's edge)
+  const int nt = std::max(1, threads), sh = 52 - p;
+  const double sc = std::ldexp(1.0, p);
+  const int64_t MARGIN = (int64_t) 1 << 20;
+  std::atomic<bool> wide(false), bad(false);
+  for(size_t b = 0; b < nblocks; ++b){
+    const std::vector<int> &m = blocks[b];
+    const size_t s = m.size();
+    if(s < 2) continue;
+    std::vector<double> Dn(s);
+    for(size_t k = 0; k < s; ++k) Dn[k] = rs[m[k]];
+    char *o = out + (size_t) toff[b];
+    std::vector<double> A, C;
+    int64_t lo = INT64_MAX, hi = INT64_MIN;
+    for(int pass = 0; pass < 2; ++pass){
+      const int64_t bs = lo;
+      for(size_t j0 = 0; j0 < s; j0 += W){
+        const size_t w = std::min(W, s - j0), nrow = j0 + w;
+        A.resize(nrow * w);
+        C.resize(w * nrow);
+        fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, m.data(), nrow, m.data() + j0, w, A.data(), nrow, nt);
+        fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, m.data() + j0, w, m.data(), nrow, C.data(), w, nt);
+        std::vector<int64_t> tlo(w, INT64_MAX), thi(w, INT64_MIN);
+        run_tasks(nt, w, [&](int, size_t jl){
+          const size_t j = j0 + jl, i1 = std::min(s, (j | (TL - 1)) + 1);  // rows to the end of j's diagonal tile
+          const double *a = A.data() + jl * nrow;
+          for(size_t i = 0; i < i1; ++i){
+            if(i == j) continue;
+            const double fij = a[i] / Dn[j], fji = C[jl + i * w] / Dn[i];
+            if(pass == 0){
+              if(!(fij > 0) || !(fji > 0) || !std::isfinite(fij) || !std::isfinite(fji)){
+                bad.store(true);
+                continue;
+              }
+              const int64_t v = (int64_t) std::llround(-0.5 * (std::log(fij) + std::log(fji)) * sc);
+              tlo[jl] = std::min(tlo[jl], v);
+              thi[jl] = std::max(thi[jl], v);
+              continue;
+            }
+            const int64_t lam = -f2::round_shift(f2::fixlog52(fij) + f2::fixlog52(fji), sh + 1), d = lam - bs;
+            if(d < 0 || (d >> 48)) wide.store(true);
+            const size_t I = i / TL, J = j / TL;
+            f2::put48(o + f2::TILE_BYTES * (J * (J + 1) / 2 + I) + 6 * (TL * (j % TL) + i % TL), (uint64_t) d);
+          }
+        });
+        if(pass == 0){
+          for(size_t jl = 0; jl < w; ++jl){
+            lo = std::min(lo, tlo[jl]);
+            hi = std::max(hi, thi[jl]);
+          }
+        }
+      }
+      if(pass == 0){
+        if(bad.load()) Rcpp::stop("influence_lambda_cpp: an entry of F / D is not positive and finite");
+        if(lo > hi) lo = hi = 0;
+        lo -= MARGIN;
+        if((uint64_t) (hi + MARGIN - lo) >> 48) Rcpp::stop("influence_lambda_cpp: a block's span does not fit 48 bits at this p");
+      }
+    }
+    std::memcpy(&base[b], &lo, sizeof lo);
+  }
+  if(wide.load()) Rcpp::stop("influence_lambda_cpp: an entry left its block's 48-bit range");
+
+  return Rcpp::List::create(Rcpp::Named("bytes") = bytes, Rcpp::Named("base") = base, Rcpp::Named("toff") = toff);
 }

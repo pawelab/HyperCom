@@ -23,6 +23,15 @@
 // score_grids_cpp reads F (a dense n x n influence matrix); score_blocks_cpp is given instead every within-sample block of F
 // (made from the factored influence matrix, see influence.cpp) and F[cell, ligand] / F[receptor, cell] for the genes of the pairs,
 // so no n x n matrix exists. Both rank and average the same values the same way.
+//
+// Memory mode (score_lambda_cpp): no F block either. Entries are ranked by integer keys ln(a b / F) = A[i] + B'[j] + Λ[i, j] (f2.h),
+// Λ = -ln F of the within-sample blocks as 6-byte offsets in tiles of the upper triangle (influence_lambda_cpp, about 3 B per entry),
+// A, B' the logs of F[cell, ligand] and F[receptor, cell] / D, all made from integers alone; the network grid is ranked by
+// ln D[j] - Λ[i, j], the order of F. Only the diagonal is skipped. Scores are within ~1e-11 of the exact kernel's.
+//
+// Passes (score_blocks_cpp, score_lambda_cpp): a big grid on several threads can place, rank and sum its buckets in P ranges, one
+// after the other, recomputing each entry's bucket at each pass instead of storing it: no bucket ids, and a key pool of ~6.75 / P B per
+// entry instead of 6 B. Same integer sums, so the same scores at any P.
 
 #include <Rcpp.h>
 #include <algorithm>
@@ -35,6 +44,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "f2.h"
 #include "grid_layout.h"
 #include "r_alloc.h"
 #if defined(__x86_64__) || defined(__i386__)
@@ -233,6 +243,13 @@ struct Cells {
   std::vector<size_t> block_run;
   size_t cap = 0;
   size_t max_block = 0;
+  const char *LamT = nullptr;          // memory mode: Λ - lbase in tiles (f2.h), block blk's at toff[blk]; null in the exact kernel
+  std::vector<size_t> toff;
+  std::vector<int64_t> lbase;          // per block: its Λ base
+  int p = 44;                          // fractional bits of the keys
+  std::vector<int64_t> lD52;           // fixlog52(D) by position
+  std::vector<int64_t> kD;             // ln D by position at 2^p (network grid)
+  size_t call = 0;                     // this call's number, so a thread's tile strip of an earlier call is never reused
 };
 
 // Team buffers of one grid: a key (8 B) and a bucket id (2 B) per within-sample entry
@@ -376,10 +393,13 @@ struct Chunk {
 //
 // Every entry's bucket is stored (2 bytes). Keys take 8 bytes, except in big grids (above the cache budget) on several
 // threads: these keep the key bits of a bucket in 6 bytes (at most 48 bits; the catch-alls, and any wider bucket, keep 8 in
-// ext), 8 bytes per entry in all, and their buckets hold equal counts, so each sorts in L2 while the threads share L3.
+// ext), 8 bytes per entry in all, and their buckets hold equal counts, so each sorts in L2 while the threads share L3. A big grid
+// in passes > 1 (multi) stores no bucket ids and keeps the keys of one range of buckets at a time: cap6 6-byte slots, about cap / passes
+// plus an eighth for a range cut at a bucket's edge.
 struct Team {
-  Team(const Cells &c, size_t size, bool alone) : size(size), bar(size), step(std::max(SAMPLE, (c.cap >> SAMPLE_BITS) | 1)),
-                                                  a(c.node.size()), b(c.node.size()), lo(size), hi(size) {
+  Team(const Cells &c, size_t size, bool alone, size_t passes) : size(size), bar(size), step(std::max(SAMPLE, (c.cap >> SAMPLE_BITS) | 1)),
+                                                                 a(c.node.size()), b(c.node.size()), ka(c.LamT ? c.node.size() : 0),
+                                                                 kb(c.LamT ? c.node.size() : 0), lo(size), hi(size) {
     // a chunk holds at most 2 x target entries (a run of blocks) or target + s (rows of a block of s cells): only a grid of CHUNK_MAX
     // entries or more needs smaller chunks, so smaller grids are cut as before (one thread: one chunk, slabs)
     const size_t nblocks = c.block_start.size() - 1, even = (c.cap + size - 1) / size,
@@ -410,6 +430,7 @@ struct Team {
     slabbed = alone && nchunks == 1;
     big = !slabbed && grid_bytes(c) > CACHE_BUDGET;
     local = !slabbed && c.cap >= LOCAL_FROM;
+    multi = big && passes > 1;
     if(slabbed){
       const size_t slabs = nbmax + c.cap / SLAB + 1;  // the one chunk holds every entry
       pool.reset(new uint64_t[slabs * SLAB]);
@@ -420,13 +441,18 @@ struct Team {
     } else {
       cnt.resize(nchunks * nbmax);
       tot.resize(nbmax);
-      if(big){
-        pool6.reset(new char[c.cap * 6]);
+      if(multi){
+        cap6 = c.cap / passes + std::min<size_t>(c.cap / (8 * passes), (size_t) 1 << 26) + 1;
+        pool6.reset(new char[cap6 * 6 + f2::SLACK]);
+        hist.resize(size);
+        msum.assign(2 * c.node.size(), 0);
+      } else if(big){
+        pool6.reset(new char[c.cap * 6 + f2::SLACK]);
         hist.resize(size);
       } else {
         pool.reset(new uint64_t[std::max<size_t>(1, c.cap)]);
       }
-      bucket.resize(c.cap);
+      if(!multi) bucket.resize(c.cap);
     }
     isum.reset(new std::atomic<uint64_t>[c.node.size()]());
     icnt.reset(new std::atomic<uint64_t>[c.node.size()]());
@@ -446,6 +472,11 @@ struct Team {
   int l = 0, r = 0, bucket_bits;        // bucket_bits: b1 of equal-width buckets before the key range is known
   bool slabbed, big;                   // big: runs of 6-byte keys with equal-count buckets (a grid above the cache budget on threads)
   bool local;                          // ranks counted from the bucket's first (a grid of LOCAL_FROM entries or more)
+  bool multi = false;                  // a big grid in passes: ranges of buckets in turn, each entry's bucket recomputed (no ids)
+  size_t cap6 = 0;                     // multi: entries pool6 holds
+  std::vector<size_t> ranges;          // multi: bucket range r is [ranges[r], ranges[r + 1])
+  std::vector<uint64_t> kmin, kend;    // multi: range r's keys are [kmin[r], kend[r]) (kend 0: no upper end)
+  std::vector<uint64_t> msum;          // multi: sender rank sum and count of each position side by side, over the passes
   Buckets bk;                          // the grid's buckets, made by the leader
   std::vector<Chunk> chunks;
   std::unique_ptr<uint64_t[]> pool;    // slabs, or runs of a grid that fits the cache
@@ -453,7 +484,7 @@ struct Team {
   std::vector<size_t> link, cur, full;  // slabs: next slab of each slab, write position and full slabs of each bucket
   std::vector<uint32_t> cnt;           // runs: per chunk and bucket (stride apart), entries, then their offset in the bucket
   std::vector<size_t> tot;
-  std::vector<uint16_t> bucket;        // the bucket of each entry
+  std::vector<uint16_t> bucket;        // the bucket of each entry (not in multi)
   std::vector<uint64_t> ext;           // big grids: the keys of the buckets wider than 48 bits (the catch-alls at least)
   std::vector<size_t> sbase;           // big grids: where each bucket's keys start, in pool6 (6-byte slots) or in ext
   std::vector<char> swide;             // big grids: the bucket's keys are in ext
@@ -462,8 +493,9 @@ struct Team {
   std::vector<int> width;
   std::vector<std::vector<uint64_t>> hist;  // big grids: each member's sampled entries per cell
   std::vector<double> a, b;
+  std::vector<int64_t> ka, kb;         // memory mode: ln a and ln b - ln D at 2^p by position
   std::vector<uint64_t> lo, hi;
-  std::unique_ptr<std::atomic<uint64_t>[]> isum, icnt;  // receiver rank sums and counts of the columns of split blocks
+  std::unique_ptr<std::atomic<uint64_t>[]> isum, icnt;  // receiver rank sums and counts of the columns of split blocks (multi: all)
   std::vector<char> split_cell;        // the cell's block is cut into row ranges
   bool has_split = false;
 };
@@ -478,13 +510,18 @@ struct Work {
   std::vector<size_t> start, at;
   std::vector<const char *> rp;
   std::vector<double> q;
+  std::vector<uint64_t> kq;            // memory mode: a column's keys
   std::vector<int64_t> rk;
-  std::vector<uint64_t> irow, icn;     // integer row sums and counts
+  std::vector<uint64_t> irc;           // integer row sums and counts side by side: one cache line per entry, where two arrays a page
+                                       // multiple apart would alias
   std::vector<char> stage;             // big grids: each bucket's 64-byte line being filled
   std::vector<char *> cur;             // and the next byte of each bucket
+  std::vector<uint16_t> bc;            // a column's buckets (multi: of its in-range entries, in ix order)
+  std::vector<uint32_t> ix;            // multi: the rows of a column's in-range entries
 
-  Work(const Cells &c, const Team &tm) : start(tm.nbmax + 1), at(tm.nbmax), rp(tm.nbmax), q(c.max_block), rk(c.max_block),
-                                         irow(c.max_block), icn(c.max_block) {}
+  Work(const Cells &c, const Team &tm) : start(tm.nbmax + 1), at(tm.nbmax), rp(tm.nbmax), q(c.max_block), kq(c.LamT ? c.max_block : 0),
+                                         rk(c.max_block), irc(2 * c.max_block), bc(tm.multi ? c.max_block : 0),
+                                         ix(tm.multi ? c.max_block : 0) {}
 };
 
 // Byte offset in the pool of the rank of slab entry p: a slab's entries hold key bits until ranked, then the first half of the
@@ -522,24 +559,11 @@ struct RunKeys {
   void finish(){}
 };
 
-// A 6-byte pool slot holds the low 48 bits of a key, least significant byte first on every platform (a 6-byte memcpy of a
-// uint64_t would keep the high bytes on a big-endian machine). Written out byte by byte so that GCC -O2 merges them into a 4-byte
-// and two 1-byte moves (as a loop it keeps 6 single-byte steps)
-inline void put48(char *p, uint64_t v){
-  unsigned char *u = reinterpret_cast<unsigned char *>(p);
-  u[0] = (unsigned char) v;
-  u[1] = (unsigned char) (v >> 8);
-  u[2] = (unsigned char) (v >> 16);
-  u[3] = (unsigned char) (v >> 24);
-  u[4] = (unsigned char) (v >> 32);
-  u[5] = (unsigned char) (v >> 40);
-}
-
-inline uint64_t get48(const char *p){
-  const unsigned char *u = reinterpret_cast<const unsigned char *>(p);
-  return (uint64_t) u[0] | (uint64_t) u[1] << 8 | (uint64_t) u[2] << 16 | (uint64_t) u[3] << 24 | (uint64_t) u[4] << 32 |
-         (uint64_t) u[5] << 40;
-}
+// A 6-byte pool slot holds the low 48 bits of a key, least significant byte first on every platform (f2::put48; a 6-byte memcpy of a
+// uint64_t would keep the high bytes on a big-endian machine), read by one 8-byte load (f2::get48: pool6 has f2::SLACK bytes of
+// slack)
+using f2::get48;
+using f2::put48;
 
 // Keys of a bucket held in one run of 6-byte slots (at most NARROW_BITS key bits); their ranks go to the run's first 4m bytes
 struct SixKeys {
@@ -717,7 +741,81 @@ template <class K> void rank_bucket(K &keys, size_t m, size_t s0, int t, Work &w
   keys.finish();
 }
 
-// Member me of the team: a and b of its share of the cells
+// Memory mode: Λ[i, j] - lbase of block blk from its tiles (f2.h); a diagonal tile is stored whole, so only tiles below it swap
+inline int64_t tile_value(const Cells &c, size_t blk, size_t i, size_t j){
+  const size_t TL = f2::TILE;
+  if(i / TL > j / TL) std::swap(i, j);
+  const size_t I = i / TL, J = j / TL;
+  return (int64_t) get48(c.LamT + c.toff[blk] + f2::TILE_BYTES * (J * (J + 1) / 2 + I) + 6 * (TL * (j % TL) + i % TL));
+}
+
+// Memory mode: a thread's strip of the TILE columns of tile column J of a block for rows [i0, i1), column-major, made from whole
+// tiles (tile (I, J) at and above the diagonal, tile (J, I) transposed below it): each tile is read once for its TILE columns
+struct TileStrip {
+  size_t call = 0, blk = SIZE_MAX, J = SIZE_MAX, i0 = 0, i1 = 0;
+  std::vector<int64_t> v;
+};
+thread_local TileStrip tile_strip;
+std::atomic<size_t> tile_calls{0};      // memory-mode calls so far (Cells::call)
+
+// Memory mode: Λ - lbase of rows [i0, i0 + m) of column jj of block blk, in the thread's strip (0 on the diagonal: the tiles hold 0)
+const int64_t *tile_strip_column(const Cells &c, size_t blk, size_t jj, size_t i0, size_t m){
+  const size_t TL = f2::TILE, s = c.block_start[blk + 1] - c.block_start[blk], i1 = i0 + m, J = jj / TL;
+  TileStrip &st = tile_strip;
+  if(st.call != c.call || st.blk != blk || st.J != J || st.i0 != i0 || st.i1 != i1){
+    st.call = c.call;
+    st.blk = blk;
+    st.J = J;
+    st.i0 = i0;
+    st.i1 = i1;
+    if(st.v.size() < TL * m) st.v.resize(TL * m);
+    const char *T = c.LamT + c.toff[blk];
+    const size_t ncol = std::min(TL, s - TL * J);
+    for(size_t I = i0 / TL; TL * I < i1; ++I){
+      const size_t r0 = std::max(i0, TL * I), r1 = std::min(i1, TL * I + TL);
+      if(I <= J){
+        const char *t = T + f2::TILE_BYTES * (J * (J + 1) / 2 + I);
+        for(size_t b = 0; b < ncol; ++b){
+          int64_t *col = st.v.data() + b * m;
+          for(size_t r = r0; r < r1; ++r) col[r - i0] = (int64_t) get48(t + 6 * (TL * b + r % TL));
+        }
+      } else {
+        const char *t = T + f2::TILE_BYTES * (I * (I + 1) / 2 + J);
+        for(size_t b = 0; b < ncol; ++b){
+          int64_t *col = st.v.data() + b * m;
+          for(size_t r = r0; r < r1; ++r) col[r - i0] = (int64_t) get48(t + 6 * (TL * (r % TL) + b));
+        }
+      }
+    }
+  }
+  return st.v.data() + (jj % TL) * m;
+}
+
+// Memory mode: the keys of rows [i0, i0 + m) of column jj of block blk into k, by integer adds: A[i] + B'[j] + Λ[i, j] (the network
+// grid: ln D[j] - Λ[i, j], the order of F), signed, then flipped to unsigned order
+const uint64_t *lambda_keys(const Cells &c, const Team &tm, size_t blk, size_t jj, size_t i0, size_t m, uint64_t *k){
+  const size_t first = c.block_start[blk];
+  const uint64_t SIGN = (uint64_t) 1 << 63;
+  const int64_t *L = tile_strip_column(c, blk, jj, i0, m), base = c.lbase[blk];
+  if(tm.l < 0){
+    const int64_t dj = c.kD[first + jj] - base;
+    for(size_t i = 0; i < m; ++i) k[i] = (uint64_t) (dj - L[i]) ^ SIGN;
+    return k;
+  }
+  const int64_t *ka = tm.ka.data() + first + i0, bj = tm.kb[first + jj] + base;
+  for(size_t i = 0; i < m; ++i) k[i] = (uint64_t) (ka[i] + bj + L[i]) ^ SIGN;
+  return k;
+}
+
+// Memory mode: the key of entry (ii, jj) of block blk
+inline uint64_t lambda_key(const Cells &c, const Team &tm, size_t blk, size_t ii, size_t jj){
+  const size_t first = c.block_start[blk];
+  const int64_t L = c.lbase[blk] + tile_value(c, blk, ii, jj);
+  const int64_t v = tm.l < 0 ? c.kD[first + jj] - L : tm.ka[first + ii] + tm.kb[first + jj] + L;
+  return (uint64_t) v ^ ((uint64_t) 1 << 63);
+}
+
+// Member me of the team: a and b of its share of the cells (memory mode: their keys ka, kb)
 void prepare_ab(const Cells &c, Team &tm, size_t me){
   if(tm.l < 0) return;
   const size_t n = c.node.size(), k1 = n * (me + 1) / tm.size;
@@ -725,6 +823,13 @@ void prepare_ab(const Cells &c, Team &tm, size_t me){
     for(size_t k = n * me / tm.size; k < k1; ++k){
       tm.a[k] = c.A[(size_t) c.out[k] + (size_t) tm.l * n];
       tm.b[k] = c.B[(size_t) tm.r + (size_t) c.out[k] * c.nrec];
+    }
+    if(c.LamT){
+      const int sh = 52 - c.p;
+      for(size_t k = n * me / tm.size; k < k1; ++k){
+        tm.ka[k] = f2::round_shift(f2::fixlog52(tm.a[k]), sh);
+        tm.kb[k] = f2::round_shift(f2::fixlog52(tm.b[k]) - c.lD52[k], sh);
+      }
     }
     return;
   }
@@ -751,6 +856,10 @@ template <class Fn> void each_sample(const Cells &c, const Team &tm, size_t me, 
     const double *a = tm.a.data() + first, *b = tm.b.data() + first;
     for(size_t k = ns * me / tm.size; k < k1; ++k){
       const size_t q = SAMPLE_FIRST + k * step, jj = q / s, ii = q % s;
+      if(c.LamT){
+        if(ii != jj) fn(lambda_key(c, tm, blk, ii, jj));
+        continue;
+      }
       double v = block_value(c, blk, ii, jj);
       if(tm.l >= 0) v = (a[ii] * b[jj]) / v;
       if(skipped(ii, jj, v)) continue;
@@ -880,35 +989,44 @@ __attribute__((noinline)) void fill_slabs(const Cells &c, Team &tm, const Bucket
     cur[d] = d * SLAB;
     full[d] = 0;
   }
+  // key k of an entry not skipped: its bucket to bc, its kept bits to the bucket's slab list
+  auto append = [&](uint16_t &bc, uint64_t k){
+    uint64_t low;
+    const size_t d = bk.locate<false>(k, low);
+    bc = (uint16_t) d;
+    size_t p = cur[d];
+    pool[p++] = low;
+    if(p % SLAB == 0){
+      link[p / SLAB - 1] = slabs;
+      p = slabs++ * SLAB;
+      ++full[d];
+    }
+    cur[d] = p;
+  };
   for(size_t blk = ck.b0; blk < ck.b1; ++blk){
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, i0 = ck.i0, m = std::min(ck.i1, s) - i0;
     for(size_t jj = 0; jj < s; ++jj){
       const size_t pos = c.block_off[blk] + jj * s + i0;
-      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
       uint16_t *bc = tm.bucket.data() + pos;
+      if(c.LamT){
+        const uint64_t *kk = lambda_keys(c, tm, blk, jj, i0, m, w.kq.data());
+        for(size_t i = 0; i < m; ++i){
+          if(i0 + i == jj) bc[i] = SKIP;
+          else append(bc[i], kk[i]);
+        }
+        continue;
+      }
+      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
       for(size_t i = 0; i < m; ++i){
         const double v = q[i];
-        if(skipped(i0 + i, jj, v)){
-          bc[i] = SKIP;
-          continue;
-        }
-        uint64_t low;
-        const size_t d = bk.locate<false>(sortable_key(v), low);
-        bc[i] = (uint16_t) d;
-        size_t p = cur[d];
-        pool[p++] = low;
-        if(p % SLAB == 0){
-          link[p / SLAB - 1] = slabs;
-          p = slabs++ * SLAB;
-          ++full[d];
-        }
-        cur[d] = p;
+        if(skipped(i0 + i, jj, v)) bc[i] = SKIP;
+        else append(bc[i], sortable_key(v));
       }
     }
   }
 }
 
-// First pass over chunk ch: the bucket of each entry (SKIP if skipped) and the chunk's entries per bucket
+// First pass over chunk ch: the bucket of each entry (SKIP if skipped; multi: to scratch only) and the chunk's entries per bucket
 template <bool TABLE> void count_chunk(const Cells &c, Team &tm, const Buckets &bk, size_t ch, Work &w){
   const bool net = tm.l < 0;
   const Chunk &ck = tm.chunks[ch];
@@ -917,9 +1035,22 @@ template <bool TABLE> void count_chunk(const Cells &c, Team &tm, const Buckets &
   for(size_t blk = ck.b0; blk < ck.b1; ++blk){
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, i0 = ck.i0, m = std::min(ck.i1, s) - i0;
     for(size_t jj = 0; jj < s; ++jj){
-      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
-      uint16_t *bc = tm.bucket.data() + c.block_off[blk] + jj * s + i0;
+      uint16_t *bc = tm.multi ? w.bc.data() : tm.bucket.data() + c.block_off[blk] + jj * s + i0;
       const size_t diag = jj - i0;       // wraps above m when the diagonal is not in the chunk
+      if(c.LamT){
+        const uint64_t *kk = lambda_keys(c, tm, blk, jj, i0, m, w.kq.data());
+        for(size_t i = 0; i < m; ++i){
+          if(i == diag){
+            bc[i] = SKIP;
+            continue;
+          }
+          const size_t d = bk.locate<TABLE>(kk[i]);
+          bc[i] = (uint16_t) d;
+          ++cnt[d];
+        }
+        continue;
+      }
+      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
       for(size_t i = 0; i < m; ++i){
         uint64_t u;
         std::memcpy(&u, q + i, sizeof u);
@@ -969,12 +1100,14 @@ void place_chunk_ids(const Cells &c, Team &tm, const Buckets &bk, size_t ch, Wor
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, i0 = ck.i0, m = std::min(ck.i1, s) - i0;
     for(size_t jj = 0; jj < s; ++jj){
       const size_t pos = c.block_off[blk] + jj * s + i0;
-      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
+      const uint64_t *kk = c.LamT ? lambda_keys(c, tm, blk, jj, i0, m, w.kq.data()) : nullptr;
+      const double *q = kk ? nullptr
+                           : block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
       const uint16_t *bc = tm.bucket.data() + pos;
       for(size_t i = 0; i < m; ++i){
         const size_t d = bc[i];
         if(d == SKIP) continue;
-        pool[at[d]++] = bk.low_bits<false>(sortable_key(q[i]), d);
+        pool[at[d]++] = bk.low_bits<false>(kk ? kk[i] : sortable_key(q[i]), d);
       }
     }
   }
@@ -995,12 +1128,14 @@ template <bool TABLE> void place_chunk_six(const Cells &c, Team &tm, const Bucke
   for(size_t blk = ck.b0; blk < ck.b1; ++blk){
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, i0 = ck.i0, m = std::min(ck.i1, s) - i0;
     for(size_t jj = 0; jj < s; ++jj){
-      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
+      const uint64_t *kk = c.LamT ? lambda_keys(c, tm, blk, jj, i0, m, w.kq.data()) : nullptr;
+      const double *q = kk ? nullptr
+                           : block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
       const uint16_t *bc = tm.bucket.data() + c.block_off[blk] + jj * s + i0;
       for(size_t i = 0; i < m; ++i){
         const size_t d = bc[i];
         if(d == SKIP) continue;
-        const uint64_t low = bk.low_bits<TABLE>(sortable_key(q[i]), d);
+        const uint64_t low = bk.low_bits<TABLE>(kk ? kk[i] : sortable_key(q[i]), d);
         if(wide[d]) ext[at[d]++] = low;
         else put48(pool + 6 * at[d]++, low);
       }
@@ -1048,12 +1183,14 @@ template <bool TABLE> void place_chunk_six_nt(const Cells &c, Team &tm, const Bu
   for(size_t blk = ck.b0; blk < ck.b1; ++blk){
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, i0 = ck.i0, m = std::min(ck.i1, s) - i0;
     for(size_t jj = 0; jj < s; ++jj){
-      const double *q = block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
+      const uint64_t *kk = c.LamT ? lambda_keys(c, tm, blk, jj, i0, m, w.kq.data()) : nullptr;
+      const double *q = kk ? nullptr
+                           : block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
       const uint16_t *bc = tm.bucket.data() + c.block_off[blk] + jj * s + i0;
       for(size_t i = 0; i < m; ++i){
         const size_t d = bc[i];
         if(d == SKIP) continue;
-        const uint64_t low = bk.low_bits<TABLE>(sortable_key(q[i]), d);
+        const uint64_t low = bk.low_bits<TABLE>(kk ? kk[i] : sortable_key(q[i]), d);
         if(wide[d]){
           ext[at[d]++] = low;
           continue;
@@ -1201,14 +1338,13 @@ template <Store STORE> void sum_chunk(const Cells &c, Team &tm, const Buckets &b
   }
   const Chunk &ck = tm.chunks[ch];
   const bool whole = ck.head && ck.last;
-  uint64_t *ssum = w.irow.data(), *scnt = w.icn.data();
+  uint64_t *sc = w.irc.data();          // row sum and count of row k at 2 k, 2 k + 1
   int64_t *rk = w.rk.data();
   for(size_t blk = ck.b0; blk < ck.b1; ++blk){
     const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first, off = c.block_off[blk];
     const size_t i0 = ck.i0, m = std::min(ck.i1, s) - i0;
     const int *out = c.out.data() + first;
-    std::fill(ssum, ssum + m, (uint64_t) 0);
-    std::fill(scnt, scnt + m, (uint64_t) 0);
+    std::fill(sc, sc + 2 * m, (uint64_t) 0);
     for(size_t jj = 0; jj < s; ++jj){
       const uint16_t *bc = tm.bucket.data() + off + jj * s + i0;
       if(STORE == Store::SLABS) pull_slabs(bc, m, rk, pool, link, at);
@@ -1218,8 +1354,8 @@ template <Store STORE> void sum_chunk(const Cells &c, Team &tm, const Buckets &b
       for(size_t i = 0; i < m; ++i){
         const int64_t k = rk[i];
         const uint64_t keep = ~(uint64_t) (k >> 63), v = (uint64_t) k & keep, one = keep & 1;
-        ssum[i] += v;
-        scnt[i] += one;
+        sc[2 * i] += v;
+        sc[2 * i + 1] += one;
         cs += v;
         cn += one;
       }
@@ -1230,8 +1366,233 @@ template <Store STORE> void sum_chunk(const Cells &c, Team &tm, const Buckets &b
         tm.icnt[first + jj].fetch_add(cn, std::memory_order_relaxed);
       }
     }
-    for(size_t k = 0; k < m; ++k) sender[out[i0 + k]] = rank_mean(ssum[k], scnt[k], denom);
+    for(size_t k = 0; k < m; ++k) sender[out[i0 + k]] = rank_mean(sc[2 * k], sc[2 * k + 1], denom);
   }
+}
+
+// Multi: the in-range entries of rows [i0, i0 + m) of column jj of block blk, keys in [kmin, kend) (kend 0: no upper end) and not
+// skipped, made as count_chunk makes them: their rows to w.ix and buckets to w.bc without a branch (each entry written, the count
+// advanced by the in-range flag); returns how many. kk / q: the column's keys (memory mode) or quotients
+template <bool TABLE> size_t column_buckets_in(const Cells &c, Team &tm, const Buckets &bk, size_t blk, size_t jj, size_t i0, size_t m,
+                                               Work &w, uint64_t kmin, uint64_t kend, const uint64_t *&kk, const double *&q){
+  const bool net = tm.l < 0;
+  const size_t first = c.block_start[blk];
+  kk = c.LamT ? lambda_keys(c, tm, blk, jj, i0, m, w.kq.data()) : nullptr;
+  q = kk ? nullptr : block_column(c, blk, jj, i0, i0 + m, tm.a.data() + first + i0, net ? 0 : tm.b[first + jj], net, w.q.data());
+  uint16_t *bc = w.bc.data();
+  uint32_t *ix = w.ix.data();
+  const size_t diag = jj - i0;         // wraps above m when the diagonal is not in the chunk
+  const uint64_t top = kend ? kend : ~(uint64_t) 0;  // kend 0: every key from kmin (the top key is never one: flipped keys)
+  size_t n = 0;
+  if(kk){
+    for(size_t i = 0; i < m; ++i){
+      const uint64_t k = kk[i];
+      ix[n] = (uint32_t) i;
+      bc[n] = (uint16_t) bk.locate<TABLE>(k);
+      n += (size_t) ((k >= kmin) & (k < top) & (i != diag));
+    }
+    return n;
+  }
+  for(size_t i = 0; i < m; ++i){
+    uint64_t u;
+    std::memcpy(&u, q + i, sizeof u);
+    const bool skip = zero_or_nan(u) || i == diag;
+    const uint64_t k = flip_key(u);
+    ix[n] = (uint32_t) i;
+    bc[n] = (uint16_t) bk.locate<TABLE>(k);
+    n += (size_t) ((k >= kmin) & (k < top) & !skip);
+  }
+  return n;
+}
+
+size_t column_buckets_any(const Cells &c, Team &tm, const Buckets &bk, size_t blk, size_t jj, size_t i0, size_t m, Work &w, uint64_t kmin,
+                          uint64_t kend, const uint64_t *&kk, const double *&q){
+  if(bk.map) return column_buckets_in<true>(c, tm, bk, blk, jj, i0, m, w, kmin, kend, kk, q);
+  return column_buckets_in<false>(c, tm, bk, blk, jj, i0, m, w, kmin, kend, kk, q);
+}
+
+// Multi: the first key of bucket d (0 for the low catch-all; nb + 1, the high catch-all, starts after the last cell); the end of the
+// keys of the buckets below d1 is range_first(d1), 0 for d1 = nb + 2 (no upper end)
+uint64_t range_first(const Buckets &bk, size_t d){
+  if(d == 0) return 0;
+  if(d >= bk.nb + 2) return 0;
+  const size_t ncells = bk.map ? bk.ncell : bk.nb;
+  size_t h = d - 1;                    // equal width: bucket d is cell d - 1
+  if(bk.map){
+    h = 0;
+    while(h < ncells && (size_t) bk.map[h] < d) ++h;
+  }
+  return bk.lo + ((uint64_t) std::min(h, ncells) << bk.t);
+}
+
+// Multi, the leader: the buckets cut into ranges of at most cap6 narrow entries and each range's keys. Wide buckets go to ext and do not
+// count, so no cut falls at an empty or a wide bucket (the catch-alls among them)
+void cut_ranges(Team &tm, const Buckets &bk){
+  const size_t NB = bk.nb + 2;
+  tm.ranges.assign(1, 0);
+  size_t in = 0;
+  for(size_t d = 0; d < NB; ++d){
+    const size_t e = bk.bits(d) > NARROW_BITS ? 0 : tm.tot[d];
+    if(e > tm.cap6) throw std::runtime_error("a value bucket holds more entries than the key pool of one pass; give the exact kernels' memory with the memory argument");
+    if(in + e > tm.cap6){
+      tm.ranges.push_back(d);
+      in = 0;
+    }
+    in += e;
+  }
+  tm.ranges.push_back(NB);
+  tm.kmin.clear();
+  tm.kend.clear();
+  for(size_t r = 0; r + 1 < tm.ranges.size(); ++r){
+    tm.kmin.push_back(range_first(bk, tm.ranges[r]));
+    tm.kend.push_back(range_first(bk, tm.ranges[r + 1]));
+  }
+}
+
+// Multi, the leader: six_storage for buckets [d0, d1) only
+void six_storage_range(Team &tm, const Buckets &bk, size_t d0, size_t d1){
+  const size_t NB = bk.nb + 2;
+  tm.sbase.assign(NB, 0);
+  tm.swide.assign(NB, 0);
+  size_t narrow = 0, wide = 0;
+  for(size_t d = d0; d < d1; ++d){
+    tm.swide[d] = bk.bits(d) > NARROW_BITS;
+    tm.sbase[d] = tm.swide[d] ? wide : narrow;
+    (tm.swide[d] ? wide : narrow) += tm.tot[d];
+  }
+  tm.ext.resize(wide);
+}
+
+// Multi: place_chunk_six for the entries of chunk ch in buckets [d0, d1) (keys [kmin, kend)), their buckets recomputed
+void place_chunk_range(const Cells &c, Team &tm, const Buckets &bk, size_t ch, Work &w, size_t d0, size_t d1, uint64_t kmin, uint64_t kend){
+  const Chunk &ck = tm.chunks[ch];
+  const uint32_t *cnt = tm.cnt.data() + ch * tm.stride;
+  size_t *at = w.at.data();
+  for(size_t d = d0; d < d1; ++d) at[d] = tm.sbase[d] + cnt[d];
+  const char *wide = tm.swide.data();
+  char *pool = tm.pool6.get();
+  uint64_t *ext = tm.ext.data();
+  const uint16_t *bc = w.bc.data();
+  const uint32_t *ix = w.ix.data();
+  for(size_t blk = ck.b0; blk < ck.b1; ++blk){
+    const size_t s = c.block_start[blk + 1] - c.block_start[blk], i0 = ck.i0, m = std::min(ck.i1, s) - i0;
+    for(size_t jj = 0; jj < s; ++jj){
+      const uint64_t *kk;
+      const double *q;
+      const size_t n = column_buckets_any(c, tm, bk, blk, jj, i0, m, w, kmin, kend, kk, q);
+      for(size_t t = 0; t < n; ++t){
+        const size_t d = bc[t], i = ix[t];
+        const uint64_t key = kk ? kk[i] : sortable_key(q[i]);
+        const uint64_t low = bk.map ? bk.low_bits<true>(key, d) : bk.low_bits<false>(key, d);
+        if(wide[d]) ext[at[d]++] = low;
+        else put48(pool + 6 * at[d]++, low);
+      }
+    }
+  }
+}
+
+// Multi: rank_buckets over buckets [d0, d1)
+void rank_range(Team &tm, const Buckets &bk, Work &w, size_t d0, size_t d1){
+  const size_t *start = w.start.data(), E = start[d1] - start[d0];
+  const size_t unit = std::max<size_t>(1, E / (RANK_UNITS * tm.size)), nunits = (E + unit - 1) / unit;
+  for(size_t u; (u = tm.next_bucket.fetch_add(1)) < nunits; ){
+    const size_t e1 = std::lower_bound(start + d0, start + d1, start[d0] + (u + 1) * unit) - start;
+    for(size_t d = std::lower_bound(start + d0, start + d1, start[d0] + u * unit) - start; d < e1; ++d){
+      const size_t m = start[d + 1] - start[d];
+      if(m == 0) continue;
+      if(m > BUCKET_MAX) throw std::runtime_error(BUCKET_ERROR);
+      const size_t s0 = tm.local ? 0 : start[d];
+      const int t = bk.bits(d);
+      if(tm.swide[d]){
+        RunKeys keys = {tm.ext.data() + tm.sbase[d]};
+        rank_bucket(keys, m, s0, t, w);
+      } else {
+        SixKeys keys = {tm.pool6.get() + 6 * tm.sbase[d]};
+        rank_bucket(keys, m, s0, t, w);
+      }
+    }
+  }
+}
+
+// Multi: the integer rank sums of chunk ch's entries in buckets [d0, d1), their buckets recomputed; rows to msum (a chunk's rows are
+// its own), columns to the team's column sums (isum / icnt), all divided after the last pass
+void sum_chunk_range(const Cells &c, Team &tm, const Buckets &bk, size_t ch, Work &w, size_t d0, size_t d1, uint64_t kmin, uint64_t kend){
+  const uint32_t *cnt = tm.cnt.data() + ch * tm.stride;
+  const char *ext = (const char *) tm.ext.data(), *pool6 = tm.pool6.get();
+  const char **rp = w.rp.data();
+  for(size_t d = d0; d < d1; ++d){
+    rp[d] = (tm.swide[d] ? ext + sizeof(uint64_t) * tm.sbase[d] : pool6 + 6 * tm.sbase[d]) + sizeof(uint32_t) * cnt[d];
+  }
+  const Chunk &ck = tm.chunks[ch];
+  const size_t *base = w.start.data();
+  const uint16_t *bc = w.bc.data();
+  const uint32_t *ix = w.ix.data();
+  for(size_t blk = ck.b0; blk < ck.b1; ++blk){
+    const size_t first = c.block_start[blk], s = c.block_start[blk + 1] - first;
+    const size_t i0 = ck.i0, m = std::min(ck.i1, s) - i0;
+    uint64_t *sc = tm.msum.data() + 2 * (first + i0);  // row sum and count of row i at 2 i, 2 i + 1
+    for(size_t jj = 0; jj < s; ++jj){
+      const uint64_t *kk;
+      const double *q;
+      const size_t n = column_buckets_any(c, tm, bk, blk, jj, i0, m, w, kmin, kend, kk, q);
+      uint64_t cs = 0;
+      for(size_t t = 0; t < n; ++t){
+        const size_t d = bc[t], i = ix[t];
+        uint32_t rank;
+        std::memcpy(&rank, rp[d], sizeof rank);
+        rp[d] += sizeof rank;
+        const uint64_t v = tm.local ? base[d] + rank : rank;
+        sc[2 * i] += v;
+        ++sc[2 * i + 1];
+        cs += v;
+      }
+      tm.isum[first + jj].fetch_add(cs, std::memory_order_relaxed);
+      tm.icnt[first + jj].fetch_add(n, std::memory_order_relaxed);
+    }
+  }
+}
+
+// Multi, one team member after the counts and their offsets: each range of buckets placed, ranked and summed in turn, then the
+// member's share of the scores, one division each
+void run_passes(const Cells &c, Team &tm, size_t me, const Buckets &bk, Work &w, const std::atomic<bool> &failed, double *snd, double *rcv){
+  const size_t n = c.node.size(), nchunks = tm.chunks.size(), NB = bk.nb + 2;
+  if(me == 0) cut_ranges(tm, bk);
+  tm.bar.wait(failed);
+  for(size_t r = 0; r + 1 < tm.ranges.size(); ++r){
+    const size_t d0 = tm.ranges[r], d1 = tm.ranges[r + 1];
+    if(me == 0){
+      six_storage_range(tm, bk, d0, d1);
+      tm.next_place = 0;
+      tm.next_bucket = 0;
+      tm.next_sum = 0;
+    }
+    tm.bar.wait(failed);
+    for(size_t ch; (ch = tm.next_place.fetch_add(1)) < nchunks; ) place_chunk_range(c, tm, bk, ch, w, d0, d1, tm.kmin[r], tm.kend[r]);
+    tm.bar.wait(failed);
+    rank_range(tm, bk, w, d0, d1);
+    tm.bar.wait(failed);
+    for(size_t ch; (ch = tm.next_sum.fetch_add(1)) < nchunks; ) sum_chunk_range(c, tm, bk, ch, w, d0, d1, tm.kmin[r], tm.kend[r]);
+    tm.bar.wait(failed);
+  }
+  const double denom = (double) w.start[NB] - 1.0;
+  for(size_t k = n * me / tm.size, k1 = n * (me + 1) / tm.size; k < k1; ++k){
+    snd[c.out[k]] = rank_mean(tm.msum[2 * k], tm.msum[2 * k + 1], denom);
+    rcv[c.out[k]] = rank_mean(tm.isum[k].load(std::memory_order_relaxed), tm.icnt[k].load(std::memory_order_relaxed), denom);
+    tm.msum[2 * k] = tm.msum[2 * k + 1] = 0;
+    tm.isum[k].store(0, std::memory_order_relaxed);
+    tm.icnt[k].store(0, std::memory_order_relaxed);
+  }
+}
+
+// After each grid: frees per-thread sort buffers above KEEP_SORT_BUFFER entries
+void trim_work(Work &w){
+  if(w.x.size() > KEEP_SORT_BUFFER){
+    std::vector<uint64_t>().swap(w.x);
+    std::vector<uint64_t>().swap(w.y);
+    std::vector<uint32_t>().swap(w.z);
+  }
+  if(w.pb.size() > KEEP_SORT_BUFFER) std::vector<uint64_t>().swap(w.pb);
+  if(w.group.capacity() > KEEP_SORT_BUFFER) std::vector<std::pair<uint64_t, uint64_t>>().swap(w.group);
 }
 
 // One team member: score grids until none are left; me = 0 leads
@@ -1292,6 +1653,11 @@ void run_team(const Cells &c, Team &tm, size_t me, const int *lig, const int *re
       split_buckets(tm, NB);
       tm.bar.wait(failed);
       for(size_t d = 0; d < NB; ++d) w.start[d + 1] = w.start[d] + tm.tot[d];
+      if(tm.multi){
+        run_passes(c, tm, me, bk, w, failed, S + g * n, R + g * n);
+        trim_work(w);
+        continue;
+      }
       if(tm.big){
         if(me == 0) six_storage(tm, bk);
         tm.bar.wait(failed);
@@ -1320,13 +1686,7 @@ void run_team(const Cells &c, Team &tm, size_t me, const int *lig, const int *re
         tm.icnt[k].store(0, std::memory_order_relaxed);
       }
     }
-    if(w.x.size() > KEEP_SORT_BUFFER){
-      std::vector<uint64_t>().swap(w.x);
-      std::vector<uint64_t>().swap(w.y);
-      std::vector<uint32_t>().swap(w.z);
-    }
-    if(w.pb.size() > KEEP_SORT_BUFFER) std::vector<uint64_t>().swap(w.pb);
-    if(w.group.capacity() > KEEP_SORT_BUFFER) std::vector<std::pair<uint64_t, uint64_t>>().swap(w.group);
+    trim_work(w);
   }
 }
 
@@ -1349,8 +1709,9 @@ void group_cells(Cells &c, const int *cell, const int *sample, size_t n){
   if(c.cap >= GRID_MAX) Rcpp::stop("grid scoring: too many cells per sample (the sum of squared sample sizes must stay below 2^52)");
 }
 
-// Sender and receiver scores (cell x pair) of the grids of ligands lp and receptor subunits rp (negative: the network score)
-Rcpp::List run_grids(const Cells &c, const int *lp, const int *rp, size_t G, int threads){
+// Sender and receiver scores (cell x pair) of the grids of ligands lp and receptor subunits rp (negative: the network score); a big grid
+// on several threads in `passes` ranges of buckets when passes > 1
+Rcpp::List run_grids(const Cells &c, const int *lp, const int *rp, size_t G, int threads, size_t passes){
   const size_t n = c.node.size();
   Rcpp::NumericMatrix sender = alloc_numeric_matrix(n, G), receiver = alloc_numeric_matrix(n, G);
   double *S = REAL(sender), *R = REAL(receiver);
@@ -1368,7 +1729,7 @@ Rcpp::List run_grids(const Cells &c, const int *lp, const int *rp, size_t G, int
   const size_t nteams = std::max<size_t>(1, std::min(std::min(nt, fit), G));
   std::vector<std::unique_ptr<Team>> teams;
   try {
-    for(size_t k = 0; k < nteams; ++k) teams.emplace_back(new Team(c, nt / nteams + (k < nt % nteams ? 1 : 0), nt == 1));
+    for(size_t k = 0; k < nteams; ++k) teams.emplace_back(new Team(c, nt / nteams + (k < nt % nteams ? 1 : 0), nt == 1, passes));
   } catch(std::bad_alloc &){
     Rcpp::stop("grid scoring: not enough memory for the grid buffers (" + std::to_string(nteams * bytes >> 20) + " MB)");
   }
@@ -1470,15 +1831,16 @@ Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp
   }
   c.Fb = c.Fown.data();
 
-  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads);
+  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads, 1);
 }
 
 // [[Rcpp::export]]
 Rcpp::List score_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample,
-                            Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads){
+                            Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, int passes = 1){
   const size_t n = sample.size(), G = lig.size();
   if((size_t) A.nrow() != n || (size_t) B.ncol() != n) Rcpp::stop("score_blocks_cpp: A needs one row and B one column per cell");
   if((size_t) rec.size() != G) Rcpp::stop("score_blocks_cpp: one receptor per ligand");
+  if(passes < 1) Rcpp::stop("score_blocks_cpp: passes must be at least 1");
   for(size_t k = 0; k < n; ++k){
     if(sample[k] < 1) Rcpp::stop("score_blocks_cpp: sample ids must be positive integers");
   }
@@ -1502,5 +1864,71 @@ Rcpp::List score_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, R
     c.block_run.push_back(0);
   }
 
-  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads);
+  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads, (size_t) passes);
+}
+
+// Memory mode: score_blocks_cpp ranking by the keys A + B' + Λ (f2.h). bytes, base, toff: Λ from influence_lambda_cpp for the same
+// cells and samples at the same p; D: the adjacency's row sums of the cells, in the order of sample; A and B as score_blocks_cpp's,
+// every entry positive and finite (their logs are taken)
+// [[Rcpp::export]]
+Rcpp::List score_lambda_cpp(Rcpp::RawVector bytes, Rcpp::NumericVector base, Rcpp::NumericVector toff, Rcpp::NumericVector D,
+                            Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig,
+                            Rcpp::IntegerVector rec, int threads, int p, int passes){
+  const size_t n = sample.size(), G = lig.size();
+  if((size_t) A.nrow() != n || (size_t) B.ncol() != n || (size_t) D.size() != n){
+    Rcpp::stop("score_lambda_cpp: one row of A, column of B and D per cell");
+  }
+  if((size_t) rec.size() != G) Rcpp::stop("score_lambda_cpp: one receptor per ligand");
+  if(p < 0 || p > 52) Rcpp::stop("score_lambda_cpp: p must be in 0..52");
+  if(passes < 1) Rcpp::stop("score_lambda_cpp: passes must be at least 1");
+  for(size_t k = 0; k < n; ++k){
+    if(sample[k] < 1) Rcpp::stop("score_lambda_cpp: sample ids must be positive integers");
+    if(!(D[k] > 0) || !std::isfinite(D[k])) Rcpp::stop("score_lambda_cpp: D must be positive and finite");
+  }
+  for(size_t g = 0; g < G; ++g){
+    if(lig[g] >= A.ncol() || rec[g] >= B.nrow() || (lig[g] < 0) != (rec[g] < 0)) Rcpp::stop("score_lambda_cpp: bad ligand or receptor index");
+  }
+  for(R_xlen_t k = 0; k < A.size(); ++k){
+    if(!(A[k] > 0) || !std::isfinite(A[k])) Rcpp::stop("score_lambda_cpp: A must be positive and finite");
+  }
+  for(R_xlen_t k = 0; k < B.size(); ++k){
+    if(!(B[k] > 0) || !std::isfinite(B[k])) Rcpp::stop("score_lambda_cpp: B must be positive and finite");
+  }
+
+  Cells c;
+  c.A = REAL(A);
+  c.B = REAL(B);
+  c.nrec = B.nrow();
+  std::vector<int> cell(n);
+  for(size_t k = 0; k < n; ++k) cell[k] = (int) k;
+  group_cells(c, cell.data(), INTEGER(sample), n);
+  const size_t nblocks = c.block_start.size() - 1;
+  if((size_t) base.size() != nblocks || (size_t) toff.size() != nblocks) Rcpp::stop("score_lambda_cpp: lambda does not match the samples");
+  for(size_t blk = 0; blk < nblocks; ++blk){  // every block's tiles, and the slack get48 reads past the last, inside bytes
+    const size_t s = c.block_start[blk + 1] - c.block_start[blk], T = (s + f2::TILE - 1) / f2::TILE;
+    if(!(toff[blk] >= 0) || toff[blk] + (double) (f2::TILE_BYTES * (T * (T + 1) / 2) + f2::SLACK) > (double) bytes.size()){
+      Rcpp::stop("score_lambda_cpp: lambda does not match the samples");
+    }
+  }
+  c.LamT = reinterpret_cast<const char *>(RAW(bytes));
+  c.lbase.resize(nblocks);
+  std::memcpy(c.lbase.data(), REAL(base), nblocks * sizeof(int64_t));
+  c.toff.resize(nblocks);
+  for(size_t blk = 0; blk < nblocks; ++blk) c.toff[blk] = (size_t) toff[blk];
+  c.call = ++tile_calls;
+  c.p = p;
+  c.lD52.resize(n);
+  c.kD.resize(n);
+  for(size_t k = 0; k < n; ++k){
+    c.lD52[k] = f2::fixlog52(D[c.out[k]]);
+    c.kD[k] = f2::round_shift(c.lD52[k], 52 - p);
+  }
+  c.block_run.push_back(0);
+  for(size_t blk = 0; blk < nblocks; ++blk){
+    c.block_fb.push_back(c.block_off[blk]);
+    c.block_gather.push_back(false);
+    c.block_run.push_back(0);
+  }
+
+  return run_grids(c, INTEGER(lig), INTEGER(rec), G, threads, (size_t) passes);
 }

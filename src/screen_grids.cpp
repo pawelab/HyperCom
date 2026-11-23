@@ -23,6 +23,13 @@
 // memory is slow to first touch, on Windows a batch of 60,000 cells screened 8-35% faster with kept ids. A thread that cannot start ends the run with an error (the
 // barriers let the others go). Worker threads take the calling thread's SSE control word, as in score_grids.cpp. Do not compile
 // with -ffast-math.
+//
+// Memory mode (screen_lambda_cpp): the same buckets, passes and teams on the integer keys of f2.h, A[i] + B'[j] + Λ[i, j], read from
+// Λ's tiles instead of F, so the bounds hold for the memory-mode scores as the exact ones do for the exact scores. The keys are
+// integers made from integers, so they do not depend on the threads either. Only the diagonal is skipped (a and b are positive and
+// finite, so no key stands for 0 or NaN). The count pass takes a unit's columns (one column of tiles) a chunk of rows at a time: their
+// Λ, gathered once from whole tiles into a strip, serves all of them. Memory: Λ's ~3 B per entry instead of the blocks' 8, so R gives
+// an id budget of 2 B per entry, one team for all threads, one id buffer.
 
 #include <Rcpp.h>
 #include <algorithm>
@@ -36,6 +43,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "f2.h"
 #include "grid_layout.h"
 #include "r_alloc.h"
 #if defined(__x86_64__) || defined(__i386__)
@@ -146,9 +154,10 @@ Layout make_layout(const int *sample, size_t n){
   return L;
 }
 
-// a and b of each block, contiguous
+// a and b of each block, contiguous; in memory mode also their keys (tile_keys)
 struct GridData {
   std::vector<std::vector<double>> a, b;
+  std::vector<std::vector<int64_t>> ka, kb;
 };
 
 void gather(const Layout &L, const double *a, const double *b, GridData &gd){
@@ -322,7 +331,88 @@ struct Input {
   const double *F, *A, *B;
   const int *lig, *rec;
   size_t nA, nB, n, G;
+  // Memory mode: Λ's tiles (f2.h) instead of F, which is then unused
+  const char *lam = nullptr;
+  std::vector<int64_t> base{};          // per block: Λ's base
+  std::vector<size_t> toff{};           // per block: byte offset of its tiles
+  std::vector<std::vector<int64_t>> lD{};  // per block: fixlog52(D) of its cells
+  int sh = 0;                           // 52 - p: the keys' rounding shift
 };
+
+const uint64_t SIGN = (uint64_t) 1 << 63;  // a key's int64 to an order-preserving uint64
+
+// Memory mode: the keys of each block's a and b, as score_grids.cpp makes them: ka = fix(ln a), kb = fix(ln b - ln D) + Λ's base
+void tile_keys(const Layout &L, const Input &in, GridData &gd){
+  gd.ka.resize(L.members.size());
+  gd.kb.resize(L.members.size());
+  for(size_t blk = 0; blk < L.members.size(); ++blk){
+    const size_t s = L.members[blk].size();
+    gd.ka[blk].resize(s);
+    gd.kb[blk].resize(s);
+    for(size_t k = 0; k < s; ++k){
+      gd.ka[blk][k] = f2::round_shift(f2::fixlog52(gd.a[blk][k]), in.sh);
+      gd.kb[blk][k] = f2::round_shift(f2::fixlog52(gd.b[blk][k]) - in.lD[blk][k], in.sh) + in.base[blk];
+    }
+  }
+}
+
+// Memory mode: Λ - base of entry (ii, jj) of block blk (ii != jj), from tile (I, J) with I <= J, so an entry below the diagonal
+// tiles reads its mirror; diagonal tiles are whole and read as stored
+inline int64_t tile_value(const Input &in, size_t blk, size_t ii, size_t jj){
+  const size_t T = f2::TILE;
+  if(ii / T > jj / T) std::swap(ii, jj);
+  const size_t I = ii / T, J = jj / T;
+  return (int64_t) f2::get48(in.lam + in.toff[blk] + f2::TILE_BYTES * (J * (J + 1) / 2 + I) + 6 * (T * (jj % T) + ii % T));
+}
+
+// Memory mode: sample_unit on the keys
+template <class Fn> void sample_tiles(const Layout &L, const Input &in, const GridData &gd, const Layout::Unit &u, size_t step, Fn fn){
+  const size_t s = L.members[u.blk].size();
+  const int64_t *ka = gd.ka[u.blk].data(), *kb = gd.kb[u.blk].data();
+  for(size_t q = (u.j0 * s + step - 1) / step * step; q < u.j1 * s; q += step){
+    const size_t jj = q / s, ii = q % s;
+    if(ii == jj) continue;
+    fn((uint64_t) (ka[ii] + kb[jj] + tile_value(in, u.blk, ii, jj)) ^ SIGN);
+  }
+}
+
+// Memory mode: count_unit on the keys. Row chunks outer: a unit's columns are one column of tiles, so each chunk's strip of their
+// Λ (column-major, from whole tiles; those below the diagonal tiles transposed) is gathered once for all of them. Ids by position
+// and counts do not depend on the order.
+template <class S> void count_tiles(const Layout &L, const Input &in, const GridData &gd, const Buckets &bk, const Layout::Unit &u,
+                                    S *cnt, uint16_t *ids){
+  static_assert(COLS == f2::TILE, "a unit of work is one column of tiles");
+  const size_t T = f2::TILE, s = L.members[u.blk].size(), off = L.off[u.blk], J = u.j0 / T, ncol = u.j1 - u.j0;
+  const int64_t *ka = gd.ka[u.blk].data(), *kb = gd.kb[u.blk].data();
+  const char *H = in.lam + in.toff[u.blk];
+  int64_t strip[COLS * CHUNK];
+  for(size_t i0 = 0; i0 < s; i0 += CHUNK){
+    const size_t m = std::min(CHUNK, s - i0), i1 = i0 + m;
+    for(size_t I = i0 / T; T * I < i1; ++I){
+      const size_t r0 = std::max(i0, T * I), r1 = std::min(i1, T * I + T);
+      const bool up = I <= J;
+      const char *t = H + f2::TILE_BYTES * (up ? J * (J + 1) / 2 + I : I * (I + 1) / 2 + J);
+      for(size_t b = 0; b < ncol; ++b){
+        int64_t *col = strip + b * m;
+        for(size_t r = r0; r < r1; ++r) col[r - i0] = (int64_t) f2::get48(t + 6 * (up ? T * b + r % T : T * (r % T) + b));
+      }
+    }
+    for(size_t jj = u.j0; jj < u.j1; ++jj){
+      const int64_t *col = strip + (jj - u.j0) * m, bj = kb[jj];
+      uint16_t *id = ids + off + jj * s + i0;
+      const size_t diag = jj - i0;     // wraps above m when the diagonal is not in these rows
+      for(size_t k = 0; k < m; ++k){
+        if(k == diag){
+          id[k] = SKIP;
+          continue;
+        }
+        const size_t d = bk.locate((uint64_t) (ka[i0 + k] + bj + col[k]) ^ SIGN);
+        ++cnt[d];
+        id[k] = (uint16_t) d;
+      }
+    }
+  }
+}
 
 struct Output {
   double *slo, *shi, *rlo, *rhi;
@@ -371,6 +461,7 @@ template <class S> struct Team {
     }
     for(size_t k = 0; k < in.n; ++k) b[k] = in.B[(size_t) in.rec[0] + k * in.nB];
     gather(L, in.A + (size_t) in.lig[0] * in.nA, b.data(), gd);
+    if(in.lam) tile_keys(L, in, gd);
     for(auto &u : unit) u.store(0);
   }
 };
@@ -387,6 +478,7 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
       if(tm.g < in.G){
         for(size_t c = 0; c < n; ++c) tm.b[c] = in.B[(size_t) in.rec[tm.g] + c * in.nB];
         gather(L, in.A + (size_t) in.lig[tm.g] * in.nA, tm.b.data(), tm.gd);
+        if(in.lam) tile_keys(L, in, tm.gd);
       }
       for(auto &u : tm.unit) u.store(0);
     }
@@ -395,8 +487,10 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
     if(g >= in.G) break;
 
     uint64_t lo = ~(uint64_t) 0, hi = 0;
+    auto range = [&](uint64_t key){ lo = std::min(lo, key); hi = std::max(hi, key); };
     for(size_t x = tm.unit[0].fetch_add(1); x < U; x = tm.unit[0].fetch_add(1)){
-      sample_unit(L, in.F, tm.gd, L.units[x], step, [&](uint64_t key){ lo = std::min(lo, key); hi = std::max(hi, key); });
+      if(in.lam) sample_tiles(L, in, tm.gd, L.units[x], step, range);
+      else sample_unit(L, in.F, tm.gd, L.units[x], step, range);
     }
     tm.lo[me] = lo;
     tm.hi[me] = hi;
@@ -404,8 +498,10 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
     set_range(bk, *std::min_element(tm.lo.begin(), tm.lo.end()), *std::max_element(tm.hi.begin(), tm.hi.end()));
     uint64_t *hm = tm.hist[me].data();
     std::fill(hm, hm + ((size_t) 1 << COARSE_BITS), 0);
+    auto tally = [&](uint64_t key){ ++hm[(key - bk.lo) >> bk.cshift]; };
     for(size_t x = tm.unit[1].fetch_add(1); x < U; x = tm.unit[1].fetch_add(1)){
-      sample_unit(L, in.F, tm.gd, L.units[x], step, [&](uint64_t key){ ++hm[(key - bk.lo) >> bk.cshift]; });
+      if(in.lam) sample_tiles(L, in, tm.gd, L.units[x], step, tally);
+      else sample_unit(L, in.F, tm.gd, L.units[x], step, tally);
     }
     if(!team_wait(tm.bar, k, failed)) return;
     for(size_t c = 0; c < bk.ncoarse; ++c){
@@ -416,7 +512,8 @@ template <class S> void run_member(const Layout &L, const Input &in, const Outpu
 
     S *cm = tm.cnt[me].data();
     for(size_t x = tm.unit[2].fetch_add(1); x < U; x = tm.unit[2].fetch_add(1)){
-      count_unit(L, in.F, tm.gd, bk, L.units[x], cm, tm.ids);
+      if(in.lam) count_tiles(L, in, tm.gd, bk, L.units[x], cm, tm.ids);
+      else count_unit(L, in.F, tm.gd, bk, L.units[x], cm, tm.ids);
     }
     if(!team_wait(tm.bar, k, failed)) return;
     const size_t nd = bk.nb + 2;
@@ -485,6 +582,56 @@ template <class S> void screen_teams(const Layout &L, const Input &in, const Out
   if(failed.load()) throw std::runtime_error("could not start the threads");
 }
 
+// The checks of the inputs both screening exports take
+void check_screen(const Rcpp::NumericMatrix &A, const Rcpp::NumericMatrix &B, const Rcpp::IntegerVector &sample,
+                  const Rcpp::IntegerVector &lig, const Rcpp::IntegerVector &rec){
+  const size_t n = A.nrow(), G = lig.size();
+  if((size_t) B.ncol() != n || (size_t) sample.size() != n || rec.size() != lig.size()){
+    Rcpp::stop("grid screening: inputs of different sizes");
+  }
+  for(size_t k = 0; k < n; ++k){
+    if(sample[k] < 1) Rcpp::stop("grid screening: sample ids must be positive integers");
+  }
+  for(size_t g = 0; g < G; ++g){
+    if(lig[g] < 0 || lig[g] >= A.ncol() || rec[g] < 0 || rec[g] >= B.nrow()) Rcpp::stop("grid screening: gene index out of range");
+  }
+}
+
+// Screen every grid of in (exact or memory mode) and return the four bound matrices, sender_lo, sender_hi, receiver_lo, receiver_hi
+Rcpp::List screen_run(const Layout &L, const Input &in, int threads, double id_budget, bool keep_ids){
+  const size_t n = in.n, G = in.G;
+  size_t biggest = 0;
+  for(const auto &m : L.members) biggest = std::max(biggest, m.size());
+  if((double) biggest * (double) L.total >= 9.2e18) Rcpp::stop("grid screening: a sample too big for 64-bit rank sums");
+  Rcpp::NumericMatrix slo = alloc_numeric_matrix(n, G, false), shi = alloc_numeric_matrix(n, G, false),
+    rlo = alloc_numeric_matrix(n, G, false), rhi = alloc_numeric_matrix(n, G, false);
+  if(G == 0 || n == 0){
+    return Rcpp::List::create(Rcpp::Named("sender_lo") = slo, Rcpp::Named("sender_hi") = shi, Rcpp::Named("receiver_lo") = rlo,
+                              Rcpp::Named("receiver_hi") = rhi);
+  }
+  const Output out = {REAL(slo), REAL(shi), REAL(rlo), REAL(rhi)};
+  const size_t step = std::max(std::max<size_t>(1, std::min<size_t>(SAMPLE, L.total / SAMPLE_MIN)), (L.total >> SAMPLE_BITS) | 1);
+  const int nt = std::max(1, threads);
+#ifdef HYPERCOM_SCREEN_WIDE
+  const bool narrow = false;            // test builds: the uint64 counts that grids of 2^32 entries or more use
+#else
+  const bool narrow = L.total < ((uint64_t) 1 << 32);
+#endif
+  const double ids = (double) L.total * sizeof(uint16_t);
+  const size_t k = id_budget > 0 ? (size_t) std::min<double>(nt, std::max(1.0, std::ceil(nt * ids / id_budget))) : (size_t) nt;
+  try {
+    if(narrow) screen_teams<uint32_t>(L, in, out, nt, k, step, keep_ids);
+    else screen_teams<uint64_t>(L, in, out, nt, k, step, keep_ids);
+  } catch(const std::bad_alloc &){
+    Rcpp::stop("grid screening: not enough memory for the bucket ids (" + std::to_string((size_t) ids >> 20) + " MB per team of threads)");
+  } catch(const std::exception &){
+    Rcpp::stop("grid screening: could not start " + std::to_string(nt) + " threads");
+  }
+
+  return Rcpp::List::create(Rcpp::Named("sender_lo") = slo, Rcpp::Named("sender_hi") = shi, Rcpp::Named("receiver_lo") = rlo,
+                            Rcpp::Named("receiver_hi") = rhi);
+}
+
 }  // namespace
 
 // The within-sample blocks of a dense influence matrix in the kernels' layout (grid_layout.h), copied from F without a temporary:
@@ -517,52 +664,64 @@ Rcpp::NumericVector dense_blocks_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector 
 // [[Rcpp::export]]
 Rcpp::List screen_blocks_cpp(Rcpp::NumericVector blocks, Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample,
                              Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads, double id_budget, bool keep_ids=false){
+  check_screen(A, B, sample, lig, rec);
   const size_t n = A.nrow(), G = lig.size();
-  if((size_t) B.ncol() != n || (size_t) sample.size() != n || rec.size() != lig.size()){
-    Rcpp::stop("grid screening: inputs of different sizes");
-  }
-  for(size_t k = 0; k < n; ++k){
-    if(sample[k] < 1) Rcpp::stop("grid screening: sample ids must be positive integers");
-  }
-  for(size_t g = 0; g < G; ++g){
-    if(lig[g] < 0 || lig[g] >= A.ncol() || rec[g] < 0 || rec[g] >= B.nrow()) Rcpp::stop("grid screening: gene index out of range");
-  }
   const Layout L = make_layout(INTEGER(sample), n);
   if((size_t) blocks.size() != L.total) Rcpp::stop("grid screening: blocks do not match the samples");
-  size_t biggest = 0;
-  for(const auto &m : L.members) biggest = std::max(biggest, m.size());
-  if((double) biggest * (double) L.total >= 9.2e18) Rcpp::stop("grid screening: a sample too big for 64-bit rank sums");
-  Rcpp::NumericMatrix slo = alloc_numeric_matrix(n, G, false), shi = alloc_numeric_matrix(n, G, false),
-    rlo = alloc_numeric_matrix(n, G, false), rhi = alloc_numeric_matrix(n, G, false);
-  if(G == 0 || n == 0){
-    return Rcpp::List::create(Rcpp::Named("sender_lo") = slo, Rcpp::Named("sender_hi") = shi, Rcpp::Named("receiver_lo") = rlo,
-                              Rcpp::Named("receiver_hi") = rhi);
-  }
   const Input in = {REAL(blocks), REAL(A), REAL(B), INTEGER(lig), INTEGER(rec), (size_t) A.nrow(), (size_t) B.nrow(), n, G};
-  const Output out = {REAL(slo), REAL(shi), REAL(rlo), REAL(rhi)};
-  const size_t step = std::max(std::max<size_t>(1, std::min<size_t>(SAMPLE, L.total / SAMPLE_MIN)), (L.total >> SAMPLE_BITS) | 1);
-  const int nt = std::max(1, threads);
-#ifdef HYPERCOM_SCREEN_WIDE
-  const bool narrow = false;            // test builds: the uint64 counts that grids of 2^32 entries or more use
-#else
-  const bool narrow = L.total < ((uint64_t) 1 << 32);
-#endif
-  const double ids = (double) L.total * sizeof(uint16_t);
-  const size_t k = id_budget > 0 ? (size_t) std::min<double>(nt, std::max(1.0, std::ceil(nt * ids / id_budget))) : (size_t) nt;
-  try {
-    if(narrow) screen_teams<uint32_t>(L, in, out, nt, k, step, keep_ids);
-    else screen_teams<uint64_t>(L, in, out, nt, k, step, keep_ids);
-  } catch(const std::bad_alloc &){
-    Rcpp::stop("grid screening: not enough memory for the bucket ids (" + std::to_string((size_t) ids >> 20) + " MB per team of threads)");
-  } catch(const std::exception &){
-    Rcpp::stop("grid screening: could not start " + std::to_string(nt) + " threads");
-  }
 
-  return Rcpp::List::create(Rcpp::Named("sender_lo") = slo, Rcpp::Named("sender_hi") = shi, Rcpp::Named("receiver_lo") = rlo,
-                            Rcpp::Named("receiver_hi") = rhi);
+  return screen_run(L, in, threads, id_budget, keep_ids);
 }
 
-// Free the bucket ids that screen_blocks_cpp kept (keep_ids)
+// Memory mode: screen_blocks_cpp on the keys of f2.h, from Λ's tiles (bytes, base, toff as influence_lambda_cpp returns them, made at
+// p fractional bits), D the adjacency's row sums of the cells in the order of sample; A and B positive and finite (else R screens
+// the blocks). Bounds of the memory-mode scores; ids kept as screen_blocks_cpp keeps them, in the same buffers
+// [[Rcpp::export]]
+Rcpp::List screen_lambda_cpp(Rcpp::RawVector bytes, Rcpp::NumericVector base, Rcpp::NumericVector toff, Rcpp::NumericVector D,
+                             Rcpp::NumericMatrix A, Rcpp::NumericMatrix B, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig,
+                             Rcpp::IntegerVector rec, int threads, double id_budget, bool keep_ids, int p){
+  check_screen(A, B, sample, lig, rec);
+  const size_t n = A.nrow(), G = lig.size();
+  if((size_t) D.size() != n) Rcpp::stop("grid screening: inputs of different sizes");
+  if(p < 0 || p > 52) Rcpp::stop("grid screening: p must be in 0..52");
+  for(R_xlen_t k = 0; k < A.size(); ++k){
+    if(!(A[k] > 0) || !std::isfinite(A[k])) Rcpp::stop("grid screening: A must be positive and finite in memory mode");
+  }
+  for(R_xlen_t k = 0; k < B.size(); ++k){
+    if(!(B[k] > 0) || !std::isfinite(B[k])) Rcpp::stop("grid screening: B must be positive and finite in memory mode");
+  }
+  for(size_t k = 0; k < n; ++k){
+    if(!(D[k] > 0) || !std::isfinite(D[k])) Rcpp::stop("grid screening: D must be positive and finite");
+  }
+  const Layout L = make_layout(INTEGER(sample), n);
+  const size_t nblocks = L.members.size();
+  if((size_t) base.size() != nblocks || (size_t) toff.size() != nblocks) Rcpp::stop("grid screening: lambda does not match the samples");
+  // Every block's tiles, and the slack get48 reads past the last slot, inside bytes
+  for(size_t blk = 0; blk < nblocks; ++blk){
+    const double T = std::ceil((double) L.members[blk].size() / f2::TILE);
+    if(!(toff[blk] >= 0) || toff[blk] != std::floor(toff[blk]) ||
+       toff[blk] + (double) f2::TILE_BYTES * (T * (T + 1) / 2) + f2::SLACK > (double) bytes.size()){
+      Rcpp::stop("grid screening: lambda's tiles do not fit its bytes");
+    }
+  }
+  Input in = {nullptr, REAL(A), REAL(B), INTEGER(lig), INTEGER(rec), (size_t) A.nrow(), (size_t) B.nrow(), n, G};
+  in.lam = reinterpret_cast<const char *>(RAW(bytes));
+  in.sh = 52 - p;
+  in.base.resize(nblocks);
+  if(nblocks > 0) std::memcpy(in.base.data(), REAL(base), nblocks * sizeof(int64_t));  // int64 bits in doubles
+  in.toff.resize(nblocks);
+  in.lD.resize(nblocks);
+  for(size_t blk = 0; blk < nblocks; ++blk){
+    const std::vector<int> &m = L.members[blk];
+    in.toff[blk] = (size_t) toff[blk];
+    in.lD[blk].resize(m.size());
+    for(size_t k = 0; k < m.size(); ++k) in.lD[blk][k] = f2::fixlog52(D[m[k]]);
+  }
+
+  return screen_run(L, in, threads, id_budget, keep_ids);
+}
+
+// Free the bucket ids that screen_blocks_cpp and screen_lambda_cpp kept (keep_ids)
 // [[Rcpp::export]]
 void screen_release_cpp(){
   kept_ids.clear();

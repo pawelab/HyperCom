@@ -218,6 +218,16 @@ By default the influence matrix is never built in full, so its memory grows with
 `infmat.method="lu"` builds it in full and gives exactly the numbers of HyperCom 0.0.0.9000 (the default agrees with them to about
 1e-15), but needs two matrices of all cells and genes squared.
 
+### Bigger samples
+- **Memory mode.** HyperCom estimates the memory of scoring before it starts. If the exact kernels (about 17.6 bytes per pair of
+  cells in the same sample) do not fit, it scores in memory mode: about 5.5 bytes per pair, priorities within ~1e-11 of exact.
+  About 100,000 cells in one sample fit in 64 GB. If even that does not fit, the run stops at once with the estimate.
+- **Tell it the memory.** `memory=` is the gigabytes the run may use (default: 90% of the computer's). **On a cluster give the
+  job's request** (e.g. `memory=64`): the scheduler may not stop a job that uses more.
+- **Screened real pairs.** With p-values, real pairs are screened like the background pairs and only 5-10% are scored in full.
+  Priorities are within ~1e-8 of exact; p-values, p.adj and order are the same, in the same or less time. `exact.priority=TRUE`
+  scores every pair in full (e.g. to compare with HyperCom 0.2).
+
 ### Runs that stop
 Scoring the pairs takes almost all the time: hours on large data. As it goes, HyperCom saves the scored pairs in
 `<outdir>/6.priority/cache`. **If a run stops** (cluster time limit, crash, closed R session), **run the same call again.** The

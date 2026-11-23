@@ -60,7 +60,8 @@ grid_cells <- function(nodes, metadata){
 #' @param ligands A vector of strings of ligand names, NA for the network score
 #' @param receptors A vector of strings of receptor subunit names, NA for the network score
 #' @param threads An integer number of threads
-#' @param blocks A numeric vector from influence_blocks for a hypercom_influence, NULL to make it here
+#' @param blocks A numeric vector from influence_blocks or a hypercom_lambda (memory mode, lambda_blocks) for a hypercom_influence, NULL
+#' to make the blocks here
 #' @returns A list of two matrices, sender and receiver, with one row per cell and one column per pair
 #' @noRd
 score_grids <- function(infMat, metadata, ligands, receptors, threads=1, blocks=NULL){
@@ -85,7 +86,14 @@ score_grids <- function(infMat, metadata, ligands, receptors, threads=1, blocks=
     rec.genes <- unique(rec[rec >= 0])
     A <- influence_slice(infMat, g$idx + 1L, lig.genes + 1L, threads)
     B <- influence_slice(infMat, rec.genes + 1L, g$idx + 1L, threads)
-    sr <- score_blocks_cpp(blocks, A, B, g$sample, match(lig, lig.genes, nomatch=0L) - 1L, match(rec, rec.genes, nomatch=0L) - 1L, threads)
+    lc <- match(lig, lig.genes, nomatch=0L) - 1L
+    rc <- match(rec, rec.genes, nomatch=0L) - 1L
+    if(inherits(blocks, "hypercom_lambda")){
+      check_tiles(A, B, blocks$entries)
+      sr <- score_lambda_cpp(blocks$bytes, blocks$base, blocks$toff, blocks$D, A, B, g$sample, lc, rc, threads, blocks$p, blocks$passes)
+    } else {
+      sr <- score_blocks_cpp(blocks, A, B, g$sample, lc, rc, threads)
+    }
   } else {
     sr <- score_grids_cpp(infMat, g$idx, g$sample, lig, rec, threads)
   }
