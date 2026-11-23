@@ -1,5 +1,5 @@
 # AGENTS.md: HyperCom
 
-Read `inst/AGENTS.md`. One home: it install with package, so agents using HyperCom see same file.
+Read `inst/AGENTS.md`. It is installed with the package, so agents that use HyperCom read the same file.
 
-This file only point there, for agents in source repo. Build-ignored (`.Rbuildignore`).
+This file only points there, for agents working in the source repository. It is left out of the package build (`.Rbuildignore`).

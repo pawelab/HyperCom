@@ -1,20 +1,89 @@
 # HyperCom 0.3.0
 
-Bigger samples in less memory and time: 100,000 cells in one sample with p-values took 8.4 h and 52 GB (16 threads). Runs with
-p-values are as fast or faster at every size; their priorities differ from 0.2.2's by at most about 1e-8, never in order (`exact.priority=TRUE` gives 0.2.2's).
-Runs without p-values that fit in memory are unchanged.
+Bigger samples in less memory, faster p-values and simpler arguments.
 
-* **Memory mode.** When the exact grid kernels (about 17.6 bytes per within-sample cell pair) do not fit, `prioritize_lr()` scores from
-  log-domain integer keys of the influence matrix, stored as tiles of each block's upper triangle and ranked in up to 3 passes (about
-  5.5 bytes per pair). Priorities are within ~1e-11 of exact. New argument `memory`: the gigabytes a run may use (default 90% of the
-  computer's memory; give a cluster job's request). Needs the default `"woodbury"` influence matrix. A run that cannot fit stops at
-  once with the estimate, and verbose runs report it.
-* **Screened real pairs.** With `significance=TRUE`, real pairs are screened like background pairs, and only those whose p-value, rank
-  or balance term the bounds leave undecided (5-10%) are scored exactly; the others' priorities are the midpoints of their bounds
-  (within ~1e-8 of exact as measured, median ~1e-9). P-values, p.adj and order are those of exact scoring. New argument `exact.priority` (default
-  `FALSE`): `TRUE` scores every pair exactly.
-* Both arguments are also in `HyperCom()`, `HyperCom_seurat()` and `HyperCom_sce()`. A cache made by an earlier version, or by the
-  other kernels, is not reused.
+* **Memory mode.** A sample whose exact scoring does not fit in memory is scored in a mode that needs about a third of the memory,
+  with priorities within ~1e-11 of exact scoring. About 100,000 cells in one sample fit in 64 GB (8.2 h on 16 threads, with
+  p-values).
+* **Faster p-values.** With `significance=TRUE`, the real pairs are screened like the background pairs, and only those whose rank
+  or p-value is in doubt are scored fully. The other priorities are estimates: typically within ~1e-9 of exact (0.2.2's), up to
+  ~1e-7 on the bundled data (1.5e-8 measured on the full bundled run). P-values, p.adj and order are exact. `exact.priority=TRUE`
+  gives exact values.
+* Runs without p-values that fit in memory give 0.2.2's results.
+
+## Breaking changes
+
+* **All cores by default.** `parallel` is gone from every function, and every function now uses one thread per physical core by
+  default (`threads=NULL`); before, the default was one thread. Give `threads=1` to run on one thread, or another number. Results
+  do not depend on the number of threads.
+* **`cache` is now `resume`**, in `HyperCom()`, `prioritize_lr()` and the wrappers.
+* **R 4.2 or later** (64-bit) and Matrix 1.5 or later are needed.
+* **Esc / Ctrl-C now stops a running step** within about a second; a run stopped while pairs are scored continues from its cache
+  when run again.
+* **New argument orders.** The leading arguments are unchanged, so calls that give the first arguments by position still work; give
+  the others by name:
+  * `HyperCom(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=1, significance=FALSE, seed=NULL, r=0.5,
+    infmat.method="woodbury", exact.priority=FALSE, threads=NULL, memory.gb=NULL, resume=TRUE, verbose=TRUE, outdir="HyperCom")`
+  * `prioritize_lr(lrs, adj, infMat, metadata, weights=1, significance=FALSE, seed=NULL, exact.priority=FALSE, threads=NULL,
+    memory.gb=NULL, resume=TRUE, verbose=TRUE, outdir="6.priority")`
+  * `score_hypercom(infMat, metadata, ligand=NULL, receptors=NULL, threads=NULL, memory.gb=NULL, verbose=FALSE)`
+  * `generate_infMat(adj, r=0.5, method=NULL, hyperedges=NULL, threads=NULL, outfile="4.infMat.rds")`: `outfile` moved last;
+    `method=NULL` picks `"woodbury"` when the hyperedges are known and `"lu"` otherwise, as leaving out `method` did before.
+* **Wrappers pass arguments on.** `HyperCom_seurat(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, ...)`
+  and `HyperCom_sce(sce, lrdb, sample, assay="counts", group=NULL, keep=NULL, ...)` pass every other argument on to `HyperCom()`;
+  a misspelled argument stops with "unused argument".
+* The bundled mouse database `cellchat.mm.lrdb` has 2,374 interactions: the 3 whose receptor has no mouse gene (RARRES2_GPR1,
+  H2-D_KLRA, H2-K1_KLRA) are left out. They were never used.
+* Kept numeric and logical metadata columns (`keep`) stay numeric or logical: gene rows get `NA` in them instead of the text "gene"
+  (text and factor columns still get "gene").
+* The rows and columns of an influence matrix made by `"woodbury"` are named `node`, like those of the adjacency
+  (`dimnames(infMat)`, `as.matrix(infMat)`, `infMat[i, j]`).
+* The cache of a run stopped under 0.2.x is not reused (the version changed).
+
+## New arguments
+
+* `memory.gb` in `HyperCom()`, the wrappers, `prioritize_lr()` and `score_hypercom()`: the gigabytes (10^9 bytes) a run may use.
+  The default is 90% of the computer's memory, or on Linux of a container's or cluster job's memory limit when that is smaller.
+  HyperCom estimates the memory of scoring before it starts (about 17.6 bytes per pair of cells in the same sample, plus about
+  1.1 GB) and switches to memory mode (about 5.5 bytes per pair) when that does not fit; memory mode needs the default
+  `infmat.method="woodbury"`. A run that cannot fit even so stops at once, giving the estimate. On a cluster, give the job's memory
+  request. `score_hypercom()` switches the same way, so it works after a `HyperCom()` run that needed memory mode.
+* `exact.priority` in `HyperCom()`, the wrappers and `prioritize_lr()` (default `FALSE`): `TRUE` scores every real pair exactly
+  when `significance=TRUE`.
+* `r` in `HyperCom()` and the wrappers: the restart probability of `generate_infMat()` (default 0.5, as before).
+* `verbose` in `score_hypercom()`: reports the memory the scoring needs.
+* `HyperCom(outdir=NULL)` runs without writing files (and keeps no cache to resume from).
+
+## Fixes
+
+* Cells and genes that no path of the hypergraph connects to the rest are left out by `generate_hyperedges()`, with a warning that
+  counts them (they could neither send nor receive anything); `HyperCom()` and `prioritize_lr()` then leave out the interactions of
+  their genes, `prioritize_lr()` with a warning.
+  Connected data are unchanged.
+* `print()` and `as.matrix()` of the adjacency and of the influence matrix work without `library(HyperCom)` (e.g.
+  `HyperCom::HyperCom()`), and `as.matrix()` gives a matrix when the Matrix package is attached.
+* Without gene rows in `metadata`, priorities counted one group too few; groups are now counted over the cells.
+* `HyperCom()` on counts held on disk or delayed (e.g. a DelayedArray or HDF5 matrix) reads the genes of the database only, as
+  `HyperCom_sce()` did, instead of failing at the hypergraph step.
+* `generate_infMat(method="lu")` checks `r` like the other methods.
+
+## New checks
+
+* The interaction table (`lrdb`, and `lrs` in `generate_hyperedges()` and `prioritize_lr()`) is checked: the second column must be
+  `ligand` and the others `r1`, `r2`, ... (another column stops, naming it, with a hint for CellChat's own interaction table);
+  interaction names must be present, distinct and differ from gene names; factors and spaces are cleaned and empty names (`""`) read
+  as missing. Interactions without a ligand or a receptor are left out with a warning; an empty table stops.
+* Missing gene names (`NA` row names of counts) are never matched.
+* `prioritize_lr()` and `score_hypercom()` stop at once on metadata that does not come from `generate_metadata()` (columns cell,
+  sample and group), and `prioritize_lr(significance=TRUE)` when it has no gene rows.
+* `HyperCom()` stops before it writes a file when a cell that expresses a ligand or receptor gene has a missing sample or group, or
+  one named "gene", and when the scoring cannot fit in memory; `outdir` naming an existing file stops too.
+* Memory mode stops at the start, giving the memory of exact scoring, when the hypergraph is not connected (possible only with
+  hyperedges not made by `generate_hyperedges()`).
+* A cache that is not reused because the run switched between exact scoring and memory mode (which follows `memory.gb` and the
+  computer's memory) now says so; caches made from other inputs, by another version of HyperCom, or damaged are moved aside as before.
+* `significance`, `exact.priority`, `resume` and `verbose` must each be `TRUE` or `FALSE`.
+* A missing `sample` argument stops with how to give one (one sample: `metadata$sample <- "all"`).
 
 # HyperCom 0.2.2
 
