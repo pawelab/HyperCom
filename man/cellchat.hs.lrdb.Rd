@@ -5,8 +5,10 @@
 \alias{cellchat.hs.lrdb}
 \title{CellChat human ligand-receptor interactions}
 \format{
-A dataframe of 2240 interactions with columns interaction (its name), ligand (a human gene symbol) and r1 to r4 (the
-receptor genes, NA where a receptor complex has fewer subunits)
+A data frame of 2240 interactions with columns interaction (its name), ligand (a human gene symbol) and r1 to r4 (the
+receptor genes, NA where a receptor complex has fewer subunits). A few interactions have the same genes as another one under
+another name (13 such sets, e.g. ADM_CALCR_RAMP1 and ADM_CALCRL_RAMP1, as in CellChat): both get the same priority, and both count
+in the Benjamini-Hochberg adjustment
 }
 \description{
 The ligand-receptor interactions of the CellChat database for H. sapiens, in the format HyperCom reads as \code{lrdb}.

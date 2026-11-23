@@ -2,94 +2,133 @@
 % Please edit documentation in R/prioritize.R
 \name{prioritize_lr}
 \alias{prioritize_lr}
-\title{Order ligand-receptor pairs by signaling strength and specificity}
+\title{Rank ligand-receptor pairs by signaling strength and specificity}
 \usage{
 prioritize_lr(
   lrs,
   adj,
   infMat,
   metadata,
-  weights = c(1),
+  weights = 1,
   significance = FALSE,
-  parallel = FALSE,
-  outdir = "6.priority",
-  threads = NULL,
   seed = NULL,
+  exact.priority = FALSE,
+  threads = NULL,
+  memory.gb = NULL,
+  resume = TRUE,
   verbose = TRUE,
-  cache = TRUE,
-  memory = NULL,
-  exact.priority = FALSE
+  outdir = "6.priority"
 )
 }
 \arguments{
-\item{lrs}{A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
+\item{lrs}{A data frame of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
 in the counts matrix}
 
 \item{adj}{An adjacency from generate_adjacency_matrix, or a named adjacency matrix}
 
 \item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
-\item{metadata}{A dataframe from generate_metadata, containing columns named cell, sample and group}
+\item{metadata}{A data frame from generate_metadata, with columns cell, sample and group and one row per node of infMat (cells and
+genes; the p-values draw background pairs from the gene rows)}
 
-\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
-score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
+\item{weights}{A vector of numbers of at least 0, one result table each: the weight of frac, the fraction of cells expressing a
+pair's genes, in the priority score. 1 (the default) weighs it like the other four terms, less than 1 favors pairs of fewer cells,
+0 leaves it out}
 
-\item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
+\item{significance}{A boolean of whether to add p-values (columns p and p.adj) from 1000 background pairs; FALSE by default}
 
-\item{parallel}{A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
-not tell them apart)}
+\item{seed}{An integer seed for drawing the background pairs, so that p-values are reproducible, or NULL (the default) to use the
+session's random numbers; the session's random state is restored afterwards. Ignored without significance}
 
-\item{outdir}{A string naming the output directory, or NULL to write no files}
+\item{exact.priority}{A boolean of whether to score every real pair exactly when significance is TRUE. FALSE (the default) screens
+the real pairs, in the same or less time: priorities typically within ~1e-9 of exact, up to ~1e-7 on the bundled data (1.5e-8
+measured on the full bundled run; more with a very small lrdb, e.g. 3e-5 with 15 pairs); p-values, p.adj and order exact. TRUE
+gives exact values. Without significance every pair is scored exactly}
 
-\item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
-them all}
+\item{threads}{An integer number of threads, NULL (the default) for one per physical core, or 1 to run on one thread; a number above
+the cores available to R warns and uses them all. Results do not depend on it}
 
-\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
-random state is restored afterwards}
+\item{memory.gb}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
+of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It decides between exact scoring and
+memory mode (see the Memory section of \code{prioritize_lr}). On a cluster give the job's memory request, as the computer's memory may
+be more than the job may use}
 
-\item{verbose}{A boolean of whether to report progress as messages: the pairs scored about every 5 s with
-the time left, and the top pair of each weight}
+\item{resume}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
+stopped when the same call is run again (see Stopped runs); TRUE by default, ignored when outdir is NULL}
 
-\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
-stopped when run again; ignored when outdir is NULL}
+\item{verbose}{A boolean of whether to report progress as messages: the memory needed, the pairs scored about every 5 s with the
+time left, and the top pair of each weight}
 
-\item{memory}{A number of gigabytes the run may use, NULL for 90\% of the computer's memory, or Inf for no limit. When the exact
-grid kernels (about 17.6 bytes per within-sample cell pair, the sum of squared sample sizes) do not fit, a "woodbury" influence matrix
-is scored in memory mode (log-domain tiles, about 5.5 bytes per pair, priorities within ~1e-11 of exact); if that does not
-fit either, the run stops with the estimate. On a cluster give the memory of the job: the scheduler may not stop a job that uses more}
-
-\item{exact.priority}{A boolean of whether to score every real pair exactly. FALSE (with significance) screens the real pairs too and
-scores exactly only those whose p-value or rank, or whose balance term, the bounds leave undecided: the other priorities are the
-midpoints of their bounds (measured within ~1e-8 of exact, median ~1e-9), and p-values, p.adj and order are those of exact scoring, in the same
-or less time. Without significance every pair is scored exactly}
+\item{outdir}{A string naming the output directory for the files priority.\if{html}{\out{<weight>}}.csv (and the cache), or NULL to write no files}
 }
 \value{
-A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
-p.adj when significance is TRUE
+A list of data frames named by weight (e.g. "1"), each with the interactions of lrs ordered by decreasing priority: the
+columns of lrs, priority, and with significance p and p.adj
 }
 \description{
-\code{prioritize_lr} returns an ordered list of ligand-receptor pairs
+\code{prioritize_lr} returns the ligand-receptor pairs ranked by a priority score, one table per weight
 }
 \details{
-This function takes the ligand-receptor pairs, the adjacency matrix, a named influence matrix and the corresponding metadata
-and ranks the pairs by a priority score: the weighted geometric mean of five terms of the cells that express a pair's genes (their
-fraction of all cells, the smallest fraction of cells expressing one of its genes, the mean of each cell's larger score as sender
-or receiver, how evenly they split into senders and receivers, and how much they concentrate in some groups). Cells are scored once
-for all weights; parallel or threads use several CPU cores.
-With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
-high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
-Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning. Background
-pairs are first screened: one pass over their cell grids bounds their priorities without ranking the cells, and only the few whose
-bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time. Real pairs
-are screened too unless exact.priority is TRUE, and data whose grids do not fit in memory are scored in memory mode (memory).
-With outdir set and cache=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache} while pairs are scored, and the folder is
-removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
-continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped on the same
-type of computer (on another type the BLAS can change the last bits of a "woodbury" influence matrix, and priorities by about
-1e-13); without seed it also continues with the background pairs drawn before. Weights and threads may differ. A cache made from other inputs (or
-damaged) is not used: it is moved to \verb{<outdir>/cache.old}, with a warning. If the cache cannot be written, scoring goes on without
-it, with a warning.
+This function takes the interactions, the adjacency, the influence matrix and the metadata made by the earlier steps (as
+\code{HyperCom} does) and ranks the ligand-receptor pairs. Every cell gets a sender and a receiver score for each pair (see
+\code{score_hypercom}); cells are scored once for all weights.
 }
+\section{Priority score}{
+
+The priority of a pair is the weighted geometric mean of five terms of the cells that express any of its genes:
+\itemize{
+\item frac: their fraction of all cells (its weight is \code{weights}; the others have weight 1);
+\item pct.min: the smallest fraction of cells expressing one of the pair's genes;
+\item max: the mean of each cell's larger score, as sender or as receiver;
+\item balance: how evenly the cells split into senders and receivers;
+\item purity: how concentrated the cells are in some groups (the group column of metadata). Cells spread exactly evenly over the groups
+give purity 0, and so priority 0; without groups purity is 1.
+}
+
+There is one ranking over all cells: groups enter only through purity, not as a ranking per group.
+}
+
+\section{P-values}{
+
+With significance=TRUE, 1000 background pairs of random genes of the hypergraph are scored like the real pairs. The p-value of a
+pair (column p) is the fraction of background pairs whose priority is at least as high, so it moves in steps of 0.001 and 0 means
+none (report p < 0.001); p.adj is p with the Benjamini-Hochberg adjustment. Background pairs without a priority (NaN) are left
+out, with a warning.
+
+To save time, pairs are first screened: a quick pass gives lower and upper bounds of each priority, and only the pairs whose rank
+or p-value the bounds cannot settle are scored fully. The priorities of the other real pairs are estimates (the middle of their
+bounds): typically within ~1e-9 of exact, up to ~1e-7 on the bundled data (1.5e-8 measured on the full bundled run). P-values,
+p.adj and order are exact. exact.priority=TRUE gives exact values.
+}
+
+\section{Memory}{
+
+Memory grows with the number of pairs of cells in the same sample: the sum over samples of the squared number of cells (one
+sample of 30,000 cells: 9e8 pairs). Exact scoring needs about 17.6 bytes per pair (16 bytes plus 10\%), plus about 1.1 GB for the
+rest of the run: about 17 GB for one sample of 30,000 cells. When that is more than memory.gb, the pairs are scored in memory
+mode, which needs about 5.5 bytes per pair (plus the same 1.1 GB) and gives priorities within ~1e-11 of exact scoring; memory
+mode needs an influence matrix made with the default method "woodbury". When neither fits, the run stops at the start, giving
+the estimate. Splitting the cells into more samples saves memory but changes which cells are compared, and so the results.
+
+The estimate is an upper bound with a floor of about 1.1 GB (1 GiB for the rest of the run): small runs report about 1.08 GB
+while using less, and memory.gb below that always stops.
+}
+
+\section{Stopped runs}{
+
+With outdir set and resume=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache}. If the run stops (time limit of a cluster
+job, crash, Esc), run the same call again: it continues where it stopped, losing at most the last batch of pairs. The results
+are those of a run that never stopped on the same type of computer (another type of CPU can change the last digits, about
+1e-13). Without seed, the run keeps the background pairs drawn before it stopped. weights and threads may differ between the
+calls. The cache folder is removed once the priority files are written.
+
+A cache is not used when the run differs in its data (adj, infMat, or the cells' sample or group in metadata; through HyperCom
+this means counts, lrdb, metadata, r or infmat.method), in its kind of scoring (exact or memory mode, which follows memory.gb and
+the computer's memory) or in its version of HyperCom, or when the cache is damaged. It is then moved to \verb{<outdir>/cache.old},
+with a warning that says why: rename it back to continue the run it belongs to. If the cache cannot be written (e.g. a full
+disk), scoring goes on without it, with a warning.
+}
+
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
 lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)

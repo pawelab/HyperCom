@@ -1,6 +1,6 @@
-# Each test is a bug of handwritten b999a01, numbered as in the project's findings list (wiki/findings.md), fixed on this branch. The fixes
-# of #1, #14, #16, #20 and #27 are asserted in test-inputs.R, of #9 and #12 in test-prioritize_lr.R, of #10 (seeded p-values) in
-# test-exact.R; #13 has no behaviour to assert; #7 and #8 (the cluster) went with the cl argument.
+# Inputs that handwritten (the original code) mishandled, each test numbered as in the list of those bugs. The fixes of #1, #14, #16,
+# #20 and #27 are asserted in test-inputs.R, #6 in test-wrappers.R, #9 and #12 in test-prioritize_lr.R and #10 (seeded p-values) in
+# test-exact.R.
 
 test_that("#2 a cell with a missing sample stops instead of becoming a gene", {
   md <- fx$input$metadata
@@ -28,21 +28,24 @@ test_that("#5 scoring a gene missing from the graph fails with a clear message",
   expect_error(score_hypercom(fx$output$infMat, fx$output$metadata, ligand="NotAGene", receptors="Sdc4"), "NotAGene")
 })
 
-test_that("#6 HyperCom restores the working directory", {
-  dir <- withr::local_tempdir()
-  withr::local_dir(dir)
-  run_hypercom("run")
-
-  expect_identical(normalizePath(getwd()), normalizePath(dir))
-})
-
-test_that("#11 the bundled counts can be subset right after library(HyperCom)", {
+test_that("#11 the bundled counts can be subset after library(HyperCom), and print and as.matrix dispatch without it", {
   skip_on_cran()
-  rscript <- file.path(R.home("bin"), "Rscript")
-  out <- suppressWarnings(system2(rscript, c("-e", shQuote("library(HyperCom); cat(ncol(alexanian2021.counts[, 1:10]))")),
-                                  stdout=TRUE, stderr=TRUE))
+  script <- withr::local_tempfile(fileext=".R")
+  writeLines(c("he <- data.frame(edge=c('e', 'e', 'f', 'f', 'g', 'g'), node=c('a', 'b', 'b', 'c', 'c', 'd'))",
+               "adj <- HyperCom::generate_adjacency_matrix(he, outfile=NULL)",
+               "infMat <- HyperCom::generate_infMat(adj, outfile=NULL, threads=1)",
+               "print(adj)",
+               "print(infMat)",
+               "suppressMessages(library(Matrix))",
+               "cat(is.matrix(as.matrix(adj)) && is.numeric(as.matrix(adj)), is.matrix(as.matrix(infMat)), '\\n')",
+               "suppressMessages(library(HyperCom))",
+               "cat(ncol(alexanian2021.counts[, 1:10]), '\\n')"), script)
+  out <- suppressWarnings(system2(file.path(R.home("bin"), "Rscript"), shQuote(script), stdout=TRUE, stderr=TRUE))
 
-  expect_identical(utils::tail(out, 1), "10")
+  expect_match(out, "HyperCom adjacency matrix of 4 nodes", all=FALSE)
+  expect_match(out, "HyperCom influence matrix of 4 nodes", all=FALSE)
+  expect_match(out, "^TRUE TRUE", all=FALSE)
+  expect_identical(trimws(utils::tail(out, 1)), "10")
 })
 
 test_that("#15 node order does not depend on the collation locale", {

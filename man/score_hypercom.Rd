@@ -9,37 +9,60 @@ score_hypercom(
   metadata,
   ligand = NULL,
   receptors = NULL,
-  parallel = FALSE,
-  threads = NULL
+  threads = NULL,
+  memory.gb = NULL,
+  verbose = FALSE
 )
 }
 \arguments{
 \item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
-\item{metadata}{A dataframe from generate_metadata, containing columns named cell, sample and group}
+\item{metadata}{A data frame from generate_metadata (e.g. \code{res$metadata} of \code{HyperCom}), with columns cell, sample and group and
+one row per node of infMat}
 
-\item{ligand}{A string of the ligand name, NULL for the network score}
+\item{ligand}{A string of the ligand gene, or NULL (the default) for the network score}
 
-\item{receptors}{A vector containing string elements of the receptor names, NULL for the network score}
+\item{receptors}{A vector of strings of the receptor genes (every subunit of a receptor complex), or NULL (the default) for the
+network score}
 
-\item{parallel}{A boolean of whether to run in parallel: one thread per physical core (one per logical core on Linux, where R does
-not tell them apart)}
+\item{threads}{An integer number of threads, NULL (the default) for one per physical core, or 1 to run on one thread; a number above
+the cores available to R warns and uses them all. Results do not depend on it}
 
-\item{threads}{An integer number of threads of at least 1, overriding parallel; more than the available cores warns and uses
-them all}
+\item{memory.gb}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
+of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It decides between exact scoring and
+memory mode (see the Memory section of \code{prioritize_lr}). On a cluster give the job's memory request, as the computer's memory may
+be more than the job may use}
+
+\item{verbose}{A boolean of whether to report the memory the scoring needs as a message; FALSE by default}
 }
 \value{
-A dataframe with one row per cell, sorted by hypercom (highest first), with columns cell, sender and receiver (the cell's
-sender and receiver scores), dif (receiver - sender), avg (their mean), max (the larger of the two) and hypercom (the HyperCom score:
-the sign of dif times the percent rank of its size times avg)
+A data frame with one row per cell of the hypergraph, sorted by hypercom (highest first), with columns:
+\itemize{
+\item cell: the cell name;
+\item sender, receiver: the cell's sender and receiver scores, from 0 to 1;
+\item dif: receiver - sender;
+\item avg: the mean of sender and receiver;
+\item max: the larger of the two;
+\item hypercom: one score per cell, negative for senders and positive for receivers: the sign of dif times the percent rank of its
+size among the cells, times avg.
+}
+
+A cell without a score (no path of hyperedges to the pair's genes) gets NaN.
 }
 \description{
-\code{score_hypercom} returns a dataframe containing the HyperCom score for each cell
+\code{score_hypercom} returns a data frame containing the HyperCom score for each cell
 }
 \details{
-This function takes a named influence matrix, the corresponding metadata, the ligand, and receptor
-to give each cell a HyperCom score. With a ligand and receptors this is the ligand-receptor pair score; with neither, the network
-score. For a receptor complex the scores of its subunits are averaged. Scores are the same at any number of threads.
+This function takes a named influence matrix, the corresponding metadata (e.g. \code{res$infMat} and \code{res$metadata} of \code{HyperCom}), a
+ligand and its receptor genes, and scores every cell of the hypergraph as sender and receiver of the pair. For each pair of cells
+i and j of the same sample, a score says how strongly cell i reaches the ligand and the receptor reaches cell j, relative to how
+strongly i reaches j: \code{F[i, ligand] * F[receptor, j] / F[i, j]} in the influence matrix F. These scores (of every sample) are
+percent-ranked together; a cell's sender score is its mean rank as cell i, and its receiver score its mean rank as cell j.
+
+For a receptor complex the scores of its subunits are averaged. With neither ligand nor receptors, the network score ranks \code{F[i, j]}
+itself: how strongly each cell reaches, and is reached by, the other cells of its sample. Scores are the same at any number of
+threads. As in \code{prioritize_lr}, the cells are scored in memory mode when exact scoring does not fit in memory.gb, so a run of
+\code{HyperCom} that needed memory mode can be followed by \code{score_hypercom(res$infMat, res$metadata, ...)} on the same computer.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

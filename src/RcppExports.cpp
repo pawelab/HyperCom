@@ -109,6 +109,19 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// dense_blocks_cpp
+Rcpp::NumericVector dense_blocks_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample);
+RcppExport SEXP _HyperCom_dense_blocks_cpp(SEXP FSEXP, SEXP cellSEXP, SEXP sampleSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type F(FSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cell(cellSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
+    rcpp_result_gen = Rcpp::wrap(dense_blocks_cpp(F, cell, sample));
+    return rcpp_result_gen;
+END_RCPP
+}
 // influence_lambda_cpp
 Rcpp::List influence_lambda_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs, Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample, int p, int threads);
 RcppExport SEXP _HyperCom_influence_lambda_cpp(SEXP hpSEXP, SEXP hiSEXP, SEXP hxSEXP, SEXP nSEXP, SEXP rsSEXP, SEXP deltaSEXP, SEXP ZSEXP, SEXP rSEXP, SEXP cellSEXP, SEXP sampleSEXP, SEXP pSEXP, SEXP threadsSEXP) {
@@ -138,22 +151,6 @@ BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     rcpp_result_gen = Rcpp::wrap(physical_memory_cpp());
-    return rcpp_result_gen;
-END_RCPP
-}
-// score_grids_cpp
-Rcpp::List score_grids_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample, Rcpp::IntegerVector lig, Rcpp::IntegerVector rec, int threads);
-RcppExport SEXP _HyperCom_score_grids_cpp(SEXP FSEXP, SEXP cellSEXP, SEXP sampleSEXP, SEXP ligSEXP, SEXP recSEXP, SEXP threadsSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type F(FSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cell(cellSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type lig(ligSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type rec(recSEXP);
-    Rcpp::traits::input_parameter< int >::type threads(threadsSEXP);
-    rcpp_result_gen = Rcpp::wrap(score_grids_cpp(F, cell, sample, lig, rec, threads));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -197,16 +194,13 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// dense_blocks_cpp
-Rcpp::NumericVector dense_blocks_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample);
-RcppExport SEXP _HyperCom_dense_blocks_cpp(SEXP FSEXP, SEXP cellSEXP, SEXP sampleSEXP) {
+// kernel_constants_cpp
+Rcpp::List kernel_constants_cpp();
+RcppExport SEXP _HyperCom_kernel_constants_cpp() {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::NumericMatrix >::type F(FSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type cell(cellSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type sample(sampleSEXP);
-    rcpp_result_gen = Rcpp::wrap(dense_blocks_cpp(F, cell, sample));
+    rcpp_result_gen = Rcpp::wrap(kernel_constants_cpp());
     return rcpp_result_gen;
 END_RCPP
 }
@@ -269,12 +263,12 @@ static const R_CallMethodDef CallEntries[] = {
     {"_HyperCom_influence_factors_cpp", (DL_FUNC) &_HyperCom_influence_factors_cpp, 7},
     {"_HyperCom_influence_block_cpp", (DL_FUNC) &_HyperCom_influence_block_cpp, 11},
     {"_HyperCom_influence_blocks_cpp", (DL_FUNC) &_HyperCom_influence_blocks_cpp, 11},
+    {"_HyperCom_dense_blocks_cpp", (DL_FUNC) &_HyperCom_dense_blocks_cpp, 3},
     {"_HyperCom_influence_lambda_cpp", (DL_FUNC) &_HyperCom_influence_lambda_cpp, 12},
     {"_HyperCom_physical_memory_cpp", (DL_FUNC) &_HyperCom_physical_memory_cpp, 0},
-    {"_HyperCom_score_grids_cpp", (DL_FUNC) &_HyperCom_score_grids_cpp, 6},
     {"_HyperCom_score_blocks_cpp", (DL_FUNC) &_HyperCom_score_blocks_cpp, 8},
     {"_HyperCom_score_lambda_cpp", (DL_FUNC) &_HyperCom_score_lambda_cpp, 12},
-    {"_HyperCom_dense_blocks_cpp", (DL_FUNC) &_HyperCom_dense_blocks_cpp, 3},
+    {"_HyperCom_kernel_constants_cpp", (DL_FUNC) &_HyperCom_kernel_constants_cpp, 0},
     {"_HyperCom_screen_blocks_cpp", (DL_FUNC) &_HyperCom_screen_blocks_cpp, 9},
     {"_HyperCom_screen_lambda_cpp", (DL_FUNC) &_HyperCom_screen_lambda_cpp, 13},
     {"_HyperCom_screen_release_cpp", (DL_FUNC) &_HyperCom_screen_release_cpp, 0},

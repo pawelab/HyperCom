@@ -1,4 +1,4 @@
-# generate_infMat methods "chol" (v1-fast's Cholesky inverse) and "woodbury" (Woodbury through the incidence, kept factored): the
+# generate_infMat methods "chol" (Cholesky inverse) and "woodbury" (Woodbury through the incidence, kept factored): the
 # same matrix as "lu" (handwritten, bit for bit) within ~1e-15 relative; scoring the factored matrix equals scoring its dense matrix bit for
 # bit. An adjacency and an influence matrix without node x node matrices index like the matrices they stand for.
 
@@ -14,7 +14,7 @@ test_that("methods chol and woodbury give handwritten's influence matrix within 
     wood <- generate_infMat(adj, r=r, outfile=NULL, method="woodbury", hyperedges=fx$output$hyperedges, threads=1)
 
     expect_identical(dimnames(chol), dimnames(expected))
-    expect_identical(dimnames(wood), dimnames(expected))
+    expect_identical(unname(dimnames(wood)), dimnames(expected))
     expect_lt(max_rel(chol, expected), 1e-13)
     expect_lt(max_rel(wood, expected), 1e-13)
   }
@@ -72,8 +72,11 @@ test_that("methods chol and woodbury stop on input they cannot invert", {
   extra <- rbind(as.data.frame(hyperedges)[1, ], as.data.frame(hyperedges))
 
   expect_error(generate_infMat(adj, outfile=NULL, method="woodbury"), "needs the hyperedges")
-  expect_error(generate_infMat(adj, r=0, outfile=NULL, method="chol"), "r must be one number")
-  expect_error(generate_infMat(adj, r=1.5, outfile=NULL, method="woodbury", hyperedges=hyperedges), "r must be one number")
+  for(method in c("lu", "chol", "woodbury")){
+    for(r in list(0, 1.5, NA_real_, c(0.5, 0.5), "0.5")){
+      expect_error(generate_infMat(adj, r=r, outfile=NULL, method=method, hyperedges=hyperedges), "r must be one number")
+    }
+  }
   expect_error(generate_infMat(asymmetric, outfile=NULL, method="chol"), "symmetric")
   expect_error(generate_infMat(isolated, outfile=NULL, method="chol"), "positive row sums")
   expect_error(generate_infMat(isolated, outfile=NULL, method="woodbury", hyperedges=hyperedges), "positive row sums")
@@ -134,23 +137,20 @@ test_that("HyperCom with infmat.method lu writes handwritten's adjacency and inf
   expect_handwritten_infmat(res$infMat)
 })
 
-test_that("generate_infMat on an adjacency without node x node matrix: factored by default, lu as handwritten, chol as from the matrix", {
-  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
-  infMat <- generate_infMat(adj, outfile=NULL, threads=test_threads(2))
+test_that("generate_infMat is woodbury by default when the hyperedges are known, the same from either adjacency, and chol alike", {
+  adj <- fx_factored()$adj
+  infMat <- generate_infMat(adj, threads=test_threads(2), outfile=NULL)
 
   expect_s3_class(adj, "hypercom_adjacency")
   expect_s3_class(infMat, "hypercom_influence")
-  expect_identical(infMat, generate_infMat(fx$output$adj, outfile=NULL, method="woodbury", hyperedges=fx$output$hyperedges,
-                                           threads=test_threads(3)))
-  expect_handwritten_infmat(generate_infMat(adj, outfile=NULL, method="lu"))
-  expect_handwritten_infmat(generate_infMat(adj, r=0.3, outfile=NULL, method="lu"), r=0.3)
-  expect_identical(generate_infMat(adj, outfile=NULL, method="chol"), generate_infMat(fx$output$adj, outfile=NULL, method="chol"))
+  expect_identical(infMat, generate_infMat(fx$output$adj, hyperedges=fx$output$hyperedges, threads=test_threads(3), outfile=NULL))
+  expect_identical(generate_infMat(adj, method="chol", outfile=NULL), generate_infMat(fx$output$adj, method="chol", outfile=NULL))
 })
 
 test_that("scoring a factored influence matrix equals scoring its dense matrix bit for bit", {
   skip_on_cran()
-  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
-  infMat <- generate_infMat(adj, outfile=NULL, method="woodbury", hyperedges=fx$output$hyperedges, threads=test_threads(2))
+  adj <- fx_factored()$adj
+  infMat <- fx_factored()$infMat
   dense <- as.matrix(infMat)
   md <- fx$output$metadata
   md.rev <- md[rev(seq_len(nrow(md))), ]
@@ -168,19 +168,9 @@ test_that("scoring a factored influence matrix equals scoring its dense matrix b
   }
 })
 
-test_that("generate_infMat defaults to woodbury given the hyperedges, and an unknown method stops", {
-  adj <- fx$output$adj
-  hyperedges <- fx$output$hyperedges
-  infMat <- generate_infMat(adj, outfile=NULL, hyperedges=hyperedges, threads=test_threads(2))
-
-  expect_s3_class(infMat, "hypercom_influence")
-  expect_identical(infMat, generate_infMat(adj, outfile=NULL, method="woodbury", hyperedges=hyperedges, threads=test_threads(2)))
-  expect_error(generate_infMat(adj, outfile=NULL, method="qr", hyperedges=hyperedges), "should be one of")
-})
-
 test_that("adjacency and influence matrix without node x node matrices index like the matrices they stand for", {
-  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
-  infMat <- generate_infMat(adj, outfile=NULL, threads=test_threads(2))
+  adj <- fx_factored()$adj
+  infMat <- fx_factored()$infMat
   A <- as.matrix(adj)
   F <- as.matrix(infMat)
   nodes <- rownames(A)
@@ -188,7 +178,8 @@ test_that("adjacency and influence matrix without node x node matrices index lik
                 list(factor(nodes[c(10, 2)]), c(2, 10, 2)), list(nodes[200], nodes))
 
   expect_identical(dim(adj), dim(A))
-  expect_identical(dimnames(infMat), dimnames(fx$output$infMat))
+  expect_identical(dimnames(infMat), dimnames(adj))
+  expect_identical(unname(dimnames(infMat)), dimnames(fx$output$infMat))
   for(k in seq_along(index)){
     i <- index[[k]][[1]]
     j <- index[[k]][[2]]

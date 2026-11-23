@@ -1,3 +1,1 @@
-# C++17 for the aligned new of the alignas(64) Progress array in score_grids.cpp (R 4.1-4.2 default to C++14)
-CXX_STD = CXX17
 PKG_LIBS = -pthread $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)

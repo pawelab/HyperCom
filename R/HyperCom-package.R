@@ -3,6 +3,7 @@
 
 #' @useDynLib HyperCom, .registration=TRUE
 #' @importFrom Rcpp sourceCpp
+#' @importFrom dplyr .data
 #' @importClassesFrom Matrix dgCMatrix dsCMatrix
 #' @keywords internal
 "_PACKAGE"

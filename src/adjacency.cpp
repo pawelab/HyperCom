@@ -6,6 +6,10 @@
 // exact integers in any order), nodes without neighbours are left out from the start, and the diagonal is written as the
 // explicit zeros that version keeps. Two passes (count, then fill) so the output is allocated once at its final size.
 
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__)
+#error "HyperCom must not be compiled with -ffast-math or -ffinite-math-only: its NaN and Inf checks would be removed"
+#endif
+
 #include <Rcpp.h>
 #include <algorithm>
 #include <climits>
@@ -17,9 +21,9 @@ const size_t SCAN_RATIO = 16;          // column j: its touched rows are sorted 
 // [[Rcpp::export]]
 Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int n_nodes, int n_edges){
   const size_t R = node.size(), N = n_nodes, E = n_edges;
-  if((size_t) edge.size() != R) Rcpp::stop("adjacency_cpp: one edge per node entry");
+  if((size_t) edge.size() != R) Rcpp::stop("adjacency matrix: one edge per node entry");
   for(size_t k = 0; k < R; ++k){
-    if(node[k] < 0 || node[k] >= n_nodes || edge[k] < 0 || edge[k] >= n_edges) Rcpp::stop("adjacency_cpp: index out of range");
+    if(node[k] < 0 || node[k] >= n_nodes || edge[k] < 0 || edge[k] >= n_edges) Rcpp::stop("adjacency matrix: node or edge index out of range");
   }
 
   // incidence by edge: nodes in ascending order with their counts
@@ -89,7 +93,7 @@ Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int
       }
     }
     nnz += m + 1;
-    if(nnz > (size_t) INT_MAX) Rcpp::stop("adjacency_cpp: too many node pairs for a sparse matrix");
+    if(nnz > (size_t) INT_MAX) Rcpp::stop("adjacency matrix: too many node pairs for a sparse matrix (at most 2^31 - 1)");
     p[new_idx[j] + 1] = (int) nnz;
   }
 
@@ -127,6 +131,8 @@ Rcpp::List adjacency_cpp(Rcpp::IntegerVector node, Rcpp::IntegerVector edge, int
     out_x[pos++] = 0;
   }
 
-  return Rcpp::List::create(Rcpp::Named("i") = out_i, Rcpp::Named("p") = p, Rcpp::Named("x") = out_x,
-                            Rcpp::Named("keep") = Rcpp::LogicalVector(keep.begin(), keep.end()));
+  Rcpp::LogicalVector kept_nodes = alloc_vector<LGLSXP>(N, false);
+  std::copy(keep.begin(), keep.end(), kept_nodes.begin());
+
+  return Rcpp::List::create(Rcpp::Named("i") = out_i, Rcpp::Named("p") = p, Rcpp::Named("x") = out_x, Rcpp::Named("keep") = kept_nodes);
 }

@@ -23,8 +23,21 @@
 // can change the last bits of the e x e inverse, as it does for lu and chol. In memory mode (influence_lambda_cpp) the blocks are
 // made a panel at a time and kept only as Λ = -ln F tiles of 6-byte integer keys (f2.h) for the grid kernel.
 //
+// The grid kernels read the within-sample blocks of F (grid_common.h): influence_blocks_cpp makes them from the factors,
+// dense_blocks_cpp copies them from a dense F.
+//
 // chol and woodbury stop as solve() does when the system is computationally singular (LAPACK dpocon, reciprocal condition number
-// below the machine epsilon), e.g. for r near 0.
+// below the machine epsilon, or NaN), e.g. for r near 0.
+//
+// Threads: fill_block, the hyperedge matrix and Z split their columns among worker threads (threads.h), each entry made by one
+// thread in a fixed order, so the results do not depend on the thread count.
+//
+// No contraction of a * b + c into one fused multiply-add: an FMA rounds once instead of twice, so F would differ in the last bits
+// between CPUs that have one (arm64) and those whose default build does not use it (x86-64). Clang honours the standard pragma;
+// GCC ignores it in C++ and contracts on arm64 (its default -ffp-contract=fast), so there F can differ in the last bits.
+#ifdef __clang__
+#pragma STDC FP_CONTRACT OFF
+#endif
 
 #define USE_FC_LEN_T
 #include <Rcpp.h>
@@ -35,18 +48,41 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <thread>
+#include <string>
 #include <vector>
 #include "f2.h"
-#include "grid_layout.h"
+#include "grid_common.h"
 #include "r_alloc.h"
+#include "threads.h"
 
 namespace {
 
-const size_t TILE = 64;                 // chol: tile edge of the loops over both triangles
+const size_t SOLVE_TILE = 64;           // chol: tile edge of the loops over both triangles, so the mirrored entries stay in cache
 const size_t BLOCK_COLS = 32;           // fill_block: columns per task
 const size_t Z_COLS = 64;               // influence_factors_cpp: columns of Z per task
 const double ROWSUM_TOL = 1e-12;        // woodbury: relative tolerance of adj's row sums against the hyperedges
+const size_t PANEL = 256;               // influence_lambda_cpp: columns per panel, a multiple of f2::TILE (a panel's rows end on a
+                                        // tile's edge)
+const int64_t MARGIN = (int64_t) 1 << 20;  // influence_lambda_cpp: Λ's base lies this far below the smallest libm estimate, far more
+                                        // than libm's logs and fixlog52 can differ (a few units at 2^-44)
+static_assert(PANEL % f2::TILE == 0, "a panel's rows end on a tile's edge");
+
+// The calling thread's error for a reciprocal condition number below the machine epsilon, or NaN (a matrix with NaN), as solve()'s
+void check_rcond(double rcond){
+  if(!(rcond >= DBL_EPSILON)) Rcpp::stop("system is computationally singular: reciprocal condition number = %g", rcond);
+}
+
+// fn(i, j) for the entries i < j (i <= j with diagonal) of the upper triangle of an N x N matrix, tile by tile, so that the mirrored
+// entries (j, i) of a tile stay in cache
+template <class Fn> void upper_tiles(size_t N, bool diagonal, Fn fn){
+  for(size_t jb = 0; jb < N; jb += SOLVE_TILE){
+    for(size_t ib = 0; ib <= jb; ib += SOLVE_TILE){
+      for(size_t j = jb; j < std::min(jb + SOLVE_TILE, N); ++j){
+        for(size_t i = ib; i < std::min(ib + SOLVE_TILE, j + diagonal); ++i) fn(i, j);
+      }
+    }
+  }
+}
 
 // order of a square adjacency given as a base matrix, dgCMatrix or dsCMatrix, with R's solve() messages
 int adjacency_order(SEXP adj){
@@ -99,22 +135,29 @@ Rcpp::NumericMatrix dense_adjacency(SEXP adj, int n, bool mirror){
   return M;
 }
 
-// fn(worker, task) for tasks 0..ntasks-1 on up to nthreads workers (the calling thread is worker 0), each task once; fn must not
-// throw. If a thread cannot start, the workers already running take its tasks.
+// fn(worker, task) for tasks 0..ntasks-1, each once, on up to nthreads worker threads (worker 0..nthreads-1) while the calling thread
+// polls for an interrupt (threads.h); with one worker the tasks run on the calling thread, which polls between them. An error or an
+// interrupt stops the workers at their next task and is raised here.
 template <class Fn>
 void run_tasks(int nthreads, size_t ntasks, Fn fn){
-  std::atomic<size_t> next(0);
-  auto work = [&](int worker){
-    for(size_t t = next.fetch_add(1); t < ntasks; t = next.fetch_add(1)) fn(worker, t);
-  };
-  std::vector<std::thread> pool;
-  const int extra = (int) std::min<size_t>(nthreads > 1 ? nthreads - 1 : 0, ntasks > 1 ? ntasks - 1 : 0);
-  try{
-    for(int k = 1; k <= extra; ++k) pool.emplace_back(work, k);
-  } catch(...){
+  hc::Stop stop;
+  const size_t nt = std::min<size_t>(std::max(1, nthreads), ntasks);
+  if(nt <= 1){
+    hc::Poll poll;
+    for(size_t t = 0; t < ntasks; ++t){
+      if(poll()){
+        stop.interrupt();
+        break;
+      }
+      fn(0, t);
+    }
+  } else {
+    std::atomic<size_t> next(0);
+    hc::run_threads(nt, stop, [&](size_t worker){
+      for(size_t t; !stop.failed.load(std::memory_order_relaxed) && (t = next.fetch_add(1)) < ntasks; ) fn((int) worker, t);
+    });
   }
-  work(0);
-  for(auto &t : pool) t.join();
+  stop.raise("influence matrix");
 }
 
 }
@@ -122,7 +165,7 @@ void run_tasks(int nthreads, size_t ntasks, Fn fn){
 // [[Rcpp::export]]
 Rcpp::NumericMatrix solve_influence_cpp(SEXP adj, Rcpp::NumericVector rs, double r){
   int n = adjacency_order(adj);
-  if(rs.size() != n) Rcpp::stop("solve_influence_cpp: one row sum per row");
+  if(rs.size() != n) Rcpp::stop("influence matrix: one row sum per row");
   const size_t N = n;
   const double *rsp = REAL(rs);
 
@@ -150,7 +193,7 @@ Rcpp::NumericMatrix solve_influence_cpp(SEXP adj, Rcpp::NumericVector rs, double
   double rcond = 0;
   std::vector<double> work(4 * N);
   F77_CALL(dgecon)(&one, &n, m, &n, &anorm, &rcond, work.data(), iwork.data(), &info FCONE);
-  if(rcond < DBL_EPSILON) Rcpp::stop("system is computationally singular: reciprocal condition number = %g", rcond);
+  check_rcond(rcond);
 
   for(size_t k = 0; k < N * N; ++k) x[k] = r * x[k];
 
@@ -161,21 +204,15 @@ Rcpp::NumericMatrix solve_influence_cpp(SEXP adj, Rcpp::NumericVector rs, double
 Rcpp::NumericMatrix solve_influence_chol_cpp(SEXP adj, Rcpp::NumericVector rs, double r){
   const bool sym = Rf_inherits(adj, "dsCMatrix");
   int n = adjacency_order(adj);
-  if(rs.size() != n) Rcpp::stop("solve_influence_chol_cpp: one row sum per row");
+  if(rs.size() != n) Rcpp::stop("influence matrix: one row sum per row");
   const size_t N = n;
 
   Rcpp::NumericMatrix S = dense_adjacency(adj, n, false);
   double *m = REAL(S);
   if(!sym){
-    for(size_t jb = 0; jb < N; jb += TILE){
-      for(size_t ib = 0; ib <= jb; ib += TILE){
-        for(size_t j = jb; j < std::min(jb + TILE, N); ++j){
-          for(size_t i = ib; i < std::min(ib + TILE, j); ++i){
-            if(!(m[i + j * N] == m[j + i * N])) Rcpp::stop("method \"chol\" needs a symmetric adjacency matrix (use method=\"lu\")");
-          }
-        }
-      }
-    }
+    upper_tiles(N, false, [&](size_t i, size_t j){
+      if(!(m[i + j * N] == m[j + i * N])) Rcpp::stop("method \"chol\" needs a symmetric adjacency matrix (use method=\"lu\")");
+    });
   }
 
   std::vector<double> s(N), row(N), col(N);
@@ -200,21 +237,15 @@ Rcpp::NumericMatrix solve_influence_chol_cpp(SEXP adj, Rcpp::NumericVector rs, d
   if(info > 0) Rcpp::stop("the leading minor of order %d is not positive: the system is not positive definite (use method=\"lu\")", info);
   double rcond = 0;
   F77_CALL(dpocon)(&uplo, &n, m, &n, &anorm, &rcond, work.data(), iwork.data(), &info FCONE);
-  if(rcond < DBL_EPSILON) Rcpp::stop("system is computationally singular: reciprocal condition number = %g", rcond);
+  check_rcond(rcond);
   F77_CALL(dpotri)(&uplo, &n, m, &n, &info FCONE);
   if(info != 0) Rcpp::stop("Lapack routine %s failed with info %d", "dpotri", info);
 
-  for(size_t jb = 0; jb < N; jb += TILE){
-    for(size_t ib = 0; ib <= jb; ib += TILE){
-      for(size_t j = jb; j < std::min(jb + TILE, N); ++j){
-        for(size_t i = ib; i < std::min(ib + TILE, j + 1); ++i){
-          const double u = m[i + j * N];
-          m[i + j * N] = (u * row[i]) * col[j];
-          if(i != j) m[j + i * N] = (u * row[j]) * col[i];
-        }
-      }
-    }
-  }
+  upper_tiles(N, true, [&](size_t i, size_t j){
+    const double u = m[i + j * N];
+    m[i + j * N] = (u * row[i]) * col[j];
+    if(i != j) m[j + i * N] = (u * row[j]) * col[i];
+  });
 
   return S;
 }
@@ -286,6 +317,20 @@ void check_nodes(const Rcpp::IntegerVector &idx, size_t N){
   }
 }
 
+// The within-sample blocks of the grid kernels' layout (grid_common.h), each the nodes of its cells: cell holds each cell's 0-based
+// node, sample its sample (from 1); what: the error's prefix
+std::vector<std::vector<int>> cell_blocks(const Rcpp::IntegerVector &cell, const Rcpp::IntegerVector &sample, size_t N, const char *what){
+  check_nodes(cell, N);
+  if(sample.size() != cell.size()) Rcpp::stop(std::string(what) + ": one sample per cell");
+  check_samples(sample, what);
+  std::vector<std::vector<int>> blocks = sample_blocks(INTEGER(sample), sample.size());
+  for(std::vector<int> &m : blocks){
+    for(int &k : m) k = cell[k];
+  }
+
+  return blocks;
+}
+
 // F[rows, cols] into out (column-major, leading dimension ld) from the factors: r (1 - r) times the sum over the row node's
 // hyperedges, ascending, of Y * Z, plus r rs / Delta on the diagonal. Columns go in blocks of BLOCK_COLS, with Z of the block
 // laid out hyperedge-major; each entry is made by one thread in a fixed order, so F is the same at any thread count.
@@ -328,7 +373,7 @@ void fill_block(const Incidence &h, const std::vector<double> &ny, const double 
 Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs,
                                  double r, int threads){
   const Incidence h = node_incidence(hp, hi, hx, n);
-  if(rs.size() != n) Rcpp::stop("influence_factors_cpp: one row sum per node");
+  if(rs.size() != n) Rcpp::stop("influence matrix: one row sum per node");
   const size_t N = h.N, E = h.E;
   const double c = 1 - r;
   const double *rsp = REAL(rs), *hxp = REAL(hx);
@@ -377,7 +422,7 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
   if(info != 0) Rcpp::stop("method \"woodbury\": the hyperedge matrix is not positive definite (Lapack dpotrf info %d; use method=\"lu\")", info);
   double rcond = 0;
   F77_CALL(dpocon)(&uplo, &ne, cm, &ne, &anorm, &rcond, work.data(), iwork.data(), &info FCONE);
-  if(rcond < DBL_EPSILON) Rcpp::stop("system is computationally singular: reciprocal condition number = %g", rcond);
+  check_rcond(rcond);
   F77_CALL(dpotri)(&uplo, &ne, cm, &ne, &info FCONE);
   if(info != 0) Rcpp::stop("Lapack routine %s failed with info %d", "dpotri", info);
   for(size_t f = 0; f < E; ++f){
@@ -398,7 +443,10 @@ Rcpp::List influence_factors_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi,
     }
   });
 
-  return Rcpp::List::create(Rcpp::Named("Z") = Z, Rcpp::Named("delta") = Rcpp::NumericVector(delta.begin(), delta.end()));
+  Rcpp::NumericVector delta_out = alloc_vector<REALSXP>(N, false);
+  std::copy(delta.begin(), delta.end(), delta_out.begin());
+
+  return Rcpp::List::create(Rcpp::Named("Z") = Z, Rcpp::Named("delta") = delta_out);
 }
 
 // [[Rcpp::export]]
@@ -424,25 +472,39 @@ Rcpp::NumericVector influence_blocks_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVe
                                          Rcpp::IntegerVector sample, int threads){
   const Incidence h = node_incidence(hp, hi, hx, n);
   check_factors(h, rs, delta, Z);
-  check_nodes(cell, h.N);
-  if(sample.size() != cell.size()) Rcpp::stop("influence_blocks_cpp: one sample per cell");
-  for(R_xlen_t k = 0; k < sample.size(); ++k){
-    if(sample[k] < 1) Rcpp::stop("influence_blocks_cpp: sample ids must be positive integers");
-  }
+  const std::vector<std::vector<int>> blocks = cell_blocks(cell, sample, h.N, "influence blocks");
   const std::vector<double> ny = scaled_incidence(h, REAL(delta));
 
-  // the within-sample blocks in the kernel's layout (grid_layout.h), each column-major, by node
-  std::vector<std::vector<int>> blocks = sample_blocks(INTEGER(sample), sample.size());
+  // each block column-major, one after the other
   size_t total = 0;
-  for(std::vector<int> &m : blocks){
-    for(int &k : m) k = cell[k];
-    total += m.size() * m.size();
-  }
+  for(const std::vector<int> &m : blocks) total += m.size() * m.size();
   Rcpp::NumericVector out = alloc_vector<REALSXP>((R_xlen_t) total, false);
   size_t off = 0;
-  for(const auto &m : blocks){
+  for(const std::vector<int> &m : blocks){
     fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, m.data(), m.size(), m.data(), m.size(), REAL(out) + off, m.size(), threads);
     off += m.size() * m.size();
+  }
+
+  return out;
+}
+
+// influence_blocks_cpp for a dense influence matrix F: the blocks copied from it, without a temporary
+// [[Rcpp::export]]
+Rcpp::NumericVector dense_blocks_cpp(Rcpp::NumericMatrix F, Rcpp::IntegerVector cell, Rcpp::IntegerVector sample){
+  const size_t N = F.nrow();
+  if((size_t) F.ncol() != N) Rcpp::stop("dense blocks: the influence matrix must be square");
+  const std::vector<std::vector<int>> blocks = cell_blocks(cell, sample, N, "dense blocks");
+
+  size_t total = 0;
+  for(const std::vector<int> &m : blocks) total += m.size() * m.size();
+  Rcpp::NumericVector out = alloc_vector<REALSXP>((R_xlen_t) total, false);
+  const double *f = REAL(F);
+  double *o = REAL(out);
+  for(const std::vector<int> &m : blocks){
+    for(int j : m){
+      const double *col = f + (size_t) j * N;
+      for(int i : m) *o++ = col[i];
+    }
   }
 
   return out;
@@ -452,39 +514,32 @@ Rcpp::NumericVector influence_blocks_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVe
 // ln(F[j, i] / D[i])) / 2 at 2^p), the logs by f2::fixlog52 (integers only, so the same bits on every computer), stored as 6-byte
 // offsets from a per-block base in the tiles of f2.h: the upper triangle (F is symmetric up to rounding, so Λ is made symmetric by
 // the average), diagonal tiles whole (their lower half too, read as stored), the diagonal and padding 0. toff: each block's byte
-// offset; base: each block's int64 base, its bits in a double. A panel of W columns at a time: F[cells, panel] and F[panel, cells]
-// by fill_block; a first pass with libm logs finds each block's smallest Λ less a margin (libm and fixlog52 differ by far less) as
-// base, the second writes. Stops if a block's span does not fit 48 bits.
+// offset; base: each block's int64 base, its bits in a double. A panel of PANEL columns at a time: F[cells, panel] and
+// F[panel, cells] by fill_block. Each block is made twice: the offsets need the block's base before the first is written, and
+// keeping F until then would take the 8 bytes per entry memory mode avoids. The first pass estimates each block's smallest Λ with
+// libm logs and takes MARGIN below it as the base; the second makes the exact keys and writes them. Stops if a block's span does not
+// fit 48 bits.
 // [[Rcpp::export]]
 Rcpp::List influence_lambda_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, Rcpp::NumericVector hx, int n, Rcpp::NumericVector rs,
                                 Rcpp::NumericVector delta, Rcpp::NumericMatrix Z, double r, Rcpp::IntegerVector cell,
                                 Rcpp::IntegerVector sample, int p, int threads){
   const Incidence h = node_incidence(hp, hi, hx, n);
   check_factors(h, rs, delta, Z);
-  check_nodes(cell, h.N);
-  if(sample.size() != cell.size()) Rcpp::stop("influence_lambda_cpp: one sample per cell");
-  for(R_xlen_t k = 0; k < sample.size(); ++k){
-    if(sample[k] < 1) Rcpp::stop("influence_lambda_cpp: sample ids must be positive integers");
-  }
-  if(p < 0 || p > 52) Rcpp::stop("influence_lambda_cpp: p must be in 0..52");
+  const std::vector<std::vector<int>> blocks = cell_blocks(cell, sample, h.N, "memory mode");
+  if(p < 0 || p > 52) Rcpp::stop("memory mode: p must be in 0..52");
   const std::vector<double> ny = scaled_incidence(h, REAL(delta));
-  std::vector<std::vector<int>> blocks = sample_blocks(INTEGER(sample), sample.size());
   const size_t nblocks = blocks.size(), TL = f2::TILE;
   size_t total = 0;                     // bytes
-  Rcpp::NumericVector toff(nblocks), base(nblocks);
+  Rcpp::NumericVector toff = alloc_vector<REALSXP>(nblocks), base = alloc_vector<REALSXP>(nblocks);
   for(size_t b = 0; b < nblocks; ++b){
-    std::vector<int> &m = blocks[b];
-    for(int &k : m) k = cell[k];
-    const size_t T = (m.size() + TL - 1) / TL;
+    const size_t T = (blocks[b].size() + TL - 1) / TL;
     toff[b] = (double) total;
     total += f2::TILE_BYTES * (T * (T + 1) / 2);
   }
   Rcpp::RawVector bytes = alloc_vector<RAWSXP>((R_xlen_t) (total + f2::SLACK), true);  // zeroed: diagonal, padding, slack
   char *out = reinterpret_cast<char *>(RAW(bytes));
-  const size_t W = 256;                 // panel columns, a multiple of TILE (a panel's rows end on a tile's edge)
   const int nt = std::max(1, threads), sh = 52 - p;
   const double sc = std::ldexp(1.0, p);
-  const int64_t MARGIN = (int64_t) 1 << 20;
   std::atomic<bool> wide(false), bad(false);
   for(size_t b = 0; b < nblocks; ++b){
     const std::vector<int> &m = blocks[b];
@@ -497,8 +552,8 @@ Rcpp::List influence_lambda_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, 
     int64_t lo = INT64_MAX, hi = INT64_MIN;
     for(int pass = 0; pass < 2; ++pass){
       const int64_t bs = lo;
-      for(size_t j0 = 0; j0 < s; j0 += W){
-        const size_t w = std::min(W, s - j0), nrow = j0 + w;
+      for(size_t j0 = 0; j0 < s; j0 += PANEL){
+        const size_t w = std::min(PANEL, s - j0), nrow = j0 + w;
         A.resize(nrow * w);
         C.resize(w * nrow);
         fill_block(h, ny, REAL(Z), REAL(rs), REAL(delta), r, m.data(), nrow, m.data() + j0, w, A.data(), nrow, nt);
@@ -522,8 +577,7 @@ Rcpp::List influence_lambda_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, 
             }
             const int64_t lam = -f2::round_shift(f2::fixlog52(fij) + f2::fixlog52(fji), sh + 1), d = lam - bs;
             if(d < 0 || (d >> 48)) wide.store(true);
-            const size_t I = i / TL, J = j / TL;
-            f2::put48(o + f2::TILE_BYTES * (J * (J + 1) / 2 + I) + 6 * (TL * (j % TL) + i % TL), (uint64_t) d);
+            f2::put48(o + f2::tile_offset(i, j), (uint64_t) d);
           }
         });
         if(pass == 0){
@@ -534,15 +588,21 @@ Rcpp::List influence_lambda_cpp(Rcpp::IntegerVector hp, Rcpp::IntegerVector hi, 
         }
       }
       if(pass == 0){
-        if(bad.load()) Rcpp::stop("influence_lambda_cpp: an entry of F / D is not positive and finite");
+        if(bad.load()){
+          Rcpp::stop("memory mode: cells of one sample are not connected in the hypergraph (influence 0); use the exact kernels (give "
+                     "more memory)");
+        }
         if(lo > hi) lo = hi = 0;
         lo -= MARGIN;
-        if((uint64_t) (hi + MARGIN - lo) >> 48) Rcpp::stop("influence_lambda_cpp: a block's span does not fit 48 bits at this p");
+        if((uint64_t) (hi + MARGIN - lo) >> 48){
+          Rcpp::stop("memory mode: the influence values of a sample span too wide a range for its 48-bit keys; use the exact kernels "
+                     "(give more memory)");
+        }
       }
     }
     std::memcpy(&base[b], &lo, sizeof lo);
   }
-  if(wide.load()) Rcpp::stop("influence_lambda_cpp: an entry left its block's 48-bit range");
+  if(wide.load()) Rcpp::stop("memory mode: an entry of lambda left its block's 48-bit range");
 
   return Rcpp::List::create(Rcpp::Named("bytes") = bytes, Rcpp::Named("base") = base, Rcpp::Named("toff") = toff);
 }

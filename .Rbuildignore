@@ -5,3 +5,4 @@
 ^src/.*\.a$
 ^AGENTS\.md$
 ^\.gitattributes$
+^\.git$

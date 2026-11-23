@@ -1,5 +1,5 @@
-# Cache of prioritize_lr: the priority terms of the pairs scored so far and the term bounds of the background pairs screened so far,
-# so that a stopped run continues where it stopped
+# Cache of prioritize_lr: the priority terms of the pairs scored so far and the term bounds of the pairs screened so far, so that a
+# stopped run continues where it stopped
 
 #' Open the cache of a prioritize_lr run
 #'
@@ -15,7 +15,7 @@
 #' @inheritParams prioritize_lr
 #' @inheritParams cache_fingerprint
 #' @returns An environment with dir, fingerprint, terms (a matrix of priority terms with one row per pair named by pair_keys, or NULL),
-#' bounds (a list of two such matrices, lo and hi, or NULL), background (a dataframe of background pairs, or NULL), saved (whether
+#' bounds (a list of two such matrices, lo and hi, or NULL), background (a data frame of background pairs, or NULL), saved (whether
 #' this run wrote the fingerprint) and failed (whether a write failed)
 #' @noRd
 open_cache <- function(dir, adj, infMat, metadata, kernel="exact"){
@@ -46,13 +46,37 @@ open_cache <- function(dir, adj, infMat, metadata, kernel="exact"){
         unlink(file.path(dir, cache_files()))
         aside <- NULL
       }
-      warning("the cache in ", dir, " was made from other inputs, or is damaged, and is not used",
+      warning("the cache in ", dir, " ", cache_mismatch(old, fingerprint), " and is not used",
               if(!is.null(aside)) paste0("; it is moved to ", aside, " (rename it back to continue the run it belongs to)"))
     }
   }
 
   return(list2env(list(dir=dir, fingerprint=fingerprint, terms=terms, bounds=bounds, background=background, saved=FALSE,
                        failed=FALSE)))
+}
+
+#' Say why a cache does not fit a run
+#'
+#' `cache_mismatch` returns why a cache is not used, for its warning
+#'
+#' This function takes the fingerprint read from the cache and the current one and returns that the cache was made with the other
+#' kernels (exact or memory mode, which follows the memory.gb argument and the computer's memory) when that is the only difference, else
+#' that it was made from other inputs or is damaged.
+#' @param old A list from cache_fingerprint with a token, or NULL
+#' @param new A list from cache_fingerprint
+#' @returns A string
+#' @noRd
+cache_mismatch <- function(old, new){
+  kernel_words <- function(type){
+    return(if(identical(type, "exact")) "the exact kernels" else "memory mode")
+  }
+  if(is.list(old) && is.character(old$kernel) && xor(identical(old$kernel, "exact"), identical(new$kernel, "exact")) &&
+     same_fingerprint(utils::modifyList(old, list(kernel=new$kernel)), new)){
+    return(paste0("was made with ", kernel_words(old$kernel), " but this run uses ", kernel_words(new$kernel),
+                  " (it follows memory.gb and the computer's memory),"))
+  }
+
+  return("was made from other inputs, or is damaged,")
 }
 
 #' Check whether a cache is in use
@@ -105,14 +129,14 @@ write_cache_terms <- function(cached, what, x){
 #' data, another restart probability or another influence matrix method change these. It also holds the grid kernels: memory mode's
 #' terms and bounds differ from the exact kernels' by ~1e-11, so a cache never mixes them.
 #' @inheritParams prioritize_lr
-#' @param kernel A string naming the grid kernels of the run, "exact" or "tiles" (memory mode)
+#' @param kernel A string naming the grid kernels of the run, "exact" or "memory" (memory mode)
 #' @returns A list
 #' @noRd
 cache_fingerprint <- function(adj, infMat, metadata, kernel="exact"){
   nodes <- rownames(infMat)
   probe <- nodes[unique(round(seq(1, length(nodes), length.out=16)))]
 
-  return(list(format=1L, version=as.character(utils::packageVersion("HyperCom")), kernel=kernel, class=class(infMat), nodes=nodes,
+  return(list(format=2L, version=as.character(utils::packageVersion("HyperCom")), kernel=kernel, class=class(infMat), nodes=nodes,
               cell=as.character(metadata$cell), sample=as.character(metadata$sample), group=as.character(metadata$group),
               adj=as.matrix(adj[probe, probe, drop=FALSE]), infMat=as.matrix(infMat[probe, probe, drop=FALSE])))
 }
@@ -131,10 +155,10 @@ cache_fingerprint <- function(adj, infMat, metadata, kernel="exact"){
 #' @returns A boolean
 #' @noRd
 same_fingerprint <- function(old, new){
-  if(!is.list(old) || !identical(setdiff(names(old), "token"), names(new))){
+  if(!is.list(old) || !identical(setdiff(names(old), "token"), setdiff(names(new), "token"))){
     return(FALSE)
   }
-  exact <- setdiff(names(new), "infMat")
+  exact <- setdiff(names(new), c("infMat", "token"))
   tolerance <- if(identical(new$class, "hypercom_influence")) 1e-10 else 0
 
   return(identical(old[exact], new[exact]) && isTRUE(all.equal(old$infMat, new$infMat, tolerance=tolerance)))
@@ -231,20 +255,4 @@ write_cache_file <- function(x, dir, name){
   }
 
   return(done)
-}
-
-#' Name ligand-receptor pairs by their genes
-#'
-#' `pair_keys` returns one string per pair naming its ligand and receptor subunits
-#'
-#' This function takes the ligands and receptor subunits of ligand-receptor pairs and returns the ligand and the subunits, in order and
-#' without NA, separated by tabs. The priority terms of a pair depend only on these genes, so pairs with the same key share them.
-#' @param ligands A vector of strings of ligand names, one per pair
-#' @param receptors A matrix of strings of receptor subunit names, one row per pair, NA where a complex has fewer subunits
-#' @returns A vector of strings, one per pair
-#' @noRd
-pair_keys <- function(ligands, receptors){
-  subunits <- apply(receptors, 1, function(x) paste(x[!is.na(x)], collapse="\t"))
-
-  return(paste(ligands, subunits, sep="\t"))
 }

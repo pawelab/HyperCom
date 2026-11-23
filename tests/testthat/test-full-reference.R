@@ -52,7 +52,8 @@ test_that("full data: scores and priorities match handwritten", {
   }
 
   workers <- as.integer(Sys.getenv("HYPERCOM_TEST_WORKERS", "4"))
-  priority <- run_priority(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(workers))
+  priority <- run_priority(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(workers),
+                           exact.priority=TRUE)
   ref.priority <- readRDS(ref_path("6.priority.rds"))
   for(w in names(ref.priority)){
     expect_same_priority(priority[[w]], ref.priority[[w]])

@@ -15,7 +15,7 @@
 
 \method{[}{hypercom_influence}(x, i, j, drop = TRUE)
 
-\method{as.matrix}{hypercom_influence}(x, threads = 1, ...)
+\method{as.matrix}{hypercom_influence}(x, threads = NULL, ...)
 
 \method{print}{hypercom_influence}(x, ...)
 }
@@ -26,7 +26,7 @@
 
 \item{drop}{A boolean of whether to drop dimensions of extent one}
 
-\item{threads}{An integer number of threads for as.matrix}
+\item{threads}{An integer number of threads for as.matrix, NULL for one per physical core}
 
 \item{...}{Ignored}
 }
@@ -37,11 +37,17 @@ dim: the number of nodes twice; dimnames: the node names twice; \code{[} and as.
 \code{hypercom_influence} objects are made by generate_infMat with method "woodbury"
 }
 \details{
-A hypercom_influence keeps the factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z of a hypergraph (H, the node x
-hyperedge incidence; rs, the row sums D of the adjacency; delta, Delta = D + (1 - r) diag(H H'); Z, hyperedge x node; Y = H /
-Delta) instead of F. dim and dimnames give those of F, \code{infMat[i, j]} makes the indexed entries as a dense matrix (indices as for a
-matrix: names, positions or logical; factors are read by name, not by their codes) on one thread and as.matrix the whole dense
-matrix (nodes squared doubles).
+A hypercom_influence is an influence matrix kept as smaller pieces from which any entry can be computed, so the whole node x node
+matrix is never stored. It works like a matrix:
+\itemize{
+\item dim and dimnames give the number and the names of the nodes (cells and genes);
+\item \code{infMat[i, j]} computes the indexed entries as a dense matrix (indices as for a matrix: names, positions or logical; factors are
+read by name, not by their codes);
+\item as.matrix computes the whole dense matrix, 8 bytes times the number of nodes squared: slice instead on large data.
+}
+
+For the record, the pieces are the factors of F = r Delta^-1 D + r (1 - r) Y Z: H (the node x hyperedge incidence), rs (the row sums
+D of the adjacency), delta (Delta = D + (1 - r) diag(H H')), Z (hyperedge x node) and Y = H / Delta.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

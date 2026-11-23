@@ -7,22 +7,24 @@
 generate_adjacency_matrix(hyperedges, outfile = "3.adj.rds")
 }
 \arguments{
-\item{hyperedges}{A dataframe of hyperedges from generate_hyperedges, with columns edge (the hyperedge) and node (a node in it)}
+\item{hyperedges}{A data frame of hyperedges from generate_hyperedges, with columns edge (the hyperedge) and node (a node in it)}
 
 \item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
-A hypercom_adjacency: a list with H, the sparse node x hyperedge matrix of how often each node is in each hyperedge
+A hypercom_adjacency (a list with H, the sparse node x hyperedge matrix of how often each node is in each hyperedge),
+which works like the adjacency matrix
 }
 \description{
 \code{generate_adjacency_matrix} returns the adjacency matrix of the hypergraph
 }
 \details{
-This function takes a dataframe of hyperedges and returns its adjacency matrix: each entry is the number of hyperedges two nodes
-share, and the diagonal is zero. Nodes are ordered by their names in the C locale, so the order does not depend on the session's
-collation. Nodes that share no hyperedge with another node are dropped. The full node x node matrix is not stored: the result
-records which nodes are in which hyperedge, so it takes memory in proportion to the hyperedge table instead of the number of nodes
-squared. It works like a matrix for dim, dimnames and rownames; \code{adj[i, j]} gives those entries and as.matrix the whole matrix.
+This function takes a data frame of hyperedges and returns its adjacency matrix: each entry is the number of hyperedges two nodes
+share, and the diagonal is zero. The nodes are the cells, ligand genes and receptor genes, ordered by name (in the C locale, so the
+order does not depend on the session's language settings). Nodes that share no hyperedge with another node are dropped. The full
+node x node matrix is not stored: the result records which nodes are in which hyperedge, so it takes memory in proportion to the
+hyperedge table instead of the number of nodes squared. It works like a matrix: dim, dimnames, \code{adj[i, j]} and as.matrix (the whole
+matrix; see \code{hypercom_adjacency}).
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

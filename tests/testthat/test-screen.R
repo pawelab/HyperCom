@@ -1,7 +1,5 @@
-# Background screening (R/screen.R, src/screen_grids.cpp): bounds that hold the exact cell scores and priority terms, the same at any
-# number of threads and in both kernel modes, and p-values identical to scoring every background pair
-
-real.score_grids <- HyperCom:::score_grids
+# Screening (R/screen.R, src/screen_grids.cpp): bounds that hold the exact cell scores and priority terms, the same at any number of
+# threads and in both kernel modes, and p-values identical to scoring every background pair
 
 #' Expect bounds to hold values
 #'
@@ -25,44 +23,29 @@ expect_bounds <- function(lo, hi, x, tolerance=1e-14){
 #' Draw the fixture's background pairs
 #'
 #' `fx_background` returns the background pairs prioritize_lr draws with seed 1 on the fixture
-#' @returns A dataframe of background pairs
+#' @returns A data frame of background pairs
 #' @noRd
 fx_background <- function(){
   return(withr::with_seed(1, HyperCom:::generate_background_lrs(fx$output$lrs, fx$output$metadata)))
 }
 
-#' Count the grids a run scores exactly
-#'
-#' `scored_grids` returns the value of an expression and the number of grids passed to score_grids while it ran
-#' @param expr An expression running prioritize_lr
-#' @returns A list with value and grids
-#' @noRd
-scored_grids <- function(expr){
-  grids <- 0
-  value <- testthat::with_mocked_bindings(expr, score_grids=function(infMat, metadata, ligands, receptors, ...){
-    grids <<- grids + length(ligands)
-    return(real.score_grids(infMat, metadata, ligands, receptors, ...))
-  }, .package="HyperCom")
-
-  return(list(value=value, grids=grids))
-}
-
-test_that("screened bounds hold every cell's scores, the same at any number of threads and with all threads on one grid", {
+test_that("screened bounds hold every cell's scores, the same at any number of threads and with ids kept between calls", {
   skip_on_cran()
   bg <- fx_background()
   grids <- HyperCom:::pair_grids(as.character(bg$ligand), as.matrix(bg[, -(1:2)]))
-  factored <- generate_infMat(generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL), outfile=NULL, threads=test_threads(2))
+  md <- fx$output$metadata
 
-  for(infMat in list(fx$output$infMat, factored)){
-    exact <- HyperCom:::score_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(2))
-    b <- HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, 1)
-    expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(3)), b)
-    expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(3), id.budget=0), b)
+  for(infMat in list(fx$output$infMat, fx_factored()$infMat)){
+    blocks <- HyperCom:::grid_blocks(infMat, HyperCom:::grid_cells(rownames(infMat), md), 1)
+    screen <- function(threads, keep.ids=FALSE) HyperCom:::screen_grids(infMat, md, grids$ligand, grids$receptor, threads, blocks, keep.ids)
+    exact <- HyperCom:::score_grids(infMat, md, grids$ligand, grids$receptor, test_threads(2))
+    b <- screen(1)
+    expect_identical(screen(test_threads(3)), b)
     for(threads in c(test_threads(3), 1)){
-      expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, threads, keep.ids=TRUE), b)
+      expect_identical(screen(threads, keep.ids=TRUE), b)
     }
     HyperCom:::screen_release_cpp()
-    expect_identical(HyperCom:::screen_grids(infMat, fx$output$metadata, grids$ligand, grids$receptor, test_threads(3)), b)
+    expect_identical(screen(test_threads(3)), b)
     expect_bounds(b$sender.lo, b$sender.hi, exact$sender)
     expect_bounds(b$receiver.lo, b$receiver.hi, exact$receiver)
     expect_lt(stats::median(b$sender.hi - b$sender.lo), 1e-3)
@@ -100,6 +83,7 @@ test_that("screened bounds hold the scores of grids with ties, zeros, negative, 
   equal <- HyperCom:::screen_blocks_cpp(rep(1, sum(sizes^2)), matrix(1, n, 1), matrix(1, 1, n), sample, 0L, 0L, 1, 2^28)
   expect_equal(equal$sender_lo[1:3, 1], rep(0, 3))
   expect_error(HyperCom:::screen_blocks_cpp(blocks[-1], A, B, sample, lig, rec, 1, 2^28), "blocks do not match the samples")
+  expect_error(HyperCom:::screen_grids(fx$output$infMat, fx$output$metadata, NA, NA), "network score")
 })
 
 test_that("balance bounds are the smallest and largest balance over the possible numbers of receivers", {
@@ -135,24 +119,20 @@ test_that("term bounds hold the exact priority terms of background pairs", {
   }
 })
 
-test_that("screened p-values are those of scoring every background pair, which few are", {
+test_that("screened p-values are those of scoring every background pair, which few are, with screened or exact real pairs", {
   skip_on_cran()
-  factored <- generate_infMat(generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL), outfile=NULL, threads=test_threads(2))
-  every <- function(expr) testthat::with_mocked_bindings(expr, ambiguous=function(L, U, x) rep(TRUE, length(L)), .package="HyperCom")
+  factored <- fx_factored()$infMat
 
-  for(seed in 1:2){
-    screened <- scored_grids(run_priority(weights=c(1, 0.5, 0), significance=TRUE, seed=seed, threads=test_threads(2)))
-    all <- scored_grids(every(run_priority(weights=c(1, 0.5, 0), significance=TRUE, seed=seed, threads=test_threads(2))))
+  for(exact.priority in c(FALSE, TRUE)){
+    screened <- count_grids(run_priority(weights=c(1, 0.5, 0), significance=TRUE, seed=1, exact.priority=exact.priority,
+                                         threads=test_threads(2)))
+    all <- count_grids(every_background(run_priority(weights=c(1, 0.5, 0), significance=TRUE, seed=1, exact.priority=exact.priority,
+                                                     threads=test_threads(2))))
     expect_identical(screened$value, all$value)
     expect_lt(screened$grids, all$grids / 2)
   }
   expect_identical(run_priority(infMat=factored, metadata=fx$output$metadata.none, significance=TRUE, seed=3),
-                   every(run_priority(infMat=factored, metadata=fx$output$metadata.none, significance=TRUE, seed=3)))
-
-  real.screen_grids <- HyperCom:::screen_grids
-  team <- testthat::with_mocked_bindings(run_priority(weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(3)),
-                                         screen_grids=function(...) real.screen_grids(..., id.budget=0), .package="HyperCom")
-  expect_identical(team, run_priority(weights=c(1, 0.5), significance=TRUE, seed=1))
+                   every_background(run_priority(infMat=factored, metadata=fx$output$metadata.none, significance=TRUE, seed=3)))
 })
 
 test_that("background pairs without a priority give the p-values and warning of scoring every background pair", {
@@ -160,18 +140,9 @@ test_that("background pairs without a priority give the p-values and warning of 
   metadata <- fx$output$metadata
   metadata$sample <- as.character(metadata$sample)
   metadata$sample[match(metadata$cell[metadata$sample != "gene"][1], metadata$cell)] <- "alone"
-  every <- function(expr) testthat::with_mocked_bindings(expr, ambiguous=function(L, U, x) rep(TRUE, length(L)), .package="HyperCom")
-  run <- function(expr){
-    warnings <- character(0)
-    value <- withCallingHandlers(expr, warning=function(w){
-      warnings <<- c(warnings, conditionMessage(w))
-      invokeRestart("muffleWarning")
-    })
-    return(list(value=value, warnings=warnings))
-  }
 
-  screened <- run(run_priority(metadata=metadata, weights=c(1, 0.5), significance=TRUE, seed=1))
-  all <- run(every(run_priority(metadata=metadata, weights=c(1, 0.5), significance=TRUE, seed=1)))
+  screened <- collect(run_priority(metadata=metadata, weights=c(1, 0.5), significance=TRUE, seed=1))
+  all <- collect(every_background(run_priority(metadata=metadata, weights=c(1, 0.5), significance=TRUE, seed=1)))
 
   expect_identical(screened, all)
   expect_match(screened$warnings, "^[1-9][0-9]* of 1000 background pairs have no priority \\(NaN\\)", all=FALSE)

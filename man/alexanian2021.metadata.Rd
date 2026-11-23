@@ -5,7 +5,7 @@
 \alias{alexanian2021.metadata}
 \title{Example metadata of 1000 mouse heart cells}
 \format{
-A dataframe with row names being the cells of \code{alexanian2021.counts} and columns sample (integer), condition ("SHAM" or
+A data frame with row names being the cells of \code{alexanian2021.counts} and columns sample (integer), condition ("SHAM" or
 "TAC"), celltype (10 cell types) and UMAP_1, UMAP_2 (UMAP coordinates)
 }
 \description{

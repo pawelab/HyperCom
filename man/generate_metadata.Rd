@@ -16,29 +16,33 @@ generate_metadata(
 \arguments{
 \item{infMat}{An influence matrix from generate_infMat (only its node names are read)}
 
-\item{metadata}{A dataframe containing cell metadata with row names being cells}
+\item{metadata}{A data frame containing cell metadata with row names being cells}
 
-\item{sample}{A string that is the column name for sample in the provided metadata}
+\item{sample}{A string that is the column name for sample (library or replicate) in the provided metadata; cells are compared
+only within their sample}
 
-\item{group}{A string that is the column name for group in the provided metadata}
+\item{group}{A string that is the column name for group (e.g. condition) in the provided metadata, or NULL (the default) for one
+group; groups feed the purity term of the priority (see \code{prioritize_lr})}
 
-\item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
+\item{keep}{A vector of strings that are additional column names to keep from the provided metadata, or NULL (the default)}
 
 \item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
-A dataframe with columns cell, sample, group and the kept columns, one row per node of the influence matrix
+A data frame with columns cell, sample, group and the kept columns, one row per node of the influence matrix, in its
+order (gene rows marked "gene")
 }
 \description{
-\code{generate_metadata} returns a minimal metadata dataframe
+\code{generate_metadata} returns a minimal metadata data frame with one row per node of the influence matrix
 }
 \details{
-This function takes an influence matrix and metadata table and creates a metadata data table containing the
-node name, sample, and group. If group is unspecified, it is assumed all nodes are part of the same group.
-Nodes of the influence matrix that are not cells of the metadata are genes: their sample, group and kept columns are "gene".
-Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and other classed columns
-other than factors become strings. Cells are compared only within their sample, so every sample needs at least 2 cells in the
-graph (cells that express a ligand or receptor gene).
+This function takes an influence matrix and a cell metadata table and returns a table of the node name (cell), sample and group of
+every node. Without group, every cell is in one group, "none". Nodes of the influence matrix that are not cells of the metadata
+are genes: their sample, group and kept text and factor columns are "gene", and their kept numeric and logical columns NA (those
+columns keep their type). Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and
+other classed columns other than factors become text. Cells are compared only within their sample, so every sample needs at
+least 2 cells in the hypergraph (cells that express a ligand or receptor gene); their sample and group must not be missing or
+"gene".
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

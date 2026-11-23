@@ -28,14 +28,13 @@ test_that("scores are bounded and consistent", {
 })
 
 test_that("score_hypercom gives the same scores on several threads, for a dense and for a factored influence matrix", {
-  adj <- generate_adjacency_matrix(fx$output$hyperedges, outfile=NULL)
-  infMat <- generate_infMat(adj, outfile=NULL, threads=test_threads(2))
+  infMat <- fx_factored()$infMat
   md <- fx$output$metadata
 
   for(p in fx_pairs){
     expect_identical(score_hypercom(fx$output$infMat, md, p[[1]], p[[2]], threads=test_threads(3)),
                      score_hypercom(fx$output$infMat, md, p[[1]], p[[2]]))
-    expect_identical(score_hypercom(infMat, md, p[[1]], p[[2]], parallel=TRUE), score_hypercom(infMat, md, p[[1]], p[[2]]))
+    expect_identical(score_hypercom(infMat, md, p[[1]], p[[2]]), score_hypercom(infMat, md, p[[1]], p[[2]], threads=1))
   }
   expect_error(score_hypercom(infMat, md, "Thbs1", "Sdc4", threads=0), "at least 1")
 })

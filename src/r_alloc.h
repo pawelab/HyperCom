@@ -11,9 +11,13 @@
 
 #include <Rcpp.h>
 #include <algorithm>
+#include <climits>
 
-// An nr x nc double matrix, zero-filled unless zero is false
+// An nr x nc double matrix, zero-filled unless zero is false; R's dimensions are int
 inline Rcpp::NumericMatrix alloc_numeric_matrix(R_xlen_t nr, R_xlen_t nc, bool zero=true){
+  if(nr < 0 || nc < 0 || nr > INT_MAX || nc > INT_MAX){
+    Rcpp::stop("a result matrix of %.0f x %.0f is beyond R's matrix size (2^31 - 1 rows or columns)", (double) nr, (double) nc);
+  }
   Rcpp::NumericMatrix m(Rcpp::unwindProtect([&]{ return Rf_allocMatrix(REALSXP, (int) nr, (int) nc); }));
   if(zero) std::fill(m.begin(), m.end(), 0.0);
 

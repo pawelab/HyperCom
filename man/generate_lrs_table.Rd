@@ -9,18 +9,19 @@ generate_lrs_table(counts, lrdb, outfile = "1.lrs.csv")
 \arguments{
 \item{counts}{A filtered matrix with row names being cells and column names being genes, from filter_counts}
 
-\item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions, e.g. \code{cellchat.mm.lrdb}}
+\item{lrdb}{A data frame of ligand-receptor interactions where the first column names the interaction, the second column is named
+ligand, and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of
+ligand-receptor interactions, e.g. \code{cellchat.mm.lrdb}. Interactions without a ligand or a receptor are left out with a warning;
+interaction names must be distinct and differ from the gene names}
 
 \item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
-A dataframe of ligand-receptor interactions in the format of lrdb with only interactions present in the counts matrix, and
+A data frame of ligand-receptor interactions in the format of lrdb with only interactions present in the counts matrix, and
 without receptor columns that are empty for all of them
 }
 \description{
-\code{generate_lrs_table} returns a dataframe of ligand-receptor interactions present in a counts matrix
+\code{generate_lrs_table} returns a data frame of ligand-receptor interactions present in a counts matrix
 }
 \details{
 This function takes a filtered cell x gene counts matrix and table of ligand-receptor interactions to produce

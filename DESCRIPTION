@@ -13,8 +13,10 @@ Description: Infers cell-resolved cell-cell communication from single-cell
     receptors in individual cells, diffuses over it by a random walk with
     restart, and scores each cell on a continuous spectrum from sender to
     receiver for each ligand-receptor pair. It then ranks ligand-receptor pairs
-    by communication over the whole dataset or by condition, with optional
-    permutation p-values. Input is a counts matrix with cell metadata, or a
+    by communication over the whole dataset, optionally favoring pairs whose
+    cells concentrate in some conditions, with optional permutation p-values.
+    It scales to about 100,000 cells per sample on a 64 GB computer. Input is
+    a counts matrix with cell metadata, or a
     'Seurat' or 'SingleCellExperiment' object; 'CellChat' ligand-receptor
     databases for human and mouse are included.
 URL: https://github.com/pawelab/HyperCom
@@ -24,7 +26,7 @@ Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Imports:
   dplyr (>= 1.1.0),
-  Matrix,
+  Matrix (>= 1.5-0),
   methods,
   parallelly (>= 1.23.0),
   Rcpp,
@@ -47,6 +49,6 @@ Suggests:
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 Depends: 
-    R (>= 4.1)
+    R (>= 4.2)
 LazyData: true
 License: MIT + file LICENSE
