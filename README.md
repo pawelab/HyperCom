@@ -61,7 +61,8 @@ functions, arguments and checks. It installs from CRAN packages only, so it need
 pak::pak("pawelab/HyperCom@base-R")
 ```
 
-- **Slower:** about a minute for the bundled data with p-values, instead of seconds; 18 minutes for one sample of 3,000 cells.
+- **Slower:** about a minute for the bundled data with p-values, instead of seconds. One sample, with its default 4 processes:
+  20 minutes and 4 GB for 3,000 cells, 3.1 hours and 32 GB for 10,000.
 - **More memory:** about 79 bytes per pair of cells in the same sample for each of its R processes, instead of 17.6; practical up
   to about 10,000 cells per sample. It has no memory mode.
 - **Same results**, to about 1e-15 (bit for bit with the paper's code under `infmat.method="lu"`). It scores every pair exactly,
