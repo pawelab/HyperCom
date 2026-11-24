@@ -88,13 +88,13 @@ scores <- score_hypercom(res$infMat, res$metadata, ligand="TGFB1", receptors=c("
 ## Run time and memory
 
 Time and memory depend on the number of cells **per sample** (they grow with its square). Splitting the same cells into more
-samples reduces both, but changes which cells are compared. One sample, with p-values:
+samples reduces both, but changes which cells are compared. One sample, with p-values, 4 R processes (the default):
 
-| Cells in the sample | Time | Peak memory | R processes |
-|---|---|---|---|
-| 1,000 | 1.7 min | 3.3 GB | 8 |
-| 3,000 | 18 min | 7.9 GB | 8 |
-| 10,000 | 3.1 h | 32 GB | 4 (default) |
+| Cells in the sample | Time | Peak memory |
+|---|---|---|
+| 1,000 | 1.4 min | 1.8 GB |
+| 3,000 | 20 min | 4.0 GB |
+| 10,000 | 3.1 h | 32 GB |
 
 - **Memory:** each R process needs about 79 bytes per pair of cells in the same sample (one sample of 10,000 cells: 10^8 pairs,
   7.9 GB), plus 0.4 GB; the run needs about 1.1 GB more. A run that cannot fit even in one process stops at the start, giving the
