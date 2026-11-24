@@ -1,3 +1,13 @@
+# HyperCom 0.3.1
+
+* **`cellchat.hs.lrdb`: two interactions had the wrong genes**, copied from CellChat's gene symbol columns: CXCL8_CXCR1 scored
+  CXCL1 (the same genes as CXCL1_CXCR1), and CD99_PILRB had the mouse symbols Cd99 / Pilrb, so it never matched human data. Both now
+  have CellChat's genes (CXCL8; CD99 / PILRB). Results for these two interactions change; on human data where they are expressed,
+  the background pairs (drawn from the interactions) and p.adj of other pairs can change too. `cellchat.mm.lrdb` matches CellChat on
+  every row.
+* The help of both tables now says why the 12 `*_CALCRL_RAMP1-3` interactions have the same genes as the `*_CALCR_RAMP1-3`
+  ones: CellChat's complex table gives CALCRL_RAMP1-3 the subunit CALCR, not CALCRL. The tables keep CellChat's genes.
+
 # HyperCom 0.3.0
 
 Bigger samples in less memory, faster p-values and simpler arguments.

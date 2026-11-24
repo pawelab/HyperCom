@@ -7,9 +7,10 @@
 \format{
 A data frame of 2374 interactions with columns interaction (its name), ligand (a mouse gene symbol) and r1 to r4 (the
 receptor genes, NA where a receptor complex has fewer subunits). The 3 interactions of CellChat whose receptor has no mouse gene
-(RARRES2_GPR1, H2-D_KLRA, H2-K1_KLRA) are left out. A few interactions have the same genes as another one under another name (12
-such sets, e.g. ADM_CALCR_RAMP1 and ADM_CALCRL_RAMP1, as in CellChat): both get the same priority, and both count in the
-Benjamini-Hochberg adjustment
+(RARRES2_GPR1, H2-D_KLRA, H2-K1_KLRA) are left out. The 12 interactions named \code{*_CALCRL_RAMP1-3} (ADM, CALCA,
+CALCB, IAPP) have CellChat's genes, Calcr and a Ramp, the same as the \code{*_CALCR_RAMP1-3} ones: CellChat's complex table gives
+CALCRL_RAMP1-3 the subunit Calcr, not Calcrl. Each pair gets the same priority, and both count in the Benjamini-Hochberg
+adjustment
 }
 \description{
 The ligand-receptor interactions of the CellChat database for M. musculus, in the format HyperCom reads as \code{lrdb}.
