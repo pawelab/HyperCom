@@ -69,6 +69,7 @@ void trim_work(Work &w){
     std::vector<uint32_t>().swap(w.z);
   }
   if(w.pb.size() > KEEP_SORT_BUFFER) std::vector<uint64_t>().swap(w.pb);
+  if(w.sb.size() > KEEP_SORT_BUFFER) std::vector<uint64_t>().swap(w.sb);
   if(w.group.capacity() > KEEP_SORT_BUFFER) std::vector<std::pair<uint64_t, uint64_t>>().swap(w.group);
 }
 

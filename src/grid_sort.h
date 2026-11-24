@@ -117,6 +117,12 @@ struct RunKeys {
       y[c[key >> shift]++] = (key << I) | i;
     }
   }
+  void scatter_low(uint64_t *y, uint32_t *c, size_t m, int I, int shift, uint64_t low) const {
+    for(size_t i = 0; i < m; ++i){
+      const uint64_t key = keys[i];
+      y[c[key >> shift]++] = ((key & low) << I) | i;
+    }
+  }
   void put(size_t i, size_t rank){
     const uint32_t r = (uint32_t) rank;
     std::memcpy((char *) keys + i * sizeof(uint32_t), &r, sizeof r);
@@ -161,6 +167,13 @@ struct SixKeys {
     for(size_t i = 0; i + 1 < m; ++i) place(i, get48(keys + 6 * i));
     place(m - 1, key(m - 1, m));
   }
+  void scatter_low(uint64_t *y, uint32_t *c, size_t m, int I, int shift, uint64_t low) const {
+    auto place = [&](size_t i, uint64_t k){
+      y[c[k >> shift]++] = ((k & low) << I) | i;
+    };
+    for(size_t i = 0; i + 1 < m; ++i) place(i, get48(keys + 6 * i));
+    place(m - 1, key(m - 1, m));
+  }
   void put(size_t i, size_t rank){
     const uint32_t r = (uint32_t) rank;
     std::memcpy(keys + i * sizeof(uint32_t), &r, sizeof r);
@@ -201,6 +214,13 @@ struct SlabKeys {
       }
     }
   }
+  void scatter_low(uint64_t *y, uint32_t *c, size_t, int I, int shift, uint64_t low) const {
+    size_t i = 0;
+    for(const auto &sg : segs){
+      const uint64_t *src = pool + sg.first;
+      for(size_t j = 0; j < sg.second; ++j, ++i) y[c[src[j] >> shift]++] = ((src[j] & low) << I) | i;
+    }
+  }
   void put(size_t i, size_t rank){
     z[i] = (uint32_t) rank;
   }
@@ -232,48 +252,87 @@ template <class K> void put_ranks(K &keys, const uint64_t *y, size_t n, int I, u
   }
 }
 
-// Ranks of one bucket of m entries, held in position order as their low t key bits: sort (key bits, index) words, then
-// give each entry its min rank - 1: s0 plus its rank in the bucket (s0 = the bucket's start, or 0 for local ranks). A bucket of
-// more than 2^(PIECE_BITS + 2) entries is cut by a top digit into pieces (equal keys share one), then each piece is sorted by a
-// second digit, deeper passes and an insertion sort, and ranked, in one reused buffer; a smaller one gets one radix pass of up
-// to TOP_BITS straight from its keys, then sort_rest.
-template <class K> void rank_bucket(K &keys, size_t m, size_t s0, int t, Work &w){
-  const int I = bit_width(m - 1), cut = t + I > 64 ? t + I - 64 : 0, width = t - cut;
-  const uint64_t imask = I ? (~(uint64_t) 0 >> (64 - I)) : 0;
-  const bool pieces = cut == 0 && bit_width(m) > PIECE_BITS + 2;
-  if(w.x.size() < m) w.x.resize(m);
-  if(!pieces && w.y.size() < m) w.y.resize(m);
-  uint64_t *x = w.x.data(), *y = w.y.data();
-  if(pieces){
-    const int b1 = std::min(width, bit_width(m) - PIECE_BITS), s1 = width - b1;
-    const size_t nb1 = (size_t) 1 << b1;
-    w.bnd.assign(nb1 + 1, 0);
-    uint32_t *c1 = w.bnd.data();
-    check_key_width(keys.hist(c1, m, 0, s1, nb1 - 1), t);
-    for(size_t b = 0; b < nb1; ++b) c1[b + 1] += c1[b];
-    keys.scatter(x, c1, m, 0, I, s1);
-    for(size_t b = 0, s = 0; b < nb1; ++b){
-      const size_t e = c1[b], n = e - s;
-      if(n == 0) continue;
-      if(w.pb.size() < n) w.pb.resize(n);
-      uint64_t *pc = w.pb.data(), *xs = x + s;
-      if(n == 1 || s1 == 0){
-        std::memcpy(pc, xs, n * sizeof(uint64_t));
-      } else {
-        // the second digit: the piece's next key bits; with none left below it (s2 = 0) the pass leaves the piece sorted
-        const int b2 = std::min(s1, bit_width(n)), s2 = s1 - b2, sh = I + s2;
-        const uint64_t mask2 = ((uint64_t) 1 << b2) - 1;
-        const size_t nb2 = (size_t) mask2 + 1;
-        w.cnt.resize(nb2 + 1);
-        const uint32_t most = radix_pass(xs, pc, n, nb2, w.cnt.data(), [&](uint64_t v){ return (v >> sh) & mask2; });
-        if(s2 > 0) sort_rest(xs, pc, n, I, nb2, most, 0, w.cnt);
-      }
-      put_ranks(keys, pc, n, I, imask, s0 + s);
-      s = e;
-    }
-    keys.finish();
+// One piece of n words (key bits below `bits`, << I | index) in xs, xs then scratch: sorted by a second digit, deeper passes and an
+// insertion sort into w.pb, then each entry's min rank - 1 from first
+template <class K> void rank_piece(K &keys, uint64_t *xs, size_t n, int bits, int I, uint64_t imask, size_t first, Work &w){
+  if(w.pb.size() < n) w.pb.resize(n);
+  uint64_t *pc = w.pb.data();
+  if(n == 1 || bits == 0){
+    std::memcpy(pc, xs, n * sizeof(uint64_t));
+  } else {
+    // the second digit: the piece's next key bits; with none left below it (s2 = 0) the pass leaves the piece sorted
+    const int b2 = std::min(bits, bit_width(n)), s2 = bits - b2, sh = I + s2;
+    const uint64_t mask2 = ((uint64_t) 1 << b2) - 1;
+    const size_t nb2 = (size_t) mask2 + 1;
+    w.cnt.resize(nb2 + 1);
+    const uint32_t most = radix_pass(xs, pc, n, nb2, w.cnt.data(), [&](uint64_t v){ return (v >> sh) & mask2; });
+    if(s2 > 0) sort_rest(xs, pc, n, I, nb2, most, 0, w.cnt);
+  }
+  put_ranks(keys, pc, n, I, imask, first);
+}
+
+// A sub-bucket of n words (key bits below `bits`) in xs, cut by its next key bits into pieces of ~2^PIECE_BITS in w.sb (in cache),
+// the words keeping only the key bits below them, each piece ranked by rank_piece; a small sub-bucket is one piece
+template <class K> void rank_sub(K &keys, uint64_t *xs, size_t n, int bits, int I, uint64_t imask, size_t first, Work &w){
+  if(bits == 0 || bit_width(n) <= PIECE_BITS + 2){
+    rank_piece(keys, xs, n, bits, I, imask, first, w);
     return;
   }
+  const int b2 = std::min(bits, bit_width(n) - PIECE_BITS), s2 = bits - b2, sh = I + s2;
+  const uint64_t mask2 = ((uint64_t) 1 << b2) - 1, keep = ~(mask2 << sh);
+  const size_t nb2 = (size_t) mask2 + 1;
+  w.bnd2.assign(nb2 + 1, 0);
+  if(w.sb.size() < n) w.sb.resize(n);
+  uint32_t *c2 = w.bnd2.data();
+  uint64_t *sb = w.sb.data();
+  for(size_t p = 0; p < n; ++p) ++c2[((xs[p] >> sh) & mask2) + 1];
+  for(size_t b = 0; b < nb2; ++b) c2[b + 1] += c2[b];
+  for(size_t p = 0; p < n; ++p) sb[c2[(xs[p] >> sh) & mask2]++] = xs[p] & keep;
+  for(size_t b = 0, s = 0; b < nb2; ++b){
+    const size_t e = c2[b];
+    if(e > s) rank_piece(keys, sb + s, e - s, s2, I, imask, first + s, w);
+    s = e;
+  }
+}
+
+// A bucket of m entries, more than 2^(PIECE_BITS + 2): cut by its top b1 of t key bits into sub-buckets in w.x (equal keys share
+// one), the words keeping only the key bits below the cut, so they fit 64 bits whenever t - b1 + I does, then each sub-bucket by
+// rank_sub. Buffers bigger than a thread's share of L3 are swept once after the cut.
+template <class K> void rank_big_bucket(K &keys, size_t m, size_t s0, int t, int I, uint64_t imask, int b1, Work &w){
+  const int s1 = t - b1;
+  const size_t nb1 = (size_t) 1 << b1;
+  if(w.x.size() < m) w.x.resize(m);
+  uint64_t *x = w.x.data();
+  w.bnd.assign(nb1 + 1, 0);
+  uint32_t *c1 = w.bnd.data();
+  check_key_width(keys.hist(c1, m, 0, s1, nb1 - 1), t);
+  for(size_t b = 0; b < nb1; ++b) c1[b + 1] += c1[b];
+  keys.scatter_low(x, c1, m, I, s1, s1 ? (~(uint64_t) 0 >> (64 - s1)) : 0);
+  for(size_t b = 0, s = 0; b < nb1; ++b){
+    const size_t e = c1[b];
+    if(e > s) rank_sub(keys, x + s, e - s, s1, I, imask, s0 + s, w);
+    s = e;
+  }
+  keys.finish();
+}
+
+// Ranks of one bucket of m entries, held in position order as their low t key bits: sort (key bits, index) words, then give each
+// entry its min rank - 1: s0 plus its rank in the bucket (s0 = the bucket's start, or 0 for local ranks). A bucket of more than
+// 2^(PIECE_BITS + 2) entries and fewer than 64 key bits goes to rank_big_bucket, its top cut at most SUB_BITS (or fewer: pieces of
+// ~2^PIECE_BITS) and at least t + I - 64 bits (so its words fit). A smaller bucket gets one radix pass of up to TOP_BITS straight
+// from its keys, then sort_rest; a bucket of 64 key bits (a catch-all) whose words would not fit keeps the top 64 - I key bits in
+// them and sorts the entries that tie on those by whole keys.
+template <class K> void rank_bucket(K &keys, size_t m, size_t s0, int t, Work &w){
+  const int I = bit_width(m - 1), bw = bit_width(m);
+  const uint64_t imask = I ? (~(uint64_t) 0 >> (64 - I)) : 0;
+  if(bw > PIECE_BITS + 2 && t < 64){
+    rank_big_bucket(keys, m, s0, t, I, imask, std::min(t, std::max(std::min(SUB_BITS, bw - PIECE_BITS), t + I - 64)), w);
+    return;
+  }
+  const int cut = t + I > 64 ? t + I - 64 : 0, width = t - cut;
+  if(w.x.size() < m) w.x.resize(m);
+  if(w.y.size() < m) w.y.resize(m);
+  uint64_t *x = w.x.data(), *y = w.y.data();
   const int want = std::min(TOP_BITS, bit_width(m)), shift = width > want ? width - want : 0;
   const size_t nb = (size_t) 1 << (width - shift);
   w.cnt.assign(nb + 1, 0);

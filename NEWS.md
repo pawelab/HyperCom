@@ -6,6 +6,10 @@
 * **`prioritize=FALSE`** in `HyperCom()` and the wrappers skips ranking the pairs (`prioritize_lr`), which takes most of the run
   time: the run stops after the influence matrix and metadata, for `score_hypercom()` on chosen pairs. `res$priority` is then
   `NULL` and `6.priority` is not written.
+* **Faster exact scoring of very large samples.** The biggest value buckets (one sample of more than ~80,000 cells) are now cut
+  into in-cache pieces before sorting instead of taking a slower general sort: grid scoring takes ~18% less time at the bucket size
+  of 100,000 cells in one sample and ~40% less at 200,000-400,000 cells (measured on 50,000 cells with fewer buckets). Results are
+  identical to the last bit. Memory mode and screening are unchanged.
 * **`cellchat.hs.lrdb`: two interactions had the wrong genes**, copied from CellChat's gene symbol columns: CXCL8_CXCR1 scored
   CXCL1 (the same genes as CXCL1_CXCR1), and CD99_PILRB had the mouse symbols Cd99 / Pilrb, so it never matched human data. Both now
   have CellChat's genes (CXCL8; CD99 / PILRB). Results for these two interactions change; on human data where they are expressed,

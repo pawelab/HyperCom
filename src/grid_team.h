@@ -68,6 +68,8 @@ const int RADIX_BITS = 12;              // and at most 2^12 in a deeper pass
 const int PIECE_BITS = 10;              // a bucket of more than 2^12 entries is cut by its top key bits into pieces of ~2^10, each sorted
                                         // and ranked at once in L1 (bucket buffers bigger than a thread's share of L3 are not swept
                                         // again)
+const int SUB_BITS = 8;                 // the top cut of such a bucket: at most 2^8 sub-buckets (more streams spill the scatter), each
+                                        // cut again in cache into the pieces
 const size_t INSERTION_MAX = 32;        // sub-buckets of at most this many words are left to the final insertion sort
 const size_t SPLIT_STEP = 256;          // buckets a thread takes at once when it turns the chunk counts into offsets
 const size_t RANK_UNITS = 16;           // ranking: work units per team member
@@ -287,6 +289,8 @@ struct Work {
   std::vector<uint32_t> z, cnt;
   std::vector<uint32_t> bnd;           // a big bucket's top-digit offsets
   std::vector<uint64_t> pb;            // one piece's words
+  std::vector<uint64_t> sb;            // one sub-bucket's words, cut into pieces
+  std::vector<uint32_t> bnd2;          // a sub-bucket's piece offsets
   std::vector<std::pair<size_t, size_t>> segs;
   std::vector<std::pair<uint64_t, uint64_t>> group;
   std::vector<size_t> start, at;
