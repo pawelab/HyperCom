@@ -79,11 +79,11 @@ head(lrdb, 2)
 ## 2. Run HyperCom
 One call runs the whole analysis.
 
-- HyperCom starts one R process per physical core, fewer when they would not fit in memory (`threads` sets the number;
-  `threads=1` runs in this R session alone). Results do not depend on it.
+- HyperCom starts up to 4 R processes (one per physical core), fewer when they would not fit in memory (`threads` sets the
+  number; `threads=1` runs in this R session alone). Results do not depend on it.
 - `significance=TRUE` adds p-values; `seed` makes them reproducible.
 
-This takes about a minute on 8 cores.
+This takes about a minute.
 ```{r}
 outdir <- file.path(tempdir(), "overview")
 res <- HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,

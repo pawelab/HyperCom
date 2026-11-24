@@ -36,8 +36,8 @@ s <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
 - The wrappers pass every other argument on to `HyperCom()`. A misspelled or removed argument (`parallel=`, `cache=`, `cl=`,
   `exact.priority=`) stops with "unused argument".
 - **Install check:** `example(HyperCom)` takes seconds.
-- **Processes:** `threads` is the number of R processes that score. The default starts one per physical core, fewer when they would
-  not fit in `memory.gb` (with a message). `threads=1` scores in the R session alone. Results do not depend on it.
+- **Processes:** `threads` is the number of R processes that score. The default starts one per physical core, at most 4 (more gain
+  little), fewer when they would not fit in `memory.gb` (with a message). `threads=1` scores in the R session alone. Results do not depend on it.
 - **Output folder:** set `outdir` yourself; the default is `HyperCom/` in the working directory. `outdir=NULL` writes no files.
 
 ## Check the input before a run

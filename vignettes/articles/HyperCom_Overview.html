@@ -2360,10 +2360,10 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <h2 class="anchored" data-anchor-id="run-hypercom">2. Run HyperCom</h2>
 <p>One call runs the whole analysis.</p>
 <ul>
-<li>HyperCom starts one R process per physical core, fewer when they would not fit in memory (<code>threads</code> sets the number; <code>threads=1</code> runs in this R session alone). Results do not depend on it.</li>
+<li>HyperCom starts up to 4 R processes (one per physical core), fewer when they would not fit in memory (<code>threads</code> sets the number; <code>threads=1</code> runs in this R session alone). Results do not depend on it.</li>
 <li><code>significance=TRUE</code> adds p-values; <code>seed</code> makes them reproducible.</li>
 </ul>
-<p>This takes about a minute on 8 cores.</p>
+<p>This takes about a minute.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>outdir <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;overview&quot;</span>)</span>
 <span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>res <span class="ot">&lt;-</span> <span class="fu">HyperCom</span>(<span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">counts=</span>alexanian2021.counts,</span>

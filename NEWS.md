@@ -6,7 +6,7 @@ scored in R instead of compiled code. It still installs from CRAN packages only.
 * **Much faster than 0.0.1.** Cells are compared only within their sample (0.0.1 built the whole cell x cell grid and dropped the
   pairs across samples), each grid of a ligand and a receptor subunit is scored once for all the pairs and weights that use it, and
   the influence matrix is kept as its factors (`infmat.method="woodbury"`, the new default). The bundled data with p-values take
-  about a minute on 8 cores instead of about 8 minutes on 12.
+  about a minute on 4 to 8 cores instead of about 8 minutes on 12.
 * **Same results.** With `infmat.method="lu"`, scores, priorities and seeded p-values are identical to 0.0.1's (and to those of the
   paper's code, branch `handwritten`). The default `"woodbury"` differs from them by rounding (about 1e-15), which can reorder pairs
   with exactly tied priorities.
@@ -18,7 +18,8 @@ scored in R instead of compiled code. It still installs from CRAN packages only.
 ## Breaking changes
 
 * **`parallel` and `cl` are gone; `threads` gives the number of R processes.** The default (`threads=NULL`) starts one process per
-  physical core, at a lower priority than other programs, and fewer when they would not fit in memory (with a message). `threads=1`
+  physical core, at most 4 (more gain little: scoring in R is limited by memory speed), at a lower priority than other programs,
+  and fewer when they would not fit in memory (with a message). `threads=1`
   runs in the R session alone. Results do not depend on it. Cluster jobs and containers use only their allocated cores;
   `options(mc.cores=)` caps the default. Clusters across several machines (`cl` on SGE) are no longer supported.
 * **`cache` is now `resume`.** A run stopped under 0.0.1 is not resumed (the version changed).

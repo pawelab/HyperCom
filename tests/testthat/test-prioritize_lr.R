@@ -47,10 +47,12 @@ test_that("background pairs without a priority are left out of the p-values, wit
   }
 })
 
-test_that("threads=NULL uses one process per physical core, never more than the available cores", {
+test_that("threads=NULL uses one process per physical core up to 4, never more than the available cores", {
   threads <- HyperCom:::get_threads()
 
   expect_gte(threads, 1)
+  expect_lte(threads, 4)
+  expect_equal(threads, min(4, parallelly::availableCores(), HyperCom:::physical_cores(), na.rm=TRUE))
   expect_lte(threads, parallelly::availableCores())
   expect_equal(HyperCom:::get_threads(1), 1)
   expect_lte(HyperCom:::physical_cores(), parallel::detectCores())

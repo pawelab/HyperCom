@@ -39,11 +39,12 @@ pair's genes, in the priority score. 1 (the default) weighs it like the other fo
 \item{seed}{An integer seed for drawing the background pairs, so that p-values are reproducible, or NULL (the default) to use the
 session's random numbers; the session's random state is restored afterwards. Ignored without significance}
 
-\item{threads}{An integer number of R processes that score grids, NULL (the default) for one per physical core, or 1 to score in
-this R session alone; a number above the cores available to R warns and uses them all. Fewer are used, with a message, when they
-would not fit in memory.gb (see Memory and processes). Worker processes run at a lower priority than other programs, so the
-computer stays responsive while HyperCom uses all cores. A cluster job or container gets only its allocated cores, and
-\code{options(mc.cores=4)} (or the environment variable MC_CORES) caps the default. Results do not depend on it}
+\item{threads}{An integer number of R processes that score grids, NULL (the default) for one per physical core up to 4 (more
+gain little: scoring in R is limited by memory speed), or 1 to score in this R session alone; a number above the cores available
+to R warns and uses them all. Fewer are used, with a message, when they would not fit in memory.gb (see Memory and processes).
+Worker processes run at a lower priority than other programs, so the computer stays responsive. A cluster job or container gets
+only its allocated cores, and \code{options(mc.cores=2)} (or the environment variable MC_CORES) caps the default. Results do not
+depend on it}
 
 \item{memory.gb}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
 of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It caps the number of processes and

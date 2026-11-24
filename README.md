@@ -19,7 +19,7 @@ on [`master`](https://github.com/pawelab/HyperCom), is faster and handles bigger
 | | pure R (this branch) | main version (`master`) |
 |---|---|---|
 | Install | any computer with R 4.2 or later | ready-built on Windows and macOS with current R; build tools otherwise |
-| Bundled data with p-values, 8 cores | about a minute | 2 s |
+| Bundled data with p-values | about a minute (4 processes) | 2 s (8 threads) |
 | Cells per sample | up to about 10,000 | up to about 100,000 (64 GB) |
 | Memory per pair of cells in a sample | 79 bytes per R process | 17.6 bytes (5.5 in memory mode) |
 | Results | the same, to about 1e-15 | |
@@ -79,9 +79,9 @@ scores <- score_hypercom(res$infMat, res$metadata, ligand="TGFB1", receptors=c("
   p < 0.001. Its `p.adj` is then 0 too and is also only a bound.
 - **Output files:** every result is also saved to `outdir` (default `HyperCom/` in the working directory; `outdir=NULL` writes none).
   Running again with the same `outdir` overwrites its files.
-- **Cores:** HyperCom starts one R process per physical core, at a lower priority than your other programs, so the computer stays
-  responsive. Each process holds its own copy of the data, so HyperCom starts fewer when they would not fit in memory, and says so.
-  `threads=4` asks for 4, `threads=1` runs in your R session alone. On a cluster it uses only the job's cores; give the job's memory
+- **Cores:** HyperCom starts up to 4 R processes (one per physical core), at a lower priority than your other programs, so the
+  computer stays responsive. More gain little in R. Each process holds its own copy of the data, so HyperCom starts fewer when
+  they would not fit in memory, and says so. `threads=8` asks for 8, `threads=1` runs in your R session alone. On a cluster it uses only the job's cores; give the job's memory
   with `memory.gb=`.
 - **Run stopped?** Run the same call again. It continues where it stopped.
 

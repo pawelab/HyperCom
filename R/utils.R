@@ -92,15 +92,22 @@ name_block <- function(A, idx, drop){
   return(A)
 }
 
-#' Choose the number of threads
+#' Most R processes started by default
 #'
-#' `get_threads` returns the number of threads used to score cell grids
+#' `default.processes` caps the default number of R processes: each ranks its grids with scattered memory reads, so past about 4
+#' processes the memory bus is the limit (per-grid time 33, 62 and 137 ms at 1, 4 and 8 processes on a desktop, 2026-11-24) while
+#' every process holds its own copy of the blocks
+#' @noRd
+default.processes <- 4L
+
+#' Choose the number of processes
 #'
-#' This function takes an optional thread count and returns it, or, when it is NULL, the available physical cores: hyperthreads and
-#' big grids compete for the same caches. Never more than the available (logical) cores: a larger thread count warns. A thread count
-#' below 1 stops.
-#' @param threads An integer number of threads or NULL
-#' @returns An integer number of threads
+#' `get_threads` returns the number of R processes that score cell grids (the threads argument)
+#'
+#' This function takes an optional process count and returns it, or, when it is NULL, the available physical cores up to
+#' default.processes. Never more than the available (logical) cores: a larger count warns. A count below 1 stops.
+#' @param threads An integer number of processes or NULL
+#' @returns An integer number of processes
 #' @noRd
 get_threads <- function(threads=NULL){
   cores <- parallelly::availableCores()
@@ -117,7 +124,7 @@ get_threads <- function(threads=NULL){
     }
     return(as.integer(min(floor(threads), cores)))
   }
-  cores <- min(cores, physical_cores(), na.rm=TRUE)
+  cores <- min(cores, physical_cores(), default.processes, na.rm=TRUE)
 
   return(as.integer(cores))
 }
