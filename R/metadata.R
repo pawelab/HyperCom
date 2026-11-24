@@ -5,7 +5,7 @@
 #' `generate_metadata` returns a minimal metadata data frame with one row per node of the influence matrix
 #'
 #' This function takes an influence matrix and a cell metadata table and returns a table of the node name (cell), sample and group of
-#' every node. Without group, every cell is in one group, "none". Nodes of the influence matrix that are not cells of the metadata
+#' every node. Without sample, every cell is in one sample, "all"; without group, every cell is in one group, "none". Nodes of the influence matrix that are not cells of the metadata
 #' are genes: their sample, group and kept text and factor columns are "gene", and their kept numeric and logical columns NA (those
 #' columns keep their type). Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and
 #' other classed columns other than factors become text. Cells are compared only within their sample, so every sample needs at
@@ -13,8 +13,8 @@
 #' "gene".
 #' @param infMat An influence matrix from generate_infMat (only its node names are read)
 #' @param metadata A data frame containing cell metadata with row names being cells
-#' @param sample A string that is the column name for sample (library or replicate) in the provided metadata; cells are compared
-#' only within their sample
+#' @param sample A string that is the column name for sample (library or replicate) in the provided metadata, or NULL (the default)
+#' for one sample; cells are compared only within their sample
 #' @param group A string that is the column name for group (e.g. condition) in the provided metadata, or NULL (the default) for one
 #' group; groups feed the purity term of the priority (see `prioritize_lr`)
 #' @param keep A vector of strings that are additional column names to keep from the provided metadata, or NULL (the default)
@@ -32,23 +32,19 @@
 #' head(metadata)
 #' table(metadata$sample)
 #' @export
-generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, outfile="5.metadata.csv"){
+generate_metadata <- function(infMat, metadata, sample=NULL, group=NULL, keep=NULL, outfile="5.metadata.csv"){
   check_columns(metadata, sample, group, keep)
   index <- data.frame(cell=row.names(infMat), check.names=FALSE)
   cells <- rownames(metadata)
 
-  if(is.null(group)){
-    group.vals <- "none"
-  } else {
-    group.vals <- as.character(metadata[[group]])
-  }
-  sample.vals <- as.character(metadata[[sample]])
+  sample.vals <- label_values(metadata, sample, "all")
+  group.vals <- label_values(metadata, group, "none")
 
   in.graph <- cells %in% index$cell
   if(!any(in.graph)){
     stop("no node of infMat is a row name of metadata: the row names of metadata must be the cell names of the counts")
   }
-  check_labels(sample.vals[in.graph], rep(group.vals, length.out=nrow(metadata))[in.graph])
+  check_labels(sample.vals[in.graph], group.vals[in.graph])
   sizes <- table(sample.vals[in.graph])
   if(any(sizes < 2)){
     stop("every sample needs at least 2 cells in the graph (cells that express a ligand or receptor gene), as cells are compared only ",
@@ -87,6 +83,22 @@ generate_metadata <- function(infMat, metadata, sample, group=NULL, keep=NULL, o
   }
 
   return(clean.df)
+}
+
+#' Get the sample or group label of every cell
+#'
+#' `label_values` returns the labels of a metadata column as strings, or one label for every cell when no column is named
+#' @param metadata A data frame containing cell metadata with row names being cells
+#' @param column A string that is a column name of metadata, or NULL
+#' @param single A string labelling every cell when column is NULL
+#' @returns A vector of strings, one per row of metadata
+#' @noRd
+label_values <- function(metadata, column, single){
+  if(is.null(column)){
+    return(rep(single, nrow(metadata)))
+  }
+
+  return(as.character(metadata[[column]]))
 }
 
 #' Check the sample and group labels of the cells in the graph
@@ -141,17 +153,14 @@ check_metadata <- function(metadata, significance=FALSE){
 #' `check_columns` stops unless sample, group and keep name columns of the metadata
 #'
 #' This function takes the metadata and the column arguments of generate_metadata and stops, naming the problem, unless metadata is a
-#' data frame, sample is given (not missing or NULL), sample and group are each one string and every named column exists.
+#' data frame, sample and group are each one string or NULL and every named column exists.
 #' @param metadata A data frame containing cell metadata with row names being cells
-#' @param sample A string that is the column name for sample in the provided metadata
+#' @param sample A string that is the column name for sample in the provided metadata, or NULL
 #' @param group A string that is the column name for group in the provided metadata, or NULL
 #' @param keep A vector of strings that are additional column names to keep in the provided metadata, or NULL
 #' @returns NULL, invisibly
 #' @noRd
-check_columns <- function(metadata, sample, group=NULL, keep=NULL){
-  if(missing(sample) || is.null(sample)){
-    stop("sample must name the column of metadata that gives each cell's sample (one sample? add metadata$sample <- \"all\")")
-  }
+check_columns <- function(metadata, sample=NULL, group=NULL, keep=NULL){
   if(!is.data.frame(metadata)){
     stop("metadata must be a data frame with row names being cells")
   }

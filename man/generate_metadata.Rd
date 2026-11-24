@@ -7,7 +7,7 @@
 generate_metadata(
   infMat,
   metadata,
-  sample,
+  sample = NULL,
   group = NULL,
   keep = NULL,
   outfile = "5.metadata.csv"
@@ -18,8 +18,8 @@ generate_metadata(
 
 \item{metadata}{A data frame containing cell metadata with row names being cells}
 
-\item{sample}{A string that is the column name for sample (library or replicate) in the provided metadata; cells are compared
-only within their sample}
+\item{sample}{A string that is the column name for sample (library or replicate) in the provided metadata, or NULL (the default)
+for one sample; cells are compared only within their sample}
 
 \item{group}{A string that is the column name for group (e.g. condition) in the provided metadata, or NULL (the default) for one
 group; groups feed the purity term of the priority (see \code{prioritize_lr})}
@@ -37,7 +37,7 @@ order (gene rows marked "gene")
 }
 \details{
 This function takes an influence matrix and a cell metadata table and returns a table of the node name (cell), sample and group of
-every node. Without group, every cell is in one group, "none". Nodes of the influence matrix that are not cells of the metadata
+every node. Without sample, every cell is in one sample, "all"; without group, every cell is in one group, "none". Nodes of the influence matrix that are not cells of the metadata
 are genes: their sample, group and kept text and factor columns are "gene", and their kept numeric and logical columns NA (those
 columns keep their type). Kept columns named cell, sample or group are renamed with make.unique (e.g. sample.1); kept dates and
 other classed columns other than factors become text. Cells are compared only within their sample, so every sample needs at

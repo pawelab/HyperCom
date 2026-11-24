@@ -3,6 +3,12 @@
 The pure R version now follows HyperCom 0.3.1 (branch `master`): the same functions, arguments, checks and fixes, with cell grids
 scored in R instead of compiled code. It still installs from CRAN packages only.
 
+* **`sample` is optional**, like `group`: without it all cells are one sample (`"all"`), in `HyperCom()`, `HyperCom_seurat()`,
+  `HyperCom_sce()` and `generate_metadata()`. `HyperCom()` also needs no `metadata` when there is neither sample, group nor
+  `keep`: `HyperCom(cellchat.hs.lrdb, counts)` runs on every cell of counts. Results equal those of `metadata$sample <- "all"`.
+* **`prioritize=FALSE`** in `HyperCom()` and the wrappers skips ranking the pairs (`prioritize_lr`), which takes most of the run
+  time: the run stops after the influence matrix and metadata, for `score_hypercom()` on chosen pairs. `res$priority` is then
+  `NULL` and `6.priority` is not written.
 * **Much faster than 0.0.1.** Cells are compared only within their sample (0.0.1 built the whole cell x cell grid and dropped the
   pairs across samples), each grid of a ligand and a receptor subunit is scored once for all the pairs and weights that use it, and
   the influence matrix is kept as its factors (`infmat.method="woodbury"`, the new default). The bundled data with p-values take

@@ -2274,8 +2274,8 @@ vertical-align: -.125em;
 <td>A genes x cells matrix (sparse or dense). Row names are gene symbols; column names are cell names. Raw or normalized, <strong>never scaled</strong>: HyperCom only uses whether each gene is above 0 in each cell.</td>
 </tr>
 <tr class="even">
-<td><strong>Cell metadata</strong></td>
-<td>A data frame with one row per cell; row names are the cell names. A <strong>sample</strong> column (library or replicate) and, optionally, a <strong>group</strong> column (condition).</td>
+<td><strong>Cell metadata</strong> (optional)</td>
+<td>A data frame with one row per cell; row names are the cell names. Optionally a <strong>sample</strong> column (library or replicate) and a <strong>group</strong> column (condition). Without metadata, all cells are one sample and one group.</td>
 </tr>
 <tr class="odd">
 <td><strong>Ligand-receptor database</strong></td>
@@ -2286,7 +2286,7 @@ vertical-align: -.125em;
 <p>Also:</p>
 <ul>
 <li><strong>Cell names must be unique.</strong> When you merge samples, add the sample name to each barcode.</li>
-<li><strong>Cells are compared only within their sample</strong>, so each sample needs at least 2 cells that express a ligand or receptor gene.</li>
+<li><strong>Cells are compared only within their sample</strong>, so each sample needs at least 2 cells that express a ligand or receptor gene. Without <code>sample</code>, all cells are one sample.</li>
 <li>Cells in the counts but not in the metadata are left out, with a warning.</li>
 </ul>
 <section id="the-example-data" class="level3">
@@ -2362,6 +2362,7 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <ul>
 <li>HyperCom starts up to 4 R processes (one per physical core), fewer when they would not fit in memory (<code>threads</code> sets the number; <code>threads=1</code> runs in this R session alone). Results do not depend on it.</li>
 <li><code>significance=TRUE</code> adds p-values; <code>seed</code> makes them reproducible.</li>
+<li><code>prioritize=FALSE</code> skips ranking the pairs, which takes most of the time, for scoring chosen pairs only (section 4): <code>res$priority</code> is then <code>NULL</code> and <code>6.priority</code> is not written.</li>
 </ul>
 <p>This takes about a minute.</p>
 <div class="cell">
@@ -2589,6 +2590,7 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <ul>
 <li><strong>Pairs:</strong> time also grows with the number of ligand-receptor pairs expressed.</li>
 <li><strong>More than about 10,000 cells per sample:</strong> use the compiled version on branch <code>master</code>. It gives the same results, takes seconds for this tutorial and fits about 100,000 cells in one sample in 64 GB.</li>
+<li><strong>Cell scores only:</strong> <code>prioritize=FALSE</code> skips ranking the pairs, which is almost all of this time. Each <code>score_hypercom</code> call then takes a while on large data.</li>
 </ul>
 </section>
 <section id="where-the-memory-goes" class="level3">

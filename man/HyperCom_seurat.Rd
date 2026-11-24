@@ -7,7 +7,7 @@
 HyperCom_seurat(
   seurat,
   lrdb,
-  sample,
+  sample = NULL,
   assay = "RNA",
   layer = "counts",
   group = NULL,
@@ -23,8 +23,8 @@ ligand, and subsequent columns are named r1, ..., rn where n is the maximum numb
 ligand-receptor interactions, e.g. \code{cellchat.mm.lrdb}. Interactions without a ligand or a receptor are left out with a warning;
 interaction names must be distinct and differ from the gene names}
 
-\item{sample}{A string that is the column name for sample (library or replicate) in the cell metadata of the Seurat object; cells
-are compared only within their sample}
+\item{sample}{A string that is the column name for sample (library or replicate) in the cell metadata of the Seurat object, or
+NULL (the default) for one sample; cells are compared only within their sample}
 
 \item{assay}{A string naming the assay to read counts from, "RNA" by default}
 
@@ -43,6 +43,9 @@ default) for one group; groups feed the purity term of the priority (see \code{p
 "lu" (a dense matrix of all cells and genes squared). The methods agree to about 1e-15}
     \item{\code{resume}}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/6.priority/cache}, so that a stopped run continues
 where it stopped when the same call is run again; TRUE by default, ignored when outdir is NULL}
+    \item{\code{prioritize}}{A boolean of whether to rank the ligand-receptor pairs with \code{prioritize_lr}, the step that takes most of the time;
+TRUE by default. FALSE stops after \code{generate_metadata}, with everything \code{score_hypercom} needs, and ignores weights, significance,
+seed and resume}
     \item{\code{verbose}}{A boolean of whether to report progress as messages: what each step found, the memory needed, the pairs scored with
 the time left, and the top pair of each weight}
     \item{\code{outdir}}{A string naming the output directory of the run ("HyperCom" in the working directory by default), or NULL to write
