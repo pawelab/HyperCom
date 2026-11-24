@@ -7,8 +7,8 @@
 HyperCom(
   lrdb,
   counts,
-  metadata,
-  sample,
+  metadata = NULL,
+  sample = NULL,
   group = NULL,
   keep = NULL,
   weights = 1,
@@ -20,6 +20,7 @@ HyperCom(
   threads = NULL,
   memory.gb = NULL,
   resume = TRUE,
+  prioritize = TRUE,
   verbose = TRUE,
   outdir = "HyperCom"
 )
@@ -33,10 +34,11 @@ interaction names must be distinct and differ from the gene names}
 \item{counts}{A matrix (dense or sparse) with row names being genes and column names being cells: raw or normalized counts, not
 scaled data}
 
-\item{metadata}{A data frame containing cell metadata with row names being cells}
+\item{metadata}{A data frame containing cell metadata with row names being cells, or NULL (the default) when there is neither a
+sample, group nor keep column: then every cell of counts is used, in one sample and one group}
 
-\item{sample}{A string that is the column name for sample (library or replicate) in the provided metadata; cells are compared
-only within their sample}
+\item{sample}{A string that is the column name for sample (library or replicate) in the provided metadata, or NULL (the default)
+for one sample; cells are compared only within their sample}
 
 \item{group}{A string that is the column name for group (e.g. condition) in the provided metadata, or NULL (the default) for one
 group; groups feed the purity term of the priority (see \code{prioritize_lr})}
@@ -76,6 +78,10 @@ be more than the job may use}
 \item{resume}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/6.priority/cache}, so that a stopped run continues
 where it stopped when the same call is run again; TRUE by default, ignored when outdir is NULL}
 
+\item{prioritize}{A boolean of whether to rank the ligand-receptor pairs with \code{prioritize_lr}, the step that takes most of the time;
+TRUE by default. FALSE stops after \code{generate_metadata}, with everything \code{score_hypercom} needs, and ignores weights, significance,
+seed, exact.priority and resume}
+
 \item{verbose}{A boolean of whether to report progress as messages: what each step found, the memory needed, the pairs scored with
 the time left, and the top pair of each weight}
 
@@ -85,7 +91,8 @@ no files (and keep no cache to resume from)}
 \value{
 Invisibly, a list:
 \itemize{
-\item priority: the ranked pairs from \code{prioritize_lr}, one data frame per weight, named by weight (e.g. \code{res$priority[["1"]]});
+\item priority: the ranked pairs from \code{prioritize_lr}, one data frame per weight, named by weight (e.g. \code{res$priority[["1"]]}); NULL
+with \code{prioritize=FALSE};
 \item metadata: cell (and gene) metadata from \code{generate_metadata};
 \item infMat: the influence matrix from \code{generate_infMat};
 \item adj: the adjacency from \code{generate_adjacency_matrix};
@@ -93,17 +100,19 @@ Invisibly, a list:
 }
 
 With outdir, the same results are written there: 0.counts.rds (the counts of the ligand and receptor genes), 1.lrs.csv,
-2.hyperedges.csv, 3.adj.rds, 4.infMat.rds, 5.metadata.csv and 6.priority/priority.\if{html}{\out{<weight>}}.csv. Read the .rds files after
+2.hyperedges.csv, 3.adj.rds, 4.infMat.rds, 5.metadata.csv and 6.priority/priority.\if{html}{\out{<weight>}}.csv (not with \code{prioritize=FALSE}).
+Read the .rds files after
 \code{library(HyperCom)}.
 }
 \description{
 \code{HyperCom} returns the ligand-receptor pairs ranked by priority and the objects to score cells with
 }
 \details{
-This function takes a gene x cell counts matrix, its cell metadata and a ligand-receptor database and runs every step:
+This function takes a gene x cell counts matrix, its cell metadata (optional) and a ligand-receptor database and runs every step:
 \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat}, \code{generate_metadata}
 and \code{prioritize_lr}. The results are returned and written to outdir, so they need not be read back: \code{res <- HyperCom(...)}, then
-\code{res$priority[["1"]]} or \code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}.
+\code{res$priority[["1"]]} or \code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}. Ranking the pairs
+(\code{prioritize_lr}) takes most of the time; \code{prioritize=FALSE} skips it, for scoring chosen pairs with \code{score_hypercom} only.
 
 The input is checked first. Before the first file is written, the run stops when a cell that expresses a ligand or receptor gene
 has a missing sample or group (or one named "gene"), and when the scoring cannot fit in memory (see memory.gb); it also stops when

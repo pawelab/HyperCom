@@ -37,14 +37,14 @@ HyperCom needs three inputs. Most failed runs come from one of them, so check th
 | Input | What it must be |
 |---|---|
 | **Counts** | A genes x cells matrix (sparse or dense). Row names are gene symbols; column names are cell names. **No negative values:** raw or normalized counts are fine; scaled data is not. HyperCom only uses whether each gene is above 0 in each cell. |
-| **Cell metadata** | A data frame with one row per cell; row names are the cell names. A **sample** column (library or replicate) and, optionally, a **group** column (condition). |
+| **Cell metadata** (optional) | A data frame with one row per cell; row names are the cell names. Optionally a **sample** column (library or replicate) and a **group** column (condition). Without metadata, all cells are one sample and one group. |
 | **Ligand-receptor database** | `cellchat.hs.lrdb` for human (genes like `TGFB1`) or `cellchat.mm.lrdb` for mouse (`Tgfb1`). |
 
 Also:
 
 - **Cell names must be unique.** When you merge samples, add the sample name to each barcode.
 - **Cells are compared only within their sample**, so each sample needs at least 2 cells that express a ligand or receptor gene.
-  One sample? Add `metadata$sample <- "all"`.
+  Without `sample`, all cells are one sample.
 - Cells in the counts but not in the metadata are left out, with a warning.
 
 ### The example data
@@ -84,6 +84,8 @@ One call runs the whole analysis.
 
 - HyperCom uses one thread per physical core (`threads` sets the number; `threads=1` runs on one thread).
 - `significance=TRUE` adds p-values; `seed` makes them reproducible.
+- `prioritize=FALSE` skips ranking the pairs, which takes most of the time, for scoring chosen pairs only (section 4):
+  `res$priority` is then `NULL` and `6.priority` is not written.
 
 ```{r}
 outdir <- file.path(tempdir(), "overview")
@@ -192,7 +194,8 @@ ggplot(umap, aes(x=UMAP_1, y=UMAP_2, colour=hypercom)) +
 
 Split by condition: the number of cells with the strongest sender and receiver scores (top 10% of `hypercom` at each end) in each
 group, and the score distributions. `res$metadata` comes from `generate_metadata`, which names the column given as `group`
-(here `condition`) `group`, and the one given as `sample` `sample`.
+(here `condition`) `group`, and the one given as `sample` `sample` (without them, every cell's group is `"none"` and its sample
+`"all"`).
 ```{r}
 top.scores <- left_join(top.scores, res$metadata, by=join_by(cell))
 cut.low <- quantile(top.scores$hypercom, 0.1, na.rm=TRUE)
@@ -244,6 +247,8 @@ bytes.
 - **Pairs:** time also grows with the number of ligand-receptor pairs expressed (about 700 here).
 - **P-values** (1,000 background pairs) take about two thirds of the time. HyperCom also screens the real pairs when it computes
   p-values.
+- **Cell scores only:** `prioritize=FALSE` skips ranking the pairs, which is almost all of this time. Each `score_hypercom` call
+  then takes a while on large data (see below).
 
 ### Where the memory goes
 - **Scoring the pairs** takes most of the memory: about 17.6 bytes for every pair of cells in the same sample, plus about 1.1 GB

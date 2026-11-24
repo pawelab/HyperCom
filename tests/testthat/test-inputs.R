@@ -158,3 +158,42 @@ test_that("within-sample cell pairs may pass 2^32 and stop at 2^52, before any b
   expect_no_error(HyperCom:::check_cell_pairs(c(2^26 - 1, 2)))
   expect_error(HyperCom:::check_cell_pairs(c(2^26, 1)), "below 2^52", fixed=TRUE)
 })
+
+test_that("without sample every cell is in one sample, and without metadata every cell of counts is used", {
+  md <- fx$input$metadata
+  md$sample <- "all"
+  infMat <- fx$output$infMat
+  lrdb <- fx$input$lrdb[fx$input$lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
+  run <- function(...){
+    return(quietly(HyperCom(lrdb, fx$input$counts, ..., threads=test_threads(2), outdir=NULL)))
+  }
+  one <- run(md, sample="sample")
+  bare <- run()
+
+  expect_identical(generate_metadata(infMat, fx$input$metadata, outfile=NULL),
+                   generate_metadata(infMat, md, sample="sample", outfile=NULL))
+  expect_identical(bare$metadata, one$metadata)
+  expect_identical(bare$priority, one$priority)
+  expect_error(run(sample="sample"), "metadata must be a data frame")
+  counts <- fx$input$counts
+  colnames(counts)[2] <- colnames(counts)[1]
+  expect_error(quietly(HyperCom(lrdb, counts, outdir=NULL)), "distinct cell names")
+})
+
+test_that("prioritize=FALSE stops before ranking, with the same objects and files of steps 0-5", {
+  dir <- withr::local_tempdir()
+  lrdb <- fx$input$lrdb[fx$input$lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
+  run <- function(outdir, ...){
+    return(quietly(HyperCom(lrdb, fx$input$counts, fx$input$metadata, sample="sample", group="condition", ...,
+                            threads=test_threads(2), outdir=outdir)))
+  }
+  full <- run(file.path(dir, "full"))
+  part <- run(file.path(dir, "part"), prioritize=FALSE, weights=c(0.5, 2))
+
+  expect_null(part$priority)
+  expect_named(part, names(full))
+  expect_identical(part[-1], full[-1])
+  expect_identical(list.files(file.path(dir, "part")), setdiff(list.files(file.path(dir, "full")), "6.priority"))
+  expect_no_warning(run(file.path(dir, "full"), prioritize=FALSE, weights=2))
+  expect_error(run(NULL, prioritize=NA), "prioritize")
+})

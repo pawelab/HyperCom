@@ -79,9 +79,9 @@ pak::pak("pawelab/HyperCom@base-R")
 
 1. **Database matches your species:** `cellchat.hs.lrdb` for human, `cellchat.mm.lrdb` for mouse. Genes are gene symbols (`TGFB1`), not
    Ensembl IDs.
-2. **`sample`** names the metadata column that holds the sample (library or replicate). Cells are compared only within their sample.
-   One sample? Add `metadata$sample <- "all"`. **`group`** (optional) names the condition column: pairs whose cells concentrate in
-   some conditions rank higher. There is one ranking for the whole dataset, not one per condition.
+2. **`sample`** (optional) names the metadata column that holds the sample (library or replicate). Cells are compared only within
+   their sample; without `sample`, all cells are one sample. **`group`** (optional) names the condition column: pairs whose cells
+   concentrate in some conditions rank higher. There is one ranking for the whole dataset, not one per condition.
 3. **No negative expression values:** raw or normalized counts are fine; scaled data is not.
 4. **Cell names are unique.** When you merge samples, add the sample name to each barcode.
 
@@ -98,6 +98,9 @@ res <- HyperCom_sce(sce, cellchat.hs.lrdb, sample="sample", group="condition")
 
 # Counts matrix (genes x cells) and a metadata table (one row per cell)
 res <- HyperCom(cellchat.hs.lrdb, counts, metadata, sample="sample", group="condition")
+
+# One sample, no conditions: counts alone
+res <- HyperCom(cellchat.hs.lrdb, counts)
 ```
 
 Then look at the results:
@@ -107,6 +110,8 @@ res$priority[["1"]]    # ligand-receptor pairs, ranked (one table per weight; th
 scores <- score_hypercom(res$infMat, res$metadata, ligand="TGFB1", receptors=c("TGFBR1", "TGFBR2"))    # score per cell
 ```
 
+- **Cell scores only:** `prioritize=FALSE` skips ranking the pairs, which takes most of the run time; then `score_hypercom()`
+  scores the pairs you choose.
 - **P-values:** add `significance=TRUE, seed=1`. `p = 0` means p < 0.001 (no background pair ranked as high): report it as
   p < 0.001. Its `p.adj` is then 0 too and is also only a bound.
 - **Output files:** every result is also saved to `outdir` (default `HyperCom/` in the working directory; `outdir=NULL` writes none).

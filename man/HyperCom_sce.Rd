@@ -7,7 +7,7 @@
 HyperCom_sce(
   sce,
   lrdb,
-  sample,
+  sample = NULL,
   assay = "counts",
   group = NULL,
   keep = NULL,
@@ -23,7 +23,7 @@ ligand-receptor interactions, e.g. \code{cellchat.mm.lrdb}. Interactions without
 interaction names must be distinct and differ from the gene names}
 
 \item{sample}{A string that is the column name for sample (library or replicate) in the cell metadata (\code{colData}) of the
-SingleCellExperiment object; cells are compared only within their sample}
+SingleCellExperiment object, or NULL (the default) for one sample; cells are compared only within their sample}
 
 \item{assay}{A string naming the assay to read counts from: "counts" (the default) or "logcounts", not a scaled assay}
 
@@ -40,6 +40,9 @@ or NULL}
 one memory mode can use), "chol" or "lu" (a dense matrix of all cells and genes squared). The methods agree to about 1e-15}
     \item{\code{resume}}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/6.priority/cache}, so that a stopped run continues
 where it stopped when the same call is run again; TRUE by default, ignored when outdir is NULL}
+    \item{\code{prioritize}}{A boolean of whether to rank the ligand-receptor pairs with \code{prioritize_lr}, the step that takes most of the time;
+TRUE by default. FALSE stops after \code{generate_metadata}, with everything \code{score_hypercom} needs, and ignores weights, significance,
+seed, exact.priority and resume}
     \item{\code{verbose}}{A boolean of whether to report progress as messages: what each step found, the memory needed, the pairs scored with
 the time left, and the top pair of each weight}
     \item{\code{outdir}}{A string naming the output directory of the run ("HyperCom" in the working directory by default), or NULL to write

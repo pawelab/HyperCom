@@ -1,5 +1,11 @@
 # HyperCom 0.3.1
 
+* **`sample` is optional**, like `group`: without it all cells are one sample (`"all"`), in `HyperCom()`, `HyperCom_seurat()`,
+  `HyperCom_sce()` and `generate_metadata()`. `HyperCom()` also needs no `metadata` when there is neither sample, group nor
+  `keep`: `HyperCom(cellchat.hs.lrdb, counts)` runs on every cell of counts. Results equal those of `metadata$sample <- "all"`.
+* **`prioritize=FALSE`** in `HyperCom()` and the wrappers skips ranking the pairs (`prioritize_lr`), which takes most of the run
+  time: the run stops after the influence matrix and metadata, for `score_hypercom()` on chosen pairs. `res$priority` is then
+  `NULL` and `6.priority` is not written.
 * **`cellchat.hs.lrdb`: two interactions had the wrong genes**, copied from CellChat's gene symbol columns: CXCL8_CXCR1 scored
   CXCL1 (the same genes as CXCL1_CXCR1), and CD99_PILRB had the mouse symbols Cd99 / Pilrb, so it never matched human data. Both now
   have CellChat's genes (CXCL8; CD99 / PILRB). Results for these two interactions change; on human data where they are expressed,
