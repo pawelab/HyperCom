@@ -19,8 +19,8 @@ This tutorial runs HyperCom on 1,000 mouse heart cells and shows how to:
 2. read the ranked ligand-receptor pairs,
 3. score and plot the cells that send and receive a signal.
 
-The last section runs each step on its own, for those who want to see how HyperCom works. This is the R-only version (branch
-`base-R`); the faster compiled version is on branch `master`.
+The last section runs each step on its own, for those who want to see how HyperCom works. This is the pure R version (branch
+`base-R`, HyperCom 0.3.1.1); the faster compiled version, with the same functions and results, is on branch `master`.
 
 ```{r setup, message=FALSE, warning=FALSE}
 library(HyperCom)
@@ -79,19 +79,17 @@ head(lrdb, 2)
 ## 2. Run HyperCom
 One call runs the whole analysis.
 
-- **Parallel runs use a cluster of R processes.** Make one with `parallelly::makeClusterPSOCK()` and pass it as `cl` with
-  `parallel=TRUE`; HyperCom leaves it running, so you can reuse it. Each worker holds its own copy of the data, so fewer workers
-  use less memory. Without `cl`, `parallel=TRUE` starts one process per core, which can fail on machines with many cores.
+- HyperCom starts one R process per physical core, fewer when they would not fit in memory (`threads` sets the number;
+  `threads=1` runs in this R session alone). Results do not depend on it.
 - `significance=TRUE` adds p-values; `seed` makes them reproducible.
 
-This takes a few minutes.
+This takes about a minute on 8 cores.
 ```{r}
-cl <- parallelly::makeClusterPSOCK(min(8, parallelly::availableCores()))
 outdir <- file.path(tempdir(), "overview")
 res <- HyperCom(lrdb=cellchat.mm.lrdb, counts=alexanian2021.counts,
                 metadata=alexanian2021.metadata, sample="sample",
                 group="condition", significance=TRUE, seed=1,
-                parallel=TRUE, cl=cl, outdir=outdir, verbose=FALSE)
+                outdir=outdir, verbose=FALSE)
 ```
 
 `res` holds the results, and they are also saved to `outdir`:
@@ -116,9 +114,9 @@ Same arguments, but HyperCom reads the counts and metadata from the object. `sam
 metadata (`seurat[[]]` or `colData(sce)`).
 ```{r, eval=FALSE}
 res <- HyperCom_seurat(seurat=seurat_object, lrdb=cellchat.mm.lrdb, sample="sample",
-                       group="condition", parallel=TRUE, cl=cl, outdir="overview")
+                       group="condition", outdir="overview")
 res <- HyperCom_sce(sce=sce_object, lrdb=cellchat.mm.lrdb, sample="sample",
-                    group="condition", parallel=TRUE, cl=cl, outdir="overview")
+                    group="condition", outdir="overview")
 ```
 
 - **`HyperCom_seurat`** reads the `counts` layer of the `RNA` assay by default (change with `assay` and `layer`). Works with Seurat v5
@@ -154,7 +152,7 @@ Thbs1-Sdc4 is the top pair. `score_hypercom` scores every cell for it:
   sample.
 - **`dif`** = receiver - sender; **`avg`** is their mean; **`max`** the larger of the two.
 - **`hypercom`:** one score per cell, negative for senders and positive for receivers.
-- **NaN:** the cell has no path to the pair's genes.
+- **NaN:** the cell has no score for the pair (rare).
 
 ```{r}
 Thbs1_Sdc4 <- score_hypercom(infMat=res$infMat, metadata=res$metadata, ligand="Thbs1",
@@ -202,10 +200,56 @@ head(Tgfb1_Tgfbr[, c("cell", "sender", "receiver", "hypercom")])
 ```
 
 ## 5. Large data
-This version keeps a dense influence matrix of all cells and genes, and each worker of the cluster holds a copy. The 1,000 cells of this
-tutorial take about 8 minutes on 12 cores, and it runs out of memory at about 20,000 cells. Fewer workers use less memory but take
-longer. For large data, use the compiled version on branch `master`: seconds for this data, and 60,000 cells in one sample fit in
-64 GiB. Both versions give the same results.
+
+### Run time and memory
+Time and memory depend on the number of cells **per sample** (they grow with its square), so more samples of the same size cost
+little. One sample, with p-values, on 8 cores:
+
+| Cells in the sample | Time | Peak memory |
+|---|---|---|
+| 1,000 | 1.7 min | 3.3 GB |
+| 3,000 | 18 min | 7.9 GB |
+| 10,000 | about 3.5 h (estimate) | about 70 GB (estimate; fewer processes on less memory, so longer) |
+
+Measured with `HyperCom()` on one sample of cells resampled from the bundled mouse heart data (counts thinned to 80%), with the bundled mouse database (about 1,000 pairs expressed), `significance=TRUE` and 8 R processes, on a desktop (Intel Core i9-12900K, 128 GB). Memory is the peak of all processes together. The 10,000-cell row is estimated from the time and memory per pair of cells. GB = 10^9^ bytes.
+
+- **Pairs:** time also grows with the number of ligand-receptor pairs expressed.
+- **More than about 10,000 cells per sample:** use the compiled version on branch `master`. It gives the same results, takes
+  seconds for this tutorial and fits about 100,000 cells in one sample in 64 GB.
+
+### Where the memory goes
+- **Scoring the pairs** takes most of the memory. Each R process that scores needs about 79 bytes for every pair of cells in the
+  same sample, plus about 0.4 GB, and the run about 1.1 GB more. The number of such pairs is the sum over samples of the squared
+  number of cells, so before a run you can estimate the memory of one process in GB with
+  `sum(as.numeric(table(metadata$sample))^2) * 79 / 1e9 + 1.1` (an upper bound: only cells that express a ligand or receptor gene
+  count).
+- **Processes:** before scoring, HyperCom compares its estimate with `memory.gb` (default: 90% of the computer's memory, or of a
+  container's or cluster job's limit on Linux) and starts only as many processes as fit, saying so. If even one does not fit, the
+  run stops at once, giving the estimate. On a cluster, give the job's memory: for a job that asks for 64 GB, `memory.gb=64`.
+- **The influence matrix** is kept, with the default `infmat.method="woodbury"`, as smaller pieces from which any entry can be
+  computed, so its memory grows with the number of cells, not its square. `infmat.method="lu"` makes the full matrix, with exactly
+  the numbers of the original release of HyperCom (0.0.0.9000).
+- **"... cells and ... genes are not connected to the rest of the hypergraph and are left out".** This warning counts cells and
+  genes that no chain of shared genes and interactions links to the rest. They could neither send nor receive anything, so they get
+  no scores. A few are normal; if many cells are left out, check the database species and the gene names.
+- **Splitting a sample into more samples** saves memory but changes which cells are compared, and so the results.
+
+### Runs that stop
+Scoring the pairs takes almost all the time. As it goes, HyperCom saves the scored pairs in `<outdir>/6.priority/cache`. **If a run
+stops** (cluster time limit, crash, closed R session), **run the same call again.** The earlier steps repeat (seconds) and scoring
+continues from the cache, losing at most the last batch of pairs, e.g.:
+
+```
+  Continuing from the cache in overview/6.priority/cache: 1042 of 1042 pairs already scored
+  Continuing from the cache in overview/6.priority/cache: 343 of 1000 background pairs already scored
+```
+
+- **Same results** as a run that never stopped, on the same type of computer. Without `seed`, the run keeps the background pairs it
+  drew before the stop. `weights` and `threads` may change between the calls.
+- **The cache is deleted** once the priority files are written.
+- **The cache is not used**, but moved to `cache.old` with a warning, when the second call differs in the counts, the database, the
+  cells' sample or group, `r`, `infmat.method` or the version of HyperCom. Rename `cache.old` back to continue the run it belongs
+  to. `resume=FALSE` turns the cache off.
 
 ## 6. Step by step: how HyperCom works
 This section runs each step of `HyperCom` on its own, with `outfile=NULL` so nothing is written.
@@ -229,14 +273,16 @@ A hyperedge links any number of nodes. HyperCom makes two types:
 1. **expression edges:** a ligand or receptor gene and the cells that express it,
 2. **interaction edges:** the genes of one ligand-receptor interaction.
 
-They are stored as a data frame with an edge and a node column (a node belongs to that edge), each edge with weight 1.
+They are stored as a data frame with an edge and a node column (a node belongs to that edge), each edge with weight 1. Cells and
+genes not connected to the rest are left out (see section 5).
 ```{r}
 hyperedges <- generate_hyperedges(counts=lr.counts, lrs=lrs, outfile=NULL)
 head(hyperedges, 2)
 ```
 
 The adjacency matrix has the cells, ligand genes and receptor genes as nodes; each entry is the number of hyperedges two nodes
-share.
+share. It is not stored in full: `adj` keeps which nodes are in which hyperedge, which is much smaller, and works like a matrix
+(`dim(adj)`, `adj[i, j]`, `as.matrix(adj)` for the whole matrix).
 ```{r}
 adj <- generate_adjacency_matrix(hyperedges=hyperedges, outfile=NULL)
 dim(adj)
@@ -248,8 +294,8 @@ A random walk with restart on the adjacency matrix gives the influence matrix: e
 i that ends at node j, so each row sums to 1. At every step the walk returns to its start with the restart probability `r`, so
 about `r` of each node's influence stays on itself and the rest spreads over the nodes it shares hyperedges with.
 
-`generate_infMat` takes `r` (default 0.5); `HyperCom` always uses 0.5. On this example the ranking hardly depends on it: `r` = 0.1
-and 0.8 give the same top 20 pairs as 0.5.
+`generate_infMat` and `HyperCom` take `r` (default 0.5). Like `adj`, `infMat` works like a matrix without being stored in full
+(section 5).
 ```{r}
 infMat <- generate_infMat(adj=adj, r=0.5, outfile=NULL)
 dim(infMat)
@@ -273,14 +319,8 @@ larger score as sender or receiver, how evenly they split into senders and recei
 `weights` is the weight of the first term; here two weights give two tables.
 ```{r}
 priority <- prioritize_lr(lrs=lrs, adj=adj, infMat=infMat, metadata=node.meta,
-                          weights=c(1, 0.5), parallel=TRUE, cl=cl, outdir=NULL,
-                          verbose=FALSE)
+                          weights=c(1, 0.5), outdir=NULL, verbose=FALSE)
 head(priority[["1"]])
-```
-
-When you are done, stop the cluster.
-```{r}
-parallel::stopCluster(cl)
 ```
 
 ## Citation

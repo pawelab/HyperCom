@@ -11,78 +11,108 @@ HyperCom(
   sample,
   group = NULL,
   keep = NULL,
-  weights = c(1),
+  weights = 1,
   significance = FALSE,
-  parallel = FALSE,
-  cl = NULL,
-  outdir = "HyperCom",
   seed = NULL,
-  verbose = TRUE,
+  r = 0.5,
   infmat.method = "woodbury",
-  cache = TRUE
+  threads = NULL,
+  memory.gb = NULL,
+  resume = TRUE,
+  verbose = TRUE,
+  outdir = "HyperCom"
 )
 }
 \arguments{
-\item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions, e.g. \code{cellchat.mm.lrdb}}
+\item{lrdb}{A data frame of ligand-receptor interactions where the first column names the interaction, the second column is named
+ligand, and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of
+ligand-receptor interactions, e.g. \code{cellchat.mm.lrdb}. Interactions without a ligand or a receptor are left out with a warning;
+interaction names must be distinct and differ from the gene names}
 
-\item{counts}{A matrix with row names being genes and column names being cells}
+\item{counts}{A matrix (dense or sparse) with row names being genes and column names being cells: raw or normalized counts, not
+scaled data}
 
-\item{metadata}{A dataframe containing cell metadata with row names being cells}
+\item{metadata}{A data frame containing cell metadata with row names being cells}
 
-\item{sample}{A string that is the column name for sample in the provided metadata}
+\item{sample}{A string that is the column name for sample (library or replicate) in the provided metadata; cells are compared
+only within their sample}
 
-\item{group}{A string that is the column name for group in the provided metadata}
+\item{group}{A string that is the column name for group (e.g. condition) in the provided metadata, or NULL (the default) for one
+group; groups feed the purity term of the priority (see \code{prioritize_lr})}
 
-\item{keep}{A vector of strings that are additional column names to keep in the provided metadata}
+\item{keep}{A vector of strings that are additional column names to keep from the provided metadata, or NULL (the default)}
 
-\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
-score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
+\item{weights}{A vector of numbers of at least 0, one result table each: the weight of frac, the fraction of cells expressing a
+pair's genes, in the priority score. 1 (the default) weighs it like the other four terms, less than 1 favors pairs of fewer cells,
+0 leaves it out}
 
-\item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
+\item{significance}{A boolean of whether to add p-values (columns p and p.adj) from 1000 background pairs; FALSE by default}
 
-\item{parallel}{A boolean of whether to run in parallel on the cluster cl}
+\item{seed}{An integer seed for drawing the background pairs, so that p-values are reproducible, or NULL (the default) to use the
+session's random numbers; the session's random state is restored afterwards. Ignored without significance}
 
-\item{cl}{A cluster object, which is left running. Default if parallel: inside an SGE parallel job (PE_HOSTFILE set)
-\code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")},
-elsewhere \code{parallelly::makeClusterPSOCK(parallelly::availableCores(), outfile = "")}; it is stopped at the end. Each worker holds
-the influence matrix and the within-sample blocks of the batch it scores (8 bytes per within-sample cell pair)}
+\item{r}{A number greater than 0 and at most 1, the restart probability of the random walk (0.5 by default): about r of each
+node's influence stays on itself and the rest spreads over the nodes it shares hyperedges with}
 
-\item{outdir}{A string naming the output directory of the pipeline run}
+\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default: fastest, least memory), "chol" or
+"lu" (a dense matrix of all cells and genes squared). The methods agree to about 1e-15}
 
-\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
-random state is restored afterwards}
+\item{threads}{An integer number of R processes that score grids, NULL (the default) for one per physical core, or 1 to score in
+this R session alone; a number above the cores available to R warns and uses them all. Fewer are used, with a message, when they
+would not fit in memory.gb (see Memory and processes). Worker processes run at a lower priority than other programs, so the
+computer stays responsive while HyperCom uses all cores. A cluster job or container gets only its allocated cores, and
+\code{options(mc.cores=4)} (or the environment variable MC_CORES) caps the default. Results do not depend on it}
 
-\item{verbose}{A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
-each weight}
+\item{memory.gb}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
+of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It caps the number of processes and
+stops a run that cannot fit (see Memory and processes). On a cluster give the job's memory request, as the computer's memory may
+be more than the job may use}
 
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default; fastest and least memory), "chol" or
-"lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15}
+\item{resume}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/6.priority/cache}, so that a stopped run continues
+where it stopped when the same call is run again; TRUE by default, ignored when outdir is NULL}
 
-\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
-stopped when run again; ignored when outdir is NULL}
+\item{verbose}{A boolean of whether to report progress as messages: what each step found, the memory needed, the pairs scored with
+the time left, and the top pair of each weight}
+
+\item{outdir}{A string naming the output directory of the run ("HyperCom" in the working directory by default), or NULL to write
+no files (and keep no cache to resume from)}
 }
 \value{
-Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
-(from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+Invisibly, a list:
+\itemize{
+\item priority: the ranked pairs from \code{prioritize_lr}, one data frame per weight, named by weight (e.g. \code{res$priority[["1"]]});
+\item metadata: cell (and gene) metadata from \code{generate_metadata};
+\item infMat: the influence matrix from \code{generate_infMat};
+\item adj: the adjacency from \code{generate_adjacency_matrix};
+\item lrs: the interactions whose genes are all in the hypergraph.
+}
+
+With outdir, the same results are written there: 0.counts.rds (the counts of the ligand and receptor genes), 1.lrs.csv,
+2.hyperedges.csv, 3.adj.rds, 4.infMat.rds, 5.metadata.csv and 6.priority/priority.\if{html}{\out{<weight>}}.csv. Read the .rds files after
+\code{library(HyperCom)}.
 }
 \description{
-\code{HyperCom} runs the HyperCom pipeline
+\code{HyperCom} returns the ligand-receptor pairs ranked by priority and the objects to score cells with
 }
 \details{
-This function runs \code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat},
-\code{generate_metadata}, and \code{prioritize_lr}, writing every step to outdir. By default no matrix with a row and a column for every
-cell and gene is made, so memory grows with the number of cells rather than its square (see \code{generate_infMat}).
-The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
-lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning.
-If a run stops while pairs are scored, the same call run again repeats the earlier steps and continues the scoring from the cache
-in \verb{<outdir>/6.priority/cache} (see \code{prioritize_lr}). The results are returned as
-well as written, so they need not be read back: \code{res <- HyperCom(...)}, then \code{res$priority[["1"]]} or
-\code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}.
+This function takes a gene x cell counts matrix, its cell metadata and a ligand-receptor database and runs every step:
+\code{filter_counts}, \code{generate_lrs_table}, \code{generate_hyperedges}, \code{generate_adjacency_matrix}, \code{generate_infMat}, \code{generate_metadata}
+and \code{prioritize_lr}. The results are returned and written to outdir, so they need not be read back: \code{res <- HyperCom(...)}, then
+\code{res$priority[["1"]]} or \code{score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")}.
+
+The input is checked first. Before the first file is written, the run stops when a cell that expresses a ligand or receptor gene
+has a missing sample or group (or one named "gene"), and when the scoring cannot fit in memory (see memory.gb); it also stops when
+no interaction of lrdb has all its genes expressed (e.g. lrdb of another species). Cells of counts that are not row names of
+metadata are left out, with a warning, and so are cells and genes not connected to the rest of the hypergraph (see
+\code{generate_hyperedges}). Priority files of other weights already in outdir are kept, with a warning.
+
+Time and memory grow with the square of the number of cells per sample (see the Memory section of \code{prioritize_lr}). If a run
+stops while pairs are scored, run the same call again: it repeats the earlier steps (seconds) and continues the scoring from the
+cache in \verb{<outdir>/6.priority/cache} (see the Stopped runs section of \code{prioritize_lr}).
 }
 \examples{
-# a few ligands keep the example quick; use the whole database for real data
+# a few ligands keep the example quick; use the whole database for real data. A smaller
+# database makes a smaller hypergraph (984 cells instead of 1,000), so the scores differ too
 lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand \%in\% c("Thbs1", "Comp", "Tgfb1"), ]
 res <- HyperCom(lrdb, alexanian2021.counts, alexanian2021.metadata, sample="sample",
                 group="condition", outdir=file.path(tempdir(), "HyperCom"))

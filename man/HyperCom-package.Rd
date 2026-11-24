@@ -3,9 +3,17 @@
 \docType{package}
 \name{HyperCom-package}
 \alias{HyperCom-package}
-\title{HyperCom: A hypergraph method to understand cell-cell communication}
+\title{HyperCom: A Hypergraph Method to Understand Cell-Cell Communication}
 \description{
-A hypergraph based method to understand cell-cell communication.
+Infers cell-resolved cell-cell communication from single-cell transcriptomics data without aggregating cells by type (Moy and Przytycki (2026) \doi{10.64898/2026.09.30.755742}). HyperCom builds a hypergraph from known ligand-receptor interactions and the expression of those ligands and receptors in individual cells, diffuses over it by a random walk with restart, and scores each cell on a continuous spectrum from sender to receiver for each ligand-receptor pair. It then ranks ligand-receptor pairs by communication over the whole dataset, optionally favoring pairs whose cells concentrate in some conditions, with optional permutation p-values. This is the pure R version (no compiler needed), for up to about 10,000 cells per sample; the compiled version scales further. Input is a counts matrix with cell metadata, or a 'Seurat' or 'SingleCellExperiment' object; 'CellChat' ligand-receptor databases for human and mouse are included.
+}
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/pawelab/HyperCom}
+  \item Report bugs at \url{https://github.com/pawelab/HyperCom/issues}
+}
+
 }
 \author{
 \strong{Maintainer}: Justin Moy \email{jmmoy@bu.edu} (\href{https://orcid.org/0000-0002-7566-2215}{ORCID})

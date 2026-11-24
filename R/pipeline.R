@@ -3,29 +3,48 @@
 
 #' Run the HyperCom pipeline
 #'
-#' `HyperCom` runs the HyperCom pipeline
+#' `HyperCom` returns the ligand-receptor pairs ranked by priority and the objects to score cells with
 #'
-#' This function runs `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency_matrix`, `generate_infMat`,
-#' `generate_metadata`, and `prioritize_lr`, writing every step to outdir. By default no matrix with a row and a column for every
-#' cell and gene is made, so memory grows with the number of cells rather than its square (see `generate_infMat`).
-#' The arguments are checked before any step runs, and the run stops when no interaction of lrdb has all its genes expressed (e.g.
-#' lrdb of another species). Cells of counts that are not row names of metadata are left out, with a warning. Priority files of other weights already in outdir are kept, with a warning.
-#' If a run stops while pairs are scored, the same call run again repeats the earlier steps and continues the scoring from the cache
-#' in `<outdir>/6.priority/cache` (see `prioritize_lr`). The results are returned as
-#' well as written, so they need not be read back: `res <- HyperCom(...)`, then `res$priority[["1"]]` or
-#' `score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")`.
+#' This function takes a gene x cell counts matrix, its cell metadata and a ligand-receptor database and runs every step:
+#' `filter_counts`, `generate_lrs_table`, `generate_hyperedges`, `generate_adjacency_matrix`, `generate_infMat`, `generate_metadata`
+#' and `prioritize_lr`. The results are returned and written to outdir, so they need not be read back: `res <- HyperCom(...)`, then
+#' `res$priority[["1"]]` or `score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")`.
+#'
+#' The input is checked first. Before the first file is written, the run stops when a cell that expresses a ligand or receptor gene
+#' has a missing sample or group (or one named "gene"), and when the scoring cannot fit in memory (see memory.gb); it also stops when
+#' no interaction of lrdb has all its genes expressed (e.g. lrdb of another species). Cells of counts that are not row names of
+#' metadata are left out, with a warning, and so are cells and genes not connected to the rest of the hypergraph (see
+#' `generate_hyperedges`). Priority files of other weights already in outdir are kept, with a warning.
+#'
+#' Time and memory grow with the square of the number of cells per sample (see the Memory section of `prioritize_lr`). If a run
+#' stops while pairs are scored, run the same call again: it repeats the earlier steps (seconds) and continues the scoring from the
+#' cache in `<outdir>/6.priority/cache` (see the Stopped runs section of `prioritize_lr`).
 #' @inheritParams filter_counts
 #' @inheritParams generate_metadata
 #' @inheritParams prioritize_lr
-#' @param outdir A string naming the output directory of the pipeline run
-#' @param verbose A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
-#' each weight
-#' @param infmat.method A string naming the method of `generate_infMat`: "woodbury" (the default; fastest and least memory), "chol" or
-#' "lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15
-#' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
-#' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+#' @inheritParams generate_infMat
+#' @param infmat.method A string naming the method of `generate_infMat`: "woodbury" (the default: fastest, least memory), "chol" or
+#' "lu" (a dense matrix of all cells and genes squared). The methods agree to about 1e-15
+#' @param resume A boolean of whether to keep the pairs scored so far in `<outdir>/6.priority/cache`, so that a stopped run continues
+#' where it stopped when the same call is run again; TRUE by default, ignored when outdir is NULL
+#' @param verbose A boolean of whether to report progress as messages: what each step found, the memory needed, the pairs scored with
+#' the time left, and the top pair of each weight
+#' @param outdir A string naming the output directory of the run ("HyperCom" in the working directory by default), or NULL to write
+#' no files (and keep no cache to resume from)
+#' @returns Invisibly, a list:
+#'
+#' - priority: the ranked pairs from `prioritize_lr`, one data frame per weight, named by weight (e.g. `res$priority[["1"]]`);
+#' - metadata: cell (and gene) metadata from `generate_metadata`;
+#' - infMat: the influence matrix from `generate_infMat`;
+#' - adj: the adjacency from `generate_adjacency_matrix`;
+#' - lrs: the interactions whose genes are all in the hypergraph.
+#'
+#' With outdir, the same results are written there: 0.counts.rds (the counts of the ligand and receptor genes), 1.lrs.csv,
+#' 2.hyperedges.csv, 3.adj.rds, 4.infMat.rds, 5.metadata.csv and 6.priority/priority.<weight>.csv. Read the .rds files after
+#' `library(HyperCom)`.
 #' @examples
-#' # a few ligands keep the example quick; use the whole database for real data
+#' # a few ligands keep the example quick; use the whole database for real data. A smaller
+#' # database makes a smaller hypergraph (984 cells instead of 1,000), so the scores differ too
 #' lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
 #' res <- HyperCom(lrdb, alexanian2021.counts, alexanian2021.metadata, sample="sample",
 #'                 group="condition", outdir=file.path(tempdir(), "HyperCom"))
@@ -33,14 +52,20 @@
 #' list.files(file.path(tempdir(), "HyperCom"), recursive=TRUE)
 #' scores <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
 #' @export
-HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=c(1), significance=FALSE, parallel=FALSE,
-                     cl=NULL, outdir="HyperCom", seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
-  check_lrdb(lrdb)
+HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=1, significance=FALSE, seed=NULL, r=0.5,
+                     infmat.method="woodbury", threads=NULL, memory.gb=NULL, resume=TRUE, verbose=TRUE, outdir="HyperCom"){
+  lrdb <- clean_lrdb(lrdb)
   check_columns(metadata, sample, group, keep)
   check_weights(weights)
+  check_flag(significance, "significance")
+  check_flag(resume, "resume")
+  check_flag(verbose, "verbose")
+  check_memory(memory.gb)
   check_outdir(outdir)
-  check_cache(cache)
+  check_restart(r)
   infmat.method <- match_method(infmat.method)
+  threads <- get_threads(threads)
+  counts <- read_counts(counts, lrdb_genes(lrdb))
   in.metadata <- colnames(counts) %in% rownames(metadata)
   if(!any(in.metadata)){
     if(any(rownames(counts) %in% rownames(metadata))){
@@ -48,41 +73,104 @@ HyperCom <- function(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weig
     }
     stop("no cell of counts is a row name of metadata: the row names of metadata must be the cell names of the counts")
   }
-  stale <- setdiff(list.files(file.path(outdir, "6.priority"), pattern="^priority\\..*\\.csv$"), priority_filename(weights))
-  if(length(stale) > 0){
-    warning("outdir already holds priorities of other weights, which are kept: ", paste(stale, collapse=", "))
+  if(!is.null(outdir)){
+    stale <- setdiff(list.files(file.path(outdir, "6.priority"), pattern="^priority\\..*\\.csv$"), priority_filename(weights))
+    if(length(stale) > 0){
+      warning("outdir already holds priorities of other weights, which are kept: ", paste(stale, collapse=", "))
+    }
   }
   if(!all(in.metadata)){
     warning(sum(!in.metadata), " cells of counts are not in metadata and are left out")
     counts <- counts[, in.metadata, drop=FALSE]
   }
-  dir.create(outdir, showWarnings=FALSE, recursive=TRUE)
 
-  counts <- filter_counts(counts, lrdb, outfile=file.path(outdir, "0.counts.rds"))
-  lrs <- generate_lrs_table(counts, lrdb, outfile=file.path(outdir, "1.lrs.csv"))
+  counts <- filter_counts(counts, lrdb, outfile=NULL)
+  lrs <- generate_lrs_table(counts, lrdb, outfile=NULL)
   if(nrow(lrs) == 0){
     stop("no interaction of lrdb has all its genes expressed in counts (", ncol(counts), " of its genes are): check that lrdb is of the ",
          "species of counts (cellchat.mm.lrdb mouse, cellchat.hs.lrdb human) and that counts is gene x cell")
   }
-  if(verbose){
-    message(ncol(counts), " ligand and receptor genes expressed in ", nrow(counts), " cells; ", nrow(lrs), " interactions of lrdb have all ",
-            "their genes expressed")
+  check_run_cells(counts, metadata, sample, group, memory.gb)
+  if(!is.null(outdir)){
+    dir.create(outdir, showWarnings=FALSE, recursive=TRUE)
+    saveRDS(counts, step_file(outdir, "0.counts.rds"))
   }
-  hyperedges <- generate_hyperedges(counts, lrs, outfile=file.path(outdir, "2.hyperedges.csv"))
-  adj <- generate_adjacency_matrix(hyperedges, outfile=file.path(outdir, "3.adj.rds"))
+  if(verbose){
+    message(ncol(counts), " ligand and receptor genes expressed; ", nrow(lrs), " interactions of lrdb have all their genes expressed")
+  }
+  hyperedges <- generate_hyperedges(counts, lrs, outfile=step_file(outdir, "2.hyperedges.csv"))
+  adj <- generate_adjacency_matrix(hyperedges, outfile=step_file(outdir, "3.adj.rds"))
+  lrs <- lrs[lrs_in_graph(lrs, rownames(adj)), , drop=FALSE]
+  if(!is.null(outdir)){
+    utils::write.csv(lrs, step_file(outdir, "1.lrs.csv"), row.names=FALSE)
+  }
+  cells <- sum(rownames(adj) %in% rownames(counts))
   rm(counts, hyperedges)
-  infMat <- generate_infMat(adj, outfile=file.path(outdir, "4.infMat.rds"), method=infmat.method)
+  infMat <- generate_infMat(adj, r=r, method=infmat.method, outfile=step_file(outdir, "4.infMat.rds"))
   if(verbose){
-    message("Hypergraph of ", nrow(adj), " cells and genes; influence matrix made (method \"", infmat.method, "\")")
+    message("Hypergraph of ", cells, " cells and ", nrow(adj) - cells, " genes; influence matrix made (method \"", infmat.method, "\")")
   }
-  metadata <- generate_metadata(infMat, metadata, sample, group, keep, outfile=file.path(outdir, "5.metadata.csv"))
-  priority <- prioritize_lr(lrs, adj, infMat, metadata, weights=weights, significance=significance, parallel=parallel, cl=cl,
-                            outdir=file.path(outdir, "6.priority"), seed=seed, verbose=verbose, cache=cache)
+  metadata <- generate_metadata(infMat, metadata, sample, group, keep, outfile=step_file(outdir, "5.metadata.csv"))
+  priority <- prioritize_lr(lrs, adj, infMat, metadata, weights=weights, significance=significance, seed=seed, threads=threads,
+                            memory.gb=memory.gb, resume=resume, verbose=verbose, outdir=step_file(outdir, "6.priority"))
   if(verbose){
-    message("Done: results in ", outdir)
+    message("Done", if(!is.null(outdir)) paste0(": results in ", outdir))
   }
 
   return(invisible(list(priority=priority, metadata=metadata, infMat=infMat, adj=adj, lrs=lrs)))
+}
+
+#' Name the file of a pipeline step
+#'
+#' `step_file` returns the path of a step's output file in the output directory, or NULL when no files are written
+#' @param outdir A string naming the output directory, or NULL
+#' @param name A string naming the file
+#' @returns A string, or NULL
+#' @noRd
+step_file <- function(outdir, name){
+  if(is.null(outdir)){
+    return(NULL)
+  }
+
+  return(file.path(outdir, name))
+}
+
+#' Find the interactions whose genes are all in the hypergraph
+#'
+#' `lrs_in_graph` returns which interactions have all their genes among the nodes of the hypergraph
+#' @param lrs A data frame of ligand-receptor interactions
+#' @param nodes A vector of strings of the node names
+#' @returns A logical vector, one per interaction
+#' @noRd
+lrs_in_graph <- function(lrs, nodes){
+  genes <- as.matrix(lrs[, -1, drop=FALSE])
+
+  return(rowSums(!(genes %in% nodes) & !is.na(genes)) == 0)
+}
+
+#' Check the cells of a run before it starts
+#'
+#' `check_run_cells` stops early on cell labels and memory that would stop the run only after its influence matrix
+#'
+#' This function takes the filtered counts, the metadata and its sample and group columns and the memory.gb argument, and stops when a
+#' cell that expresses a ligand or receptor gene has a missing sample or group or one named "gene" (check_labels), or when scoring these
+#' cells cannot fit in memory in one R process (fit_workers).
+#' @param counts A matrix with row names being cells and column names being genes, from filter_counts
+#' @param metadata A data frame containing cell metadata with row names being cells
+#' @param sample A string that is the column name for sample in the provided metadata
+#' @param group A string that is the column name for group in the provided metadata, or NULL
+#' @param memory.gb A number of gigabytes, Inf for no limit, or NULL for the computer's memory
+#' @returns NULL, invisibly
+#' @noRd
+check_run_cells <- function(counts, metadata, sample, group, memory.gb){
+  cells <- rownames(counts)[Matrix::rowSums(counts > 0, na.rm=TRUE) > 0]
+  rows <- match(cells, rownames(metadata))
+  sample.vals <- as.character(metadata[[sample]][rows])
+  group.vals <- if(is.null(group)) rep("none", length(cells)) else as.character(metadata[[group]][rows])
+  check_labels(sample.vals, group.vals)
+  fit_workers(cell_pairs(table(sample.vals)), 1, memory.gb)
+
+  return(invisible(NULL))
 }
 
 #' Get the counts matrix of a Seurat assay layer
@@ -105,18 +193,18 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 
   if(!inherits(a, "Assay5")){
     if(!(layer %in% c("counts", "data", "scale.data"))){
-      stop("layer '", layer, "' is not a layer of assay '", assay, "': use counts, data or scale.data")
+      stop("layer \"", layer, "\" is not a layer of assay \"", assay, "\": use counts, data or scale.data")
     }
     m <- methods::slot(a, layer)
     if(!length(m)){
-      stop("layer '", layer, "' is empty or absent in assay '", assay, "'")
+      stop("layer \"", layer, "\" is empty or absent in assay \"", assay, "\"")
     }
     return(m)
   }
 
-  lyrs <- SeuratObject::Layers(a, search=layer)
+  lyrs <- suppressWarnings(SeuratObject::Layers(a, search=layer))
   if(!length(lyrs)){
-    stop("no layer matching '", layer, "' in assay '", assay, "'; available: ", paste(SeuratObject::Layers(a), collapse=", "))
+    stop("no layer matching \"", layer, "\" in assay \"", assay, "\"; available: ", paste(SeuratObject::Layers(a), collapse=", "))
   }
   if(length(lyrs) == 1){
     return(SeuratObject::LayerData(a, layer=lyrs))
@@ -125,21 +213,26 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
   return(SeuratObject::LayerData(SeuratObject::JoinLayers(a), layer=layer))
 }
 
-#' Run the HyperCom pipeline on a seurat object
+#' Run the HyperCom pipeline on a Seurat object
 #'
-#' `HyperCom_seurat` runs the HyperCom pipeline on a Seurat object
+#' `HyperCom_seurat` returns the results of `HyperCom` on a Seurat object
 #'
-#' This function runs `HyperCom` on one assay layer and the cell metadata of a Seurat object (v5 or older assays). Needs the
-#' SeuratObject package.
+#' This function takes a Seurat object (v5 or older assays) and runs `HyperCom` on one layer of one assay (raw counts by default)
+#' and on the cell metadata (`seurat[[]]`). Every other argument is passed on to `HyperCom`; a misspelled one stops with "unused
+#' argument". Needs the SeuratObject package.
 #' @param seurat A Seurat object
-#' @param sample A string that is the column name for sample in the cell metadata of the Seurat object
-#' @param assay A string naming the assay to read counts from
-#' @param layer A string naming the layer of the assay to read counts from
-#' @param group A string that is the column name for group in the cell metadata of the Seurat object
-#' @param keep A vector of strings that are additional column names to keep from the cell metadata of the Seurat object
+#' @param sample A string that is the column name for sample (library or replicate) in the cell metadata of the Seurat object; cells
+#' are compared only within their sample
+#' @param assay A string naming the assay to read counts from, "RNA" by default
+#' @param layer A string naming the layer of the assay to read counts from: "counts" (the default) or "data", not the scaled
+#' "scale.data"
+#' @param group A string that is the column name for group (e.g. condition) in the cell metadata of the Seurat object, or NULL (the
+#' default) for one group; groups feed the purity term of the priority (see `prioritize_lr`)
+#' @param keep A vector of strings that are additional column names to keep from the cell metadata of the Seurat object, or NULL
 #' @inheritParams HyperCom
-#' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
-#' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+#' @inheritDotParams HyperCom -lrdb -counts -metadata -sample -group -keep
+#' @returns Invisibly, the list of `HyperCom`: priority (the ranked pairs, one data frame per weight), metadata, infMat, adj and lrs,
+#' also written to outdir
 #' @examplesIf requireNamespace("SeuratObject", quietly=TRUE)
 #' seurat <- SeuratObject::CreateSeuratObject(alexanian2021.counts, meta.data=alexanian2021.metadata)
 #' lrdb <- cellchat.mm.lrdb[cellchat.mm.lrdb$ligand %in% c("Thbs1", "Comp", "Tgfb1"), ]
@@ -147,13 +240,11 @@ get_seurat_layer <- function(seurat, assay="RNA", layer="counts"){
 #'                        outdir=file.path(tempdir(), "HyperCom_seurat"))
 #' head(res$priority[["1"]])
 #' @export
-HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                            parallel=FALSE, cl=NULL, outdir="HyperCom", seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
+HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, ...){
   counts <- get_seurat_layer(seurat, assay, layer)
   metadata <- seurat[[]]
 
-  res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
-                  parallel=parallel, cl=cl, outdir=outdir, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)
+  res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, ...)
 
   return(invisible(res))
 }
@@ -166,7 +257,7 @@ HyperCom_seurat <- function(seurat, lrdb, sample, assay="RNA", layer="counts", g
 #' columns. Assays that are neither base nor Matrix matrices (e.g. a DelayedMatrix of HDF5-backed data) are read into a sparse
 #' matrix with only the genes of lrdb, so the rest of the assay is never loaded.
 #' @param sce A SingleCellExperiment object
-#' @param lrdb A dataframe of ligand-receptor interactions
+#' @param lrdb A data frame of ligand-receptor interactions
 #' @param assay A string naming the assay to get data from
 #' @returns A matrix with row names being genes and column names being cells
 #' @noRd
@@ -181,37 +272,38 @@ get_sce_assay <- function(sce, lrdb, assay="counts"){
     stop("sce has no cell names: set colnames(sce) to the cell barcodes")
   }
   if(is.character(assay) && !(assay %in% SummarizedExperiment::assayNames(sce))){
-    stop("no assay '", assay, "' in sce; available: ", paste(SummarizedExperiment::assayNames(sce), collapse=", "))
+    stop("no assay \"", assay, "\" in sce; available: ", paste(SummarizedExperiment::assayNames(sce), collapse=", "))
   }
-  genes <- unique(unlist(lapply(lrdb[, -1, drop=FALSE], as.character), use.names=FALSE))
+  genes <- lrdb_genes(lrdb)
   if(!any(rownames(sce) %in% genes)){
     stop("no row name of sce is a gene of lrdb: the row names must be gene symbols of the species of lrdb (cellchat.mm.lrdb mouse, ",
          "cellchat.hs.lrdb human). With Ensembl IDs as row names and symbols in rowData: rownames(sce) <- rowData(sce)$Symbol")
   }
-  counts <- SummarizedExperiment::assay(sce, assay, withDimnames=TRUE)
-
-  if(!is.matrix(counts) && !methods::is(counts, "Matrix")){
-    counts <- methods::as(counts[rownames(counts) %in% genes, , drop=FALSE], "dgCMatrix")
-  }
+  counts <- read_counts(SummarizedExperiment::assay(sce, assay, withDimnames=TRUE), genes)
 
   return(counts)
 }
 
 #' Run the HyperCom pipeline on a SingleCellExperiment object
 #'
-#' `HyperCom_sce` runs the HyperCom pipeline on a SingleCellExperiment object
+#' `HyperCom_sce` returns the results of `HyperCom` on a SingleCellExperiment object
 #'
-#' This function runs `HyperCom` on one assay and the cell metadata (`colData`) of a SingleCellExperiment, or of any
-#' SummarizedExperiment with genes as rows and cells as columns. The row names must be gene symbols and the column names cell names. Assays held
-#' on disk (DelayedArray, HDF5Array) are read for the genes of lrdb only. Needs the SummarizedExperiment package.
+#' This function takes a SingleCellExperiment, or any SummarizedExperiment with genes as rows and cells as columns, and runs
+#' `HyperCom` on one assay and on the cell metadata (`colData`). The row names must be gene symbols and the column names cell names.
+#' Assays held on disk (DelayedArray, HDF5Array) are read for the genes of lrdb only. Every other argument is passed on to `HyperCom`;
+#' a misspelled one stops with "unused argument". Needs the SummarizedExperiment package (installed with SingleCellExperiment).
 #' @param sce A SingleCellExperiment object
-#' @param sample A string that is the column name for sample in the cell metadata (`colData`) of the SingleCellExperiment object
-#' @param assay A string naming the assay to read counts from ("counts" or "logcounts"; not a scaled assay)
-#' @param group A string that is the column name for group in the cell metadata of the SingleCellExperiment object
-#' @param keep A vector of strings that are additional column names to keep from the cell metadata of the SingleCellExperiment object
+#' @param sample A string that is the column name for sample (library or replicate) in the cell metadata (`colData`) of the
+#' SingleCellExperiment object; cells are compared only within their sample
+#' @param assay A string naming the assay to read counts from: "counts" (the default) or "logcounts", not a scaled assay
+#' @param group A string that is the column name for group (e.g. condition) in the cell metadata of the SingleCellExperiment object,
+#' or NULL (the default) for one group; groups feed the purity term of the priority (see `prioritize_lr`)
+#' @param keep A vector of strings that are additional column names to keep from the cell metadata of the SingleCellExperiment object,
+#' or NULL
 #' @inheritParams HyperCom
-#' @returns Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
-#' (from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+#' @inheritDotParams HyperCom -lrdb -counts -metadata -sample -group -keep
+#' @returns Invisibly, the list of `HyperCom`: priority (the ranked pairs, one data frame per weight), metadata, infMat, adj and lrs,
+#' also written to outdir
 #' @examplesIf requireNamespace("SingleCellExperiment", quietly=TRUE)
 #' sce <- SingleCellExperiment::SingleCellExperiment(assays=list(counts=alexanian2021.counts),
 #'                                                   colData=alexanian2021.metadata)
@@ -220,14 +312,12 @@ get_sce_assay <- function(sce, lrdb, assay="counts"){
 #'                     outdir=file.path(tempdir(), "HyperCom_sce"))
 #' head(res$priority[["1"]])
 #' @export
-HyperCom_sce <- function(sce, lrdb, sample, assay="counts", group=NULL, keep=NULL, weights=c(1), significance=FALSE,
-                         parallel=FALSE, cl=NULL, outdir="HyperCom", seed=NULL, verbose=TRUE, infmat.method="woodbury", cache=TRUE){
-  check_lrdb(lrdb)
+HyperCom_sce <- function(sce, lrdb, sample, assay="counts", group=NULL, keep=NULL, ...){
+  lrdb <- clean_lrdb(lrdb)
   counts <- get_sce_assay(sce, lrdb, assay)
   metadata <- as.data.frame(SummarizedExperiment::colData(sce), optional=TRUE)
 
-  res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, weights=weights, significance=significance,
-                  parallel=parallel, cl=cl, outdir=outdir, seed=seed, verbose=verbose, infmat.method=infmat.method, cache=cache)
+  res <- HyperCom(lrdb, counts, metadata, sample=sample, group=group, keep=keep, ...)
 
   return(invisible(res))
 }

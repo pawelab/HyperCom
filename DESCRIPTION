@@ -1,36 +1,50 @@
 Package: HyperCom
-Title: A hypergraph method to understand cell-cell communication
-Version: 0.0.1.9000
+Title: A Hypergraph Method to Understand Cell-Cell Communication
+Version: 0.3.1.1
 Authors@R: 
     c(person("Justin", "Moy", , "jmmoy@bu.edu", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7566-2215")),
     person("Pawel", "Przytycki", , "pawel@bu.edu", role = c("aut", "ths"),
            comment = c(ORCID = "0000-0002-3360-6936")))
-Description: A hypergraph based method to understand cell-cell communication.
+Description: Infers cell-resolved cell-cell communication from single-cell
+    transcriptomics data without aggregating cells by type (Moy and Przytycki
+    (2026) <doi:10.64898/2026.09.30.755742>). HyperCom builds a hypergraph from
+    known ligand-receptor interactions and the expression of those ligands and
+    receptors in individual cells, diffuses over it by a random walk with
+    restart, and scores each cell on a continuous spectrum from sender to
+    receiver for each ligand-receptor pair. It then ranks ligand-receptor pairs
+    by communication over the whole dataset, optionally favoring pairs whose
+    cells concentrate in some conditions, with optional permutation p-values.
+    This is the pure R version (no compiler needed), for up to about 10,000
+    cells per sample; the compiled version scales further. Input is
+    a counts matrix with cell metadata, or a
+    'Seurat' or 'SingleCellExperiment' object; 'CellChat' ligand-receptor
+    databases for human and mouse are included.
+URL: https://github.com/pawelab/HyperCom
+BugReports: https://github.com/pawelab/HyperCom/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Imports:
-  doParallel,
   dplyr (>= 1.1.0),
-  foreach,
-  Matrix,
+  Matrix (>= 1.5-0),
   methods,
   parallel,
-  parallelly,
+  parallelly (>= 1.23.0),
   stats,
   tidyr,
+  tools,
   utils
 Suggests:
   DelayedArray,
   SeuratObject,
   SingleCellExperiment,
   SummarizedExperiment,
-  testthat (>= 3.0.0),
+  testthat (>= 3.1.7),
   withr
 Config/testthat/edition: 3
 Config/Needs/website: rmarkdown
 Depends: 
-    R (>= 4.1)
+    R (>= 4.2)
 LazyData: true
 License: MIT + file LICENSE

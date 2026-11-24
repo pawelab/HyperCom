@@ -7,46 +7,50 @@
 generate_infMat(
   adj,
   r = 0.5,
-  outfile = "4.infMat.rds",
-  method = c("woodbury", "lu", "chol"),
-  hyperedges = NULL
+  method = NULL,
+  hyperedges = NULL,
+  outfile = "4.infMat.rds"
 )
 }
 \arguments{
 \item{adj}{An adjacency from generate_adjacency_matrix, or a named adjacency matrix}
 
-\item{r}{A double between 0 and 1 representing the restart probability}
+\item{r}{A number greater than 0 and at most 1, the restart probability of the random walk (0.5 by default): about r of each
+node's influence stays on itself and the rest spreads over the nodes it shares hyperedges with}
+
+\item{method}{A string naming the method, "woodbury", "lu" or "chol", or NULL (the default) for "woodbury" when the hyperedges are
+known (adj from generate_adjacency_matrix, or hyperedges given) and "lu" otherwise}
+
+\item{hyperedges}{A data frame of the hyperedges a plain adjacency matrix was made from, needed by method "woodbury" with such a
+matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own}
 
 \item{outfile}{A string naming the output file, or NULL to write none}
-
-\item{method}{A string naming the method: "woodbury" (the default; "lu" for an adjacency matrix given without hyperedges), "lu"
-or "chol"}
-
-\item{hyperedges}{A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
-matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own}
 }
 \value{
-An influence matrix with node names: a hypercom_influence (method "woodbury", unless there are at least as many hyperedges
-as nodes) or a dense matrix
+An influence matrix with node names: a hypercom_influence (method "woodbury", except on small data, see Details) or a
+dense matrix
 }
 \description{
 \code{generate_infMat} returns the influence matrix of the hypergraph
 }
 \details{
-This function takes an adjacency matrix and returns its influence matrix by heat diffusion (a random walk with restart),
-r (I - (1 - r) adj / D)^-1 with D the row sums of adj. Three methods give the same matrix up to rounding (about 1e-15 relative,
-which can reorder exactly tied scores):
+This function takes an adjacency and returns its influence matrix by a random walk with restart: entry (i, j) is the share of a
+walk started at node i that ends at node j, so each row sums to 1. At every step the walk returns to its start with probability r.
+In matrix form it is r (I - (1 - r) adj / D)^-1, with D the row sums of adj. Three methods give the same matrix up to rounding
+(about 1e-15 relative, which can reorder exactly tied scores):
 \itemize{
-\item "woodbury" (the default) works through the hyperedges, so no node x node matrix is made: memory grows with the number of nodes
-instead of its square. The result works like a matrix for dim, dimnames and rownames; \code{infMat[i, j]} gives those entries and
-as.matrix the whole matrix. An adjacency from generate_adjacency_matrix holds its hyperedges; an adjacency matrix needs
-\code{hyperedges}, and without them (and without a method given) gets "lu". Small data with at least as many hyperedges as nodes get
-the dense matrix of "chol", which is then no bigger.
-\item "lu" makes the dense matrix with exactly the numbers of HyperCom 0.0.0.9000; it holds four node x node matrices at once.
-\item "chol" makes the dense matrix faster, with three node x node matrices at once.
+\item "woodbury" (the default) works through the hyperedges and keeps the matrix as its factors (a hypercom_influence), so its memory
+grows with the number of nodes instead of its square. Data with at least as many hyperedges (of two or more nodes) as nodes get
+the dense matrix of "chol" instead, which is then no bigger: that is, data with no more cells than interactions of two or more
+distinct genes, all expressed (the bundled 1,000 cells stay factored: 1,661 hyperedges, 1,663 nodes). An adjacency from
+generate_adjacency_matrix holds its hyperedges; a plain adjacency matrix needs \code{hyperedges}.
+\item "lu" makes the dense matrix with exactly the numbers of the original release, HyperCom 0.0.0.9000; it holds two node x node
+matrices at once.
+\item "chol" makes the dense matrix faster, with one node x node matrix.
 }
 
-All methods stop when the matrix cannot be inverted (r near 0).
+A hypercom_influence works like a matrix: dim, dimnames, \code{infMat[i, j]} and as.matrix (the whole matrix; see
+\code{hypercom_influence}). All methods stop when r is not in (0, 1] or the matrix cannot be inverted.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

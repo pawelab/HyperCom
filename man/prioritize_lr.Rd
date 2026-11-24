@@ -2,82 +2,127 @@
 % Please edit documentation in R/prioritize.R
 \name{prioritize_lr}
 \alias{prioritize_lr}
-\title{Order ligand-receptor pairs by signaling strength and specificity}
+\title{Rank ligand-receptor pairs by signaling strength and specificity}
 \usage{
 prioritize_lr(
   lrs,
   adj,
   infMat,
   metadata,
-  weights = c(1),
+  weights = 1,
   significance = FALSE,
-  parallel = FALSE,
-  cl = NULL,
-  outdir = "6.priority",
   seed = NULL,
+  threads = NULL,
+  memory.gb = NULL,
+  resume = TRUE,
   verbose = TRUE,
-  cache = TRUE
+  outdir = "6.priority"
 )
 }
 \arguments{
-\item{lrs}{A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
+\item{lrs}{A data frame of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
 in the counts matrix}
 
 \item{adj}{An adjacency from generate_adjacency_matrix, or a named adjacency matrix}
 
 \item{infMat}{An influence matrix from generate_infMat (a hypercom_influence or a named dense matrix)}
 
-\item{metadata}{A dataframe from generate_metadata, containing columns named cell, sample and group}
+\item{metadata}{A data frame from generate_metadata, with columns cell, sample and group and one row per node of infMat (cells and
+genes; the p-values draw background pairs from the gene rows)}
 
-\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
-score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
+\item{weights}{A vector of numbers of at least 0, one result table each: the weight of frac, the fraction of cells expressing a
+pair's genes, in the priority score. 1 (the default) weighs it like the other four terms, less than 1 favors pairs of fewer cells,
+0 leaves it out}
 
-\item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
+\item{significance}{A boolean of whether to add p-values (columns p and p.adj) from 1000 background pairs; FALSE by default}
 
-\item{parallel}{A boolean of whether to run in parallel on the cluster cl}
+\item{seed}{An integer seed for drawing the background pairs, so that p-values are reproducible, or NULL (the default) to use the
+session's random numbers; the session's random state is restored afterwards. Ignored without significance}
 
-\item{cl}{A cluster object, which is left running. Default if parallel: inside an SGE parallel job (PE_HOSTFILE set)
-\code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")},
-elsewhere \code{parallelly::makeClusterPSOCK(parallelly::availableCores(), outfile = "")}; it is stopped at the end. Each worker holds
-the influence matrix and the within-sample blocks of the batch it scores (8 bytes per within-sample cell pair)}
+\item{threads}{An integer number of R processes that score grids, NULL (the default) for one per physical core, or 1 to score in
+this R session alone; a number above the cores available to R warns and uses them all. Fewer are used, with a message, when they
+would not fit in memory.gb (see Memory and processes). Worker processes run at a lower priority than other programs, so the
+computer stays responsive while HyperCom uses all cores. A cluster job or container gets only its allocated cores, and
+\code{options(mc.cores=4)} (or the environment variable MC_CORES) caps the default. Results do not depend on it}
 
-\item{outdir}{A string naming the output directory, or NULL to write no files}
+\item{memory.gb}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
+of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It caps the number of processes and
+stops a run that cannot fit (see Memory and processes). On a cluster give the job's memory request, as the computer's memory may
+be more than the job may use}
 
-\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
-random state is restored afterwards}
+\item{resume}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
+stopped when the same call is run again (see Stopped runs); TRUE by default, ignored when outdir is NULL}
 
-\item{verbose}{A boolean of whether to report progress as messages: the pairs scored about every 5 s with
-the time left, and the top pair of each weight}
+\item{verbose}{A boolean of whether to report progress as messages: the memory needed, the pairs scored about every 5 s with the
+time left, and the top pair of each weight}
 
-\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
-stopped when run again; ignored when outdir is NULL}
+\item{outdir}{A string naming the output directory for the files priority.\if{html}{\out{<weight>}}.csv (and the cache), or NULL to write no files}
 }
 \value{
-A list of dataframes named by weight, each the ligand-receptor pairs ordered by their priority column, with columns p and
-p.adj when significance is TRUE
+A list of data frames named by weight (e.g. "1"), each with the interactions of lrs ordered by decreasing priority: the
+columns of lrs, priority, and with significance p and p.adj
 }
 \description{
-\code{prioritize_lr} returns an ordered list of ligand-receptor pairs
+\code{prioritize_lr} returns the ligand-receptor pairs ranked by a priority score, one table per weight
 }
 \details{
-This function takes the ligand-receptor pairs, the adjacency matrix, a named influence matrix and the corresponding metadata
-and ranks the pairs by a priority score: the weighted geometric mean of five terms of the cells that express a pair's genes (their
-fraction of all cells, the smallest fraction of cells expressing one of its genes, the mean of each cell's larger score as sender
-or receiver, how evenly they split into senders and receivers, and how much they concentrate in some groups). Cells are scored once
-for all weights; parallel scores batches of grids on a cluster of R processes (cl).
-With significance, the p-value of a pair is the fraction of 1000 background pairs of random genes whose priority is at least as
-high, so it moves in steps of 0.001 and is 0 when no background pair scored as high; p.adj is its Benjamini-Hochberg adjustment.
-Background pairs without a priority (NaN, e.g. when some of their cells have no score) are left out, with a warning. Background
-pairs are first screened: one pass over their cell grids bounds their priorities without ranking the cells, and only the few whose
-bounds hold a real pair's priority are scored in full, so the p-values are those of scoring all of them, in less time.
-With outdir set and cache=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache} while pairs are scored, and the folder is
-removed once the priority files are written. If the run stops (time limit of a cluster job, crash, Esc), the same call run again
-continues where it stopped, losing at most the last batch of pairs, with the same results as a run that never stopped on the same
-type of computer (on another type the BLAS can change the last bits of a "woodbury" influence matrix, and priorities by about
-1e-13); without seed it also continues with the background pairs drawn before. Weights and the cluster may differ. A cache made from other inputs (or
-damaged) is not used: it is moved to \verb{<outdir>/cache.old}, with a warning. If the cache cannot be written, scoring goes on without
-it, with a warning.
+This function takes the interactions, the adjacency, the influence matrix and the metadata made by the earlier steps (as
+\code{HyperCom} does) and ranks the ligand-receptor pairs. Every cell gets a sender and a receiver score for each pair (see
+\code{score_hypercom}); cells are scored once for all weights.
 }
+\section{Priority score}{
+
+The priority of a pair is the weighted geometric mean of five terms of the cells that express any of its genes:
+\itemize{
+\item frac: their fraction of all cells (its weight is \code{weights}; the others have weight 1);
+\item pct.min: the smallest fraction of cells expressing one of the pair's genes;
+\item max: the mean of each cell's larger score, as sender or as receiver;
+\item balance: how evenly the cells split into senders and receivers;
+\item purity: how concentrated the cells are in some groups (the group column of metadata). Cells spread exactly evenly over the groups
+give purity 0, and so priority 0; without groups purity is 1.
+}
+
+There is one ranking over all cells: groups enter only through purity, not as a ranking per group.
+}
+
+\section{P-values}{
+
+With significance=TRUE, 1000 background pairs of random genes of the hypergraph are scored like the real pairs. The p-value of a
+pair (column p) is the fraction of background pairs whose priority is at least as high, so it moves in steps of 0.001 and 0 means
+none (report p < 0.001); p.adj is p with the Benjamini-Hochberg adjustment. Background pairs without a priority (NaN) are left
+out, with a warning. Every real and background pair is scored exactly (the pure R version of HyperCom does not screen: in R,
+screening a grid takes longer than scoring it).
+}
+
+\section{Memory and processes}{
+
+Memory grows with the number of pairs of cells in the same sample: the sum over samples of the squared number of cells (one
+sample of 10,000 cells: 1e8 pairs). Each R process that scores grids needs about 79 bytes per pair (72 bytes plus 10\%): its copy of
+the within-sample influence values and the ranking of one grid. The run needs about 1.1 GB more for the rest (1 GiB), each worker
+process about 0.4 GB more, and the main process about 8.8 bytes per pair while it hands the influence values to the workers.
+threads is lowered, with a message, so that the processes fit in memory.gb; when one process does not fit, the run stops at the
+start, giving the estimate (about 9 GB for one sample of 10,000 cells, 72 GB for 30,000). Splitting the cells into more samples
+saves memory but changes which cells are compared, and so the results. HyperCom on branch master scores grids in compiled code with
+about 17.6 bytes per pair, and with less in its memory mode.
+
+The estimate is an upper bound with a floor of about 1.1 GB (1 GiB for the rest of the run): small runs report about 1.08 GB
+while using less, and memory.gb below that always stops.
+}
+
+\section{Stopped runs}{
+
+With outdir set and resume=TRUE, the pairs scored so far are kept in \verb{<outdir>/cache}. If the run stops (time limit of a cluster
+job, crash, Esc), run the same call again: it continues where it stopped, losing at most the last batch of pairs. The results
+are those of a run that never stopped on the same type of computer (another type of CPU can change the last digits, about
+1e-13). Without seed, the run keeps the background pairs drawn before it stopped. weights and threads may differ between the
+calls. The cache folder is removed once the priority files are written.
+
+A cache is not used when the run differs in its data (adj, infMat, or the cells' sample or group in metadata; through HyperCom
+this means counts, lrdb, metadata, r or infmat.method) or in its version of HyperCom, or when the cache is damaged. It is then moved to \verb{<outdir>/cache.old},
+with a warning that says why: rename it back to continue the run it belongs to. If the cache cannot be written (e.g. a full
+disk), scoring goes on without it, with a warning.
+}
+
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
 lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)

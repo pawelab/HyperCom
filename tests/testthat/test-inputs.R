@@ -1,6 +1,16 @@
 # Argument and input validation: what the steps and HyperCom accept, what they stop on (and with which message) and what they warn
 # about.
 
+test_that("threads must be one number of at least 1 and is capped at the available cores with a warning", {
+  expect_error(run_priority(threads=NA), "threads")
+  expect_error(run_priority(threads=c(2, 4)), "threads")
+  expect_error(run_priority(threads="two"), "threads")
+  expect_error(run_priority(threads=0), "at least 1")
+  expect_error(run_priority(threads=-3), "at least 1")
+  expect_warning(threads <- HyperCom:::get_threads(1e10), paste0("available cores: using ", parallelly::availableCores()))
+  expect_equal(threads, unname(parallelly::availableCores()))
+})
+
 test_that("a kept factor column, also listed twice, labels genes as gene without a warning (#16)", {
   md <- fx$input$metadata
   md$celltype <- factor(md$celltype)
@@ -30,19 +40,17 @@ test_that("metadata cells must be distinct nodes of the influence matrix", {
   expect_error(score_hypercom(fx$output$infMat, md, ligand="Thbs1", receptors="Sdc4"), "distinct nodes")
 })
 
-test_that("an empty LR table keeps the lrdb columns, and counts without an expressed ligand or receptor gene stop clearly (#14)", {
+test_that("an empty LR table keeps the lrdb columns, an empty lrdb stops, and counts without an expressed gene stop clearly (#14)", {
   counts <- fx$input$counts
   counts[rownames(counts) %in% unlist(fx$input$lrdb[, -1]), ] <- 0
   cc <- filter_counts(counts, fx$input$lrdb, outfile=NULL)
   lrs <- generate_lrs_table(cc, fx$input$lrdb, outfile=NULL)
-  empty <- generate_lrs_table(fx$output$counts, fx$input$lrdb[0, ], outfile=NULL)
   he <- generate_hyperedges(cc, lrs, outfile=NULL)
   adj <- generate_adjacency_matrix(he, outfile=NULL)
 
-  for(df in list(lrs, empty)){
-    expect_equal(nrow(df), 0)
-    expect_identical(colnames(df), colnames(fx$input$lrdb))
-  }
+  expect_equal(nrow(lrs), 0)
+  expect_identical(colnames(lrs), colnames(fx$input$lrdb))
+  expect_error(generate_lrs_table(fx$output$counts, fx$input$lrdb[0, ], outfile=NULL), "lrdb has no interactions")
   expect_equal(nrow(adj), 0)
   expect_error(generate_infMat(adj, outfile=NULL), "no nodes")
 })
@@ -70,13 +78,6 @@ test_that("numeric node names are ordered as numbers and hyperedges need node an
   expect_error(generate_adjacency_matrix(data.frame(Edge=he$edge, Node=he$node), outfile=NULL), "node and edge")
 })
 
-test_that("generate_infMat takes a dataframe and keeps an unnamed adjacency unnamed", {
-  dense <- as.matrix(fx$output$adj)
-
-  expect_handwritten_infmat(generate_infMat(as.data.frame(dense), outfile=NULL))
-  expect_null(dimnames(generate_infMat(unname(dense), outfile=NULL)))
-})
-
 test_that("an adjacency with one-sided dimnames gives the same priorities", {
   adj <- fx$output$adj
   adj@Dimnames <- list(NULL, rownames(adj))
@@ -84,10 +85,10 @@ test_that("an adjacency with one-sided dimnames gives the same priorities", {
   expect_handwritten(run_priority(adj=adj), fx$output$priority["1"])
 })
 
-test_that("HyperCom checks its arguments before any step runs, weights that print alike stop (#27) and threads is no argument", {
+test_that("HyperCom checks its arguments before any step runs, and weights that print alike stop (#27)", {
   dir <- withr::local_tempdir()
   args <- list(lrdb=fx$input$lrdb, counts=fx$input$counts, metadata=fx$input$metadata, sample="sample", group="condition",
-               outdir=file.path(dir, "run"), verbose=FALSE)
+               outdir=file.path(dir, "run"), threads=1, verbose=FALSE)
   run <- function(...){
     return(do.call(HyperCom, utils::modifyList(args, list(...))))
   }
@@ -96,19 +97,19 @@ test_that("HyperCom checks its arguments before any step runs, weights that prin
   expect_error(run(sample="smaple"), "not columns of metadata: smaple")
   expect_error(run(group="conditon", keep="celltyp"), "conditon, celltyp")
   expect_error(run(sample=fx$input$metadata$sample), "one column name")
-  expect_error(run(metadata=as.matrix(fx$input$metadata)), "dataframe")
+  expect_error(run(metadata=as.matrix(fx$input$metadata)), "data frame")
   expect_error(run(weights=-1), "at least 0")
+  expect_error(run(exact.priority=TRUE), "unused argument")
   expect_error(run(outdir=4), "outdir must be one string")
-  expect_error(run(threads=2), "unused argument")
-  expect_error(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata, sample="sample", outdir=NULL), "outdir must be one string")
+  expect_error(run(outdir=withr::local_tempfile(lines="a file")), "outdir names a file")
   expect_error(HyperCom(fx$input$lrdb, fx$input$counts, fx$input$metadata[0, ], sample="sample", outdir=file.path(dir, "run")),
                "no cell of counts is a row name of metadata")
   expect_error(run(weights="1"), "at least 0")
   expect_error(run(weights=c(0.3, 0.1 + 0.2)), "weights must differ")
   expect_error(run(infmat.method="qr"), "should be one of")
+  expect_error(run(r=2), "r must be one number")
   expect_false(dir.exists(file.path(dir, "run")))
   expect_error(run_priority(weights=c(0.3, 0.1 + 0.2)), "weights must differ")
-  expect_error(run_priority(threads=2), "unused argument")
 })
 
 test_that("counts of another species, transposed counts and scaled data stop clearly", {
@@ -141,19 +142,20 @@ test_that("score_hypercom needs both or neither of ligand and receptors, and one
   expect_error(score_hypercom(fx$output$infMat, md, ligand=c("Thbs1", "Tgfb1"), receptors="Sdc4"), "one gene")
 })
 
-test_that("HyperCom warns about priority files of other weights already in outdir", {
+test_that("HyperCom warns about priority files of other weights already in outdir, not about those it writes", {
   dir <- withr::local_tempdir()
+  dir.create(file.path(dir, "6.priority"))
+  for(f in c("priority.0.5.csv", "priority.1.csv")){
+    writeLines("interaction", file.path(dir, "6.priority", f))
+  }
 
-  expect_no_warning(run_hypercom(dir, weights=c(1, 0.5)))
-  expect_no_warning(run_hypercom(dir, weights=c(1, 0.5)))
-  expect_warning(run_hypercom(dir, weights=1), "priority.0.5.csv")
+  res <- collect(run_hypercom(dir, weights=1, threads=test_threads(2)))
+
+  expect_identical(res$warnings, "outdir already holds priorities of other weights, which are kept: priority.0.5.csv")
 })
 
 test_that("within-sample cell pairs may pass 2^32 and stop at 2^52, before any block is made", {
-  skip_on_cran()
-  past32 <- tryCatch(HyperCom:::grid_blocks(NULL, list(sample=rep(1L, 65537), idx=seq_len(65537) - 1L)), error=conditionMessage)
-  big <- list(sample=rep(1L, 2^26 + 1))
-
-  expect_false(grepl("sample sizes", past32))
-  expect_error(HyperCom:::grid_blocks(NULL, big), "below 2^52", fixed=TRUE)
+  expect_no_error(HyperCom:::check_cell_pairs(65537))
+  expect_no_error(HyperCom:::check_cell_pairs(c(2^26 - 1, 2)))
+  expect_error(HyperCom:::check_cell_pairs(c(2^26, 1)), "below 2^52", fixed=TRUE)
 })

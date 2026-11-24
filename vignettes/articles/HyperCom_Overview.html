@@ -2236,15 +2236,15 @@ vertical-align: -.125em;
 </header>
 
 
-<section id="last-updated-2026-11-19" class="level4">
-<h4 class="anchored" data-anchor-id="last-updated-2026-11-19">Last Updated: 2026-11-19</h4>
+<section id="last-updated-2026-11-24" class="level4">
+<h4 class="anchored" data-anchor-id="last-updated-2026-11-24">Last Updated: 2026-11-24</h4>
 <p>This tutorial runs HyperCom on 1,000 mouse heart cells and shows how to:</p>
 <ol type="1">
 <li>run the whole analysis with one call,</li>
 <li>read the ranked ligand-receptor pairs,</li>
 <li>score and plot the cells that send and receive a signal.</li>
 </ol>
-<p>The last section runs each step on its own, for those who want to see how HyperCom works. This is the R-only version (branch <code>base-R</code>); the faster compiled version is on branch <code>master</code>.</p>
+<p>The last section runs each step on its own, for those who want to see how HyperCom works. This is the pure R version (branch <code>base-R</code>, HyperCom 0.3.1.1); the faster compiled version, with the same functions and results, is on branch <code>master</code>.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(HyperCom)</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
@@ -2345,7 +2345,7 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>lrdb <span class="ot">&lt;-</span> cellchat.mm.lrdb</span>
 <span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(lrdb)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>[1] 2377    6</code></pre>
+<pre><code>[1] 2374    6</code></pre>
 </div>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(lrdb, <span class="dv">2</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
@@ -2360,17 +2360,16 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <h2 class="anchored" data-anchor-id="run-hypercom">2. Run HyperCom</h2>
 <p>One call runs the whole analysis.</p>
 <ul>
-<li><strong>Parallel runs use a cluster of R processes.</strong> Make one with <code>parallelly::makeClusterPSOCK()</code> and pass it as <code>cl</code> with <code>parallel=TRUE</code>; HyperCom leaves it running, so you can reuse it. Each worker holds its own copy of the data, so fewer workers use less memory. Without <code>cl</code>, <code>parallel=TRUE</code> starts one process per core, which can fail on machines with many cores.</li>
+<li>HyperCom starts one R process per physical core, fewer when they would not fit in memory (<code>threads</code> sets the number; <code>threads=1</code> runs in this R session alone). Results do not depend on it.</li>
 <li><code>significance=TRUE</code> adds p-values; <code>seed</code> makes them reproducible.</li>
 </ul>
-<p>This takes a few minutes.</p>
+<p>This takes about a minute on 8 cores.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>cl <span class="ot">&lt;-</span> parallelly<span class="sc">::</span><span class="fu">makeClusterPSOCK</span>(<span class="fu">min</span>(<span class="dv">8</span>, parallelly<span class="sc">::</span><span class="fu">availableCores</span>()))</span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>outdir <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;overview&quot;</span>)</span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>res <span class="ot">&lt;-</span> <span class="fu">HyperCom</span>(<span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">counts=</span>alexanian2021.counts,</span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>                <span class="at">metadata=</span>alexanian2021.metadata, <span class="at">sample=</span><span class="st">&quot;sample&quot;</span>,</span>
-<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>                <span class="at">group=</span><span class="st">&quot;condition&quot;</span>, <span class="at">significance=</span><span class="cn">TRUE</span>, <span class="at">seed=</span><span class="dv">1</span>,</span>
-<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>                <span class="at">parallel=</span><span class="cn">TRUE</span>, <span class="at">cl=</span>cl, <span class="at">outdir=</span>outdir, <span class="at">verbose=</span><span class="cn">FALSE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>outdir <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;overview&quot;</span>)</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>res <span class="ot">&lt;-</span> <span class="fu">HyperCom</span>(<span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">counts=</span>alexanian2021.counts,</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>                <span class="at">metadata=</span>alexanian2021.metadata, <span class="at">sample=</span><span class="st">&quot;sample&quot;</span>,</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>                <span class="at">group=</span><span class="st">&quot;condition&quot;</span>, <span class="at">significance=</span><span class="cn">TRUE</span>, <span class="at">seed=</span><span class="dv">1</span>,</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>                <span class="at">outdir=</span>outdir, <span class="at">verbose=</span><span class="cn">FALSE</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <p><code>res</code> holds the results, and they are also saved to <code>outdir</code>:</p>
 <table class="caption-top table">
@@ -2439,9 +2438,9 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <p>Same arguments, but HyperCom reads the counts and metadata from the object. <code>sample</code>, <code>group</code> and <code>keep</code> name columns of its cell metadata (<code>seurat[[]]</code> or <code>colData(sce)</code>).</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>res <span class="ot">&lt;-</span> <span class="fu">HyperCom_seurat</span>(<span class="at">seurat=</span>seurat_object, <span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">sample=</span><span class="st">&quot;sample&quot;</span>,</span>
-<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>                       <span class="at">group=</span><span class="st">&quot;condition&quot;</span>, <span class="at">parallel=</span><span class="cn">TRUE</span>, <span class="at">cl=</span>cl, <span class="at">outdir=</span><span class="st">&quot;overview&quot;</span>)</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>                       <span class="at">group=</span><span class="st">&quot;condition&quot;</span>, <span class="at">outdir=</span><span class="st">&quot;overview&quot;</span>)</span>
 <span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>res <span class="ot">&lt;-</span> <span class="fu">HyperCom_sce</span>(<span class="at">sce=</span>sce_object, <span class="at">lrdb=</span>cellchat.mm.lrdb, <span class="at">sample=</span><span class="st">&quot;sample&quot;</span>,</span>
-<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>                    <span class="at">group=</span><span class="st">&quot;condition&quot;</span>, <span class="at">parallel=</span><span class="cn">TRUE</span>, <span class="at">cl=</span>cl, <span class="at">outdir=</span><span class="st">&quot;overview&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>                    <span class="at">group=</span><span class="st">&quot;condition&quot;</span>, <span class="at">outdir=</span><span class="st">&quot;overview&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <ul>
 <li><strong><code>HyperCom_seurat</code></strong> reads the <code>counts</code> layer of the <code>RNA</code> assay by default (change with <code>assay</code> and <code>layer</code>). Works with Seurat v5 and older.</li>
@@ -2484,7 +2483,7 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <li><strong><code>sender</code>, <code>receiver</code>:</strong> from 0 to 1, how strongly the cell sends or receives the signal, compared with the other cells of its sample.</li>
 <li><strong><code>dif</code></strong> = receiver - sender; <strong><code>avg</code></strong> is their mean; <strong><code>max</code></strong> the larger of the two.</li>
 <li><strong><code>hypercom</code>:</strong> one score per cell, negative for senders and positive for receivers.</li>
-<li><strong>NaN:</strong> the cell has no path to the pair’s genes.</li>
+<li><strong>NaN:</strong> the cell has no score for the pair (rare).</li>
 </ul>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>Thbs1_Sdc4 <span class="ot">&lt;-</span> <span class="fu">score_hypercom</span>(<span class="at">infMat=</span>res<span class="sc">$</span>infMat, <span class="at">metadata=</span>res<span class="sc">$</span>metadata, <span class="at">ligand=</span><span class="st">&quot;Thbs1&quot;</span>,</span>
@@ -2557,7 +2556,67 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 </section>
 <section id="large-data" class="level2">
 <h2 class="anchored" data-anchor-id="large-data">5. Large data</h2>
-<p>This version keeps a dense influence matrix of all cells and genes, and each worker of the cluster holds a copy. The 1,000 cells of this tutorial take about 8 minutes on 12 cores, and it runs out of memory at about 20,000 cells. Fewer workers use less memory but take longer. For large data, use the compiled version on branch <code>master</code>: seconds for this data, and 60,000 cells in one sample fit in 64 GiB. Both versions give the same results.</p>
+<section id="run-time-and-memory" class="level3">
+<h3 class="anchored" data-anchor-id="run-time-and-memory">Run time and memory</h3>
+<p>Time and memory depend on the number of cells <strong>per sample</strong> (they grow with its square), so more samples of the same size cost little. One sample, with p-values, on 8 cores:</p>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Cells in the sample</th>
+<th>Time</th>
+<th>Peak memory</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1,000</td>
+<td>1.7 min</td>
+<td>3.3 GB</td>
+</tr>
+<tr class="even">
+<td>3,000</td>
+<td>18 min</td>
+<td>7.9 GB</td>
+</tr>
+<tr class="odd">
+<td>10,000</td>
+<td>about 3.5 h (estimate)</td>
+<td>about 70 GB (estimate; fewer processes on less memory, so longer)</td>
+</tr>
+</tbody>
+</table>
+<p>Measured with <code>HyperCom()</code> on one sample of cells resampled from the bundled mouse heart data (counts thinned to 80%), with the bundled mouse database (about 1,000 pairs expressed), <code>significance=TRUE</code> and 8 R processes, on a desktop (Intel Core i9-12900K, 128 GB). Memory is the peak of all processes together. The 10,000-cell row is estimated from the time and memory per pair of cells. GB = 10<sup>9</sup> bytes.</p>
+<ul>
+<li><strong>Pairs:</strong> time also grows with the number of ligand-receptor pairs expressed.</li>
+<li><strong>More than about 10,000 cells per sample:</strong> use the compiled version on branch <code>master</code>. It gives the same results, takes seconds for this tutorial and fits about 100,000 cells in one sample in 64 GB.</li>
+</ul>
+</section>
+<section id="where-the-memory-goes" class="level3">
+<h3 class="anchored" data-anchor-id="where-the-memory-goes">Where the memory goes</h3>
+<ul>
+<li><strong>Scoring the pairs</strong> takes most of the memory. Each R process that scores needs about 79 bytes for every pair of cells in the same sample, plus about 0.4 GB, and the run about 1.1 GB more. The number of such pairs is the sum over samples of the squared number of cells, so before a run you can estimate the memory of one process in GB with <code>sum(as.numeric(table(metadata$sample))^2) * 79 / 1e9 + 1.1</code> (an upper bound: only cells that express a ligand or receptor gene count).</li>
+<li><strong>Processes:</strong> before scoring, HyperCom compares its estimate with <code>memory.gb</code> (default: 90% of the computer’s memory, or of a container’s or cluster job’s limit on Linux) and starts only as many processes as fit, saying so. If even one does not fit, the run stops at once, giving the estimate. On a cluster, give the job’s memory: for a job that asks for 64 GB, <code>memory.gb=64</code>.</li>
+<li><strong>The influence matrix</strong> is kept, with the default <code>infmat.method=&quot;woodbury&quot;</code>, as smaller pieces from which any entry can be computed, so its memory grows with the number of cells, not its square. <code>infmat.method=&quot;lu&quot;</code> makes the full matrix, with exactly the numbers of the original release of HyperCom (0.0.0.9000).</li>
+<li><strong>“… cells and … genes are not connected to the rest of the hypergraph and are left out”.</strong> This warning counts cells and genes that no chain of shared genes and interactions links to the rest. They could neither send nor receive anything, so they get no scores. A few are normal; if many cells are left out, check the database species and the gene names.</li>
+<li><strong>Splitting a sample into more samples</strong> saves memory but changes which cells are compared, and so the results.</li>
+</ul>
+</section>
+<section id="runs-that-stop" class="level3">
+<h3 class="anchored" data-anchor-id="runs-that-stop">Runs that stop</h3>
+<p>Scoring the pairs takes almost all the time. As it goes, HyperCom saves the scored pairs in <code>&lt;outdir&gt;/6.priority/cache</code>. <strong>If a run stops</strong> (cluster time limit, crash, closed R session), <strong>run the same call again.</strong> The earlier steps repeat (seconds) and scoring continues from the cache, losing at most the last batch of pairs, e.g.:</p>
+<pre><code>  Continuing from the cache in overview/6.priority/cache: 1042 of 1042 pairs already scored
+  Continuing from the cache in overview/6.priority/cache: 343 of 1000 background pairs already scored</code></pre>
+<ul>
+<li><strong>Same results</strong> as a run that never stopped, on the same type of computer. Without <code>seed</code>, the run keeps the background pairs it drew before the stop. <code>weights</code> and <code>threads</code> may change between the calls.</li>
+<li><strong>The cache is deleted</strong> once the priority files are written.</li>
+<li><strong>The cache is not used</strong>, but moved to <code>cache.old</code> with a warning, when the second call differs in the counts, the database, the cells’ sample or group, <code>r</code>, <code>infmat.method</code> or the version of HyperCom. Rename <code>cache.old</code> back to continue the run it belongs to. <code>resume=FALSE</code> turns the cache off.</li>
+</ul>
+</section>
 </section>
 <section id="step-by-step-how-hypercom-works" class="level2">
 <h2 class="anchored" data-anchor-id="step-by-step-how-hypercom-works">6. Step by step: how HyperCom works</h2>
@@ -2566,16 +2625,16 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <h3 class="anchored" data-anchor-id="filter-the-counts">Filter the counts</h3>
 <p>To save memory, keep only the genes of the database that are expressed (above 0). The matrix is also transposed to cells x genes.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>lr.counts <span class="ot">&lt;-</span> <span class="fu">filter_counts</span>(<span class="at">counts=</span>counts, <span class="at">lrdb=</span>lrdb, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
-<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(lr.counts)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>lr.counts <span class="ot">&lt;-</span> <span class="fu">filter_counts</span>(<span class="at">counts=</span>counts, <span class="at">lrdb=</span>lrdb, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(lr.counts)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] 1000  663</code></pre>
 </div>
 </div>
 <p>Then keep only the interactions whose genes are all expressed.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>lrs <span class="ot">&lt;-</span> <span class="fu">generate_lrs_table</span>(<span class="at">counts=</span>lr.counts, <span class="at">lrdb=</span>lrdb, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
-<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(lrs)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>lrs <span class="ot">&lt;-</span> <span class="fu">generate_lrs_table</span>(<span class="at">counts=</span>lr.counts, <span class="at">lrdb=</span>lrdb, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(lrs)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] 1042    5</code></pre>
 </div>
@@ -2588,10 +2647,10 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <li><strong>expression edges:</strong> a ligand or receptor gene and the cells that express it,</li>
 <li><strong>interaction edges:</strong> the genes of one ligand-receptor interaction.</li>
 </ol>
-<p>They are stored as a data frame with an edge and a node column (a node belongs to that edge), each edge with weight 1.</p>
+<p>They are stored as a data frame with an edge and a node column (a node belongs to that edge), each edge with weight 1. Cells and genes not connected to the rest are left out (see section 5).</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>hyperedges <span class="ot">&lt;-</span> <span class="fu">generate_hyperedges</span>(<span class="at">counts=</span>lr.counts, <span class="at">lrs=</span>lrs, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
-<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(hyperedges, <span class="dv">2</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a>hyperedges <span class="ot">&lt;-</span> <span class="fu">generate_hyperedges</span>(<span class="at">counts=</span>lr.counts, <span class="at">lrs=</span>lrs, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(hyperedges, <span class="dv">2</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 2 × 3
   edge                node   weight
@@ -2600,38 +2659,38 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 2 TGFB1_TGFBR1_TGFBR2 Tgfbr1      1</code></pre>
 </div>
 </div>
-<p>The adjacency matrix has the cells, ligand genes and receptor genes as nodes; each entry is the number of hyperedges two nodes share.</p>
+<p>The adjacency matrix has the cells, ligand genes and receptor genes as nodes; each entry is the number of hyperedges two nodes share. It is not stored in full: <code>adj</code> keeps which nodes are in which hyperedge, which is much smaller, and works like a matrix (<code>dim(adj)</code>, <code>adj[i, j]</code>, <code>as.matrix(adj)</code> for the whole matrix).</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>adj <span class="ot">&lt;-</span> <span class="fu">generate_adjacency_matrix</span>(<span class="at">hyperedges=</span>hyperedges, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
-<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(adj)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>adj <span class="ot">&lt;-</span> <span class="fu">generate_adjacency_matrix</span>(<span class="at">hyperedges=</span>hyperedges, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(adj)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] 1663 1663</code></pre>
 </div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>adj[<span class="fu">c</span>(<span class="st">&quot;Thbs1&quot;</span>, <span class="st">&quot;Sdc4&quot;</span>), <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a>adj[<span class="fu">c</span>(<span class="st">&quot;Thbs1&quot;</span>, <span class="st">&quot;Sdc4&quot;</span>), <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>2 x 3 sparse Matrix of class &quot;dgCMatrix&quot;
-       node
+<pre><code>       node
 node    AAAGATGCACAGATTC-3 AAAGATGCAGCTCGCA-3 AAAGATGCAGGTCTCG-3
-  Thbs1                  1                  1                  .
-  Sdc4                   .                  .                  .</code></pre>
+  Thbs1                  1                  1                  0
+  Sdc4                   0                  0                  0</code></pre>
 </div>
 </div>
 </section>
 <section id="compute-the-influence-matrix" class="level3">
 <h3 class="anchored" data-anchor-id="compute-the-influence-matrix">Compute the influence matrix</h3>
 <p>A random walk with restart on the adjacency matrix gives the influence matrix: entry (i, j) is the share of a walk started at node i that ends at node j, so each row sums to 1. At every step the walk returns to its start with the restart probability <code>r</code>, so about <code>r</code> of each node’s influence stays on itself and the rest spreads over the nodes it shares hyperedges with.</p>
-<p><code>generate_infMat</code> takes <code>r</code> (default 0.5); <code>HyperCom</code> always uses 0.5. On this example the ranking hardly depends on it: <code>r</code> = 0.1 and 0.8 give the same top 20 pairs as 0.5.</p>
+<p><code>generate_infMat</code> and <code>HyperCom</code> take <code>r</code> (default 0.5). Like <code>adj</code>, <code>infMat</code> works like a matrix without being stored in full (section 5).</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>infMat <span class="ot">&lt;-</span> <span class="fu">generate_infMat</span>(<span class="at">adj=</span>adj, <span class="at">r=</span><span class="fl">0.5</span>, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
-<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(infMat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb40"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a>infMat <span class="ot">&lt;-</span> <span class="fu">generate_infMat</span>(<span class="at">adj=</span>adj, <span class="at">r=</span><span class="fl">0.5</span>, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dim</span>(infMat)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] 1663 1663</code></pre>
 </div>
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a>infMat[<span class="fu">c</span>(<span class="st">&quot;Thbs1&quot;</span>, <span class="st">&quot;Sdc4&quot;</span>), <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>infMat[<span class="fu">c</span>(<span class="st">&quot;Thbs1&quot;</span>, <span class="st">&quot;Sdc4&quot;</span>), <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>]</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>      AAAGATGCACAGATTC-3 AAAGATGCAGCTCGCA-3 AAAGATGCAGGTCTCG-3
-Thbs1        0.001564199       0.0015831587       0.0002673712
-Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
+<pre><code>       node
+node    AAAGATGCACAGATTC-3 AAAGATGCAGCTCGCA-3 AAAGATGCAGGTCTCG-3
+  Thbs1        0.001564199       0.0015831587       0.0002673712
+  Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 </div>
 </div>
 </section>
@@ -2639,10 +2698,10 @@ Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 <h3 class="anchored" data-anchor-id="prepare-the-metadata">Prepare the metadata</h3>
 <p>The matrices now have genes as well as cells, so the metadata gets a row per gene too, with <code>&quot;gene&quot;</code> in each column. To save memory, only the cell, sample and group columns are kept; <code>keep</code> adds others.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>node.meta <span class="ot">&lt;-</span> <span class="fu">generate_metadata</span>(<span class="at">infMat=</span>infMat, <span class="at">metadata=</span>cell.meta,</span>
-<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a>                               <span class="at">sample=</span><span class="st">&quot;sample&quot;</span>, <span class="at">group=</span><span class="st">&quot;condition&quot;</span>,</span>
-<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a>                               <span class="at">keep=</span><span class="cn">NULL</span>, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
-<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(node.meta)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb44"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a>node.meta <span class="ot">&lt;-</span> <span class="fu">generate_metadata</span>(<span class="at">infMat=</span>infMat, <span class="at">metadata=</span>cell.meta,</span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a>                               <span class="at">sample=</span><span class="st">&quot;sample&quot;</span>, <span class="at">group=</span><span class="st">&quot;condition&quot;</span>,</span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a>                               <span class="at">keep=</span><span class="cn">NULL</span>, <span class="at">outfile=</span><span class="cn">NULL</span>)</span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(node.meta)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>                cell sample group
 1 AAAGATGCACAGATTC-3      3   TAC
@@ -2658,10 +2717,9 @@ Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 <h3 class="anchored" data-anchor-id="rank-the-pairs">Rank the pairs</h3>
 <p><code>prioritize_lr</code> ranks the pairs (section 3). The priority is the weighted geometric mean of five terms of the cells that express the pair’s genes: their fraction of all cells, the smallest fraction of cells expressing one of its genes, the mean of each cell’s larger score as sender or receiver, how evenly they split into senders and receivers, and how much they concentrate in some groups. <code>weights</code> is the weight of the first term; here two weights give two tables.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a>priority <span class="ot">&lt;-</span> <span class="fu">prioritize_lr</span>(<span class="at">lrs=</span>lrs, <span class="at">adj=</span>adj, <span class="at">infMat=</span>infMat, <span class="at">metadata=</span>node.meta,</span>
-<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>                          <span class="at">weights=</span><span class="fu">c</span>(<span class="dv">1</span>, <span class="fl">0.5</span>), <span class="at">parallel=</span><span class="cn">TRUE</span>, <span class="at">cl=</span>cl, <span class="at">outdir=</span><span class="cn">NULL</span>,</span>
-<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>                          <span class="at">verbose=</span><span class="cn">FALSE</span>)</span>
-<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(priority[[<span class="st">&quot;1&quot;</span>]])</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a>priority <span class="ot">&lt;-</span> <span class="fu">prioritize_lr</span>(<span class="at">lrs=</span>lrs, <span class="at">adj=</span>adj, <span class="at">infMat=</span>infMat, <span class="at">metadata=</span>node.meta,</span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>                          <span class="at">weights=</span><span class="fu">c</span>(<span class="dv">1</span>, <span class="fl">0.5</span>), <span class="at">outdir=</span><span class="cn">NULL</span>, <span class="at">verbose=</span><span class="cn">FALSE</span>)</span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(priority[[<span class="st">&quot;1&quot;</span>]])</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>        interaction ligand    r1    r2   r3  priority
 1        THBS1_SDC4  Thbs1  Sdc4  &lt;NA&gt; &lt;NA&gt; 0.3313764
@@ -2671,10 +2729,6 @@ Sdc4         0.000335307       0.0003461792       0.0002531521</code></pre>
 5 POSTN_ITGAV_ITGB5  Postn Itgav Itgb5 &lt;NA&gt; 0.2651227
 6         CCL4_CCR5   Ccl4  Ccr5  &lt;NA&gt; &lt;NA&gt; 0.2645498</code></pre>
 </div>
-</div>
-<p>When you are done, stop the cluster.</p>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb47"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a>parallel<span class="sc">::</span><span class="fu">stopCluster</span>(cl)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 </section>
 </section>
@@ -2705,25 +2759,19 @@ attached base packages:
 [1] stats     graphics  grDevices utils     datasets  methods   base     
 
 other attached packages:
-[1] tidyr_1.3.2    Matrix_1.7-1   ggridges_0.5.6 ggplot2_3.5.2  dplyr_1.2.1   
-[6] HyperCom_0.0.1
+[1] tidyr_1.3.2      Matrix_1.7-1     ggridges_0.5.6   ggplot2_3.5.2   
+[5] dplyr_1.2.1      HyperCom_0.3.1.1
 
 loaded via a namespace (and not attached):
- [1] gtable_0.3.6          jsonlite_2.0.0        compiler_4.4.2       
- [4] Rcpp_1.0.14           tidyselect_1.2.1      collapse_2.1.7       
- [7] parallel_4.4.2        scales_1.4.0          yaml_2.3.10          
-[10] fastmap_1.2.0         lattice_0.22-6        R6_2.6.1             
-[13] labeling_0.4.3        generics_0.1.4        knitr_1.50           
-[16] iterators_1.0.14      htmlwidgets_1.6.4     tibble_3.3.1         
-[19] zigg_0.0.2            pillar_1.11.1         RColorBrewer_1.1-3   
-[22] rlang_1.2.0           utf8_1.2.6            xfun_0.52            
-[25] RcppParallel_5.1.11-2 doParallel_1.0.17     cli_3.6.3            
-[28] withr_3.0.2           magrittr_2.0.3        foreach_1.5.2        
-[31] digest_0.6.37         grid_4.4.2            lifecycle_1.0.5      
-[34] vctrs_0.7.3           Rfast_2.1.5.2         evaluate_1.0.3       
-[37] glue_1.8.0            farver_2.1.2          codetools_0.2-20     
-[40] parallelly_1.47.0     rmarkdown_2.29        purrr_1.0.4          
-[43] tools_4.4.2           pkgconfig_2.0.3       htmltools_0.5.8.1    </code></pre>
+ [1] gtable_0.3.6       jsonlite_2.0.0     compiler_4.4.2     tidyselect_1.2.1  
+ [5] parallel_4.4.2     scales_1.4.0       yaml_2.3.10        fastmap_1.2.0     
+ [9] lattice_0.22-6     R6_2.6.1           labeling_0.4.3     generics_0.1.4    
+[13] knitr_1.50         htmlwidgets_1.6.4  tibble_3.3.1       pillar_1.11.1     
+[17] RColorBrewer_1.1-3 rlang_1.2.0        utf8_1.2.6         xfun_0.52         
+[21] cli_3.6.3          withr_3.0.2        magrittr_2.0.3     digest_0.6.37     
+[25] grid_4.4.2         lifecycle_1.0.5    vctrs_0.7.3        evaluate_1.0.3    
+[29] glue_1.8.0         farver_2.1.2       parallelly_1.47.0  rmarkdown_2.29    
+[33] purrr_1.0.4        tools_4.4.2        pkgconfig_2.0.3    htmltools_0.5.8.1 </code></pre>
 </div>
 </div>
 </section>

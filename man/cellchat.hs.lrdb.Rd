@@ -5,8 +5,12 @@
 \alias{cellchat.hs.lrdb}
 \title{CellChat human ligand-receptor interactions}
 \format{
-A dataframe of 2240 interactions with columns interaction (its name), ligand (a human gene symbol) and r1 to r4 (the
-receptor genes, NA where a receptor complex has fewer subunits)
+A data frame of 2240 interactions with columns interaction (its name), ligand (a human gene symbol) and r1 to r4 (the
+receptor genes, NA where a receptor complex has fewer subunits). The 12 interactions named \verb{*_CALCRL_RAMP1-3}
+(ADM, CALCA, CALCB, IAPP) have CellChat's genes, CALCR and a RAMP, the same as the \verb{*_CALCR_RAMP1-3} ones: CellChat's complex
+table gives CALCRL_RAMP1-3 the subunit CALCR, not CALCRL. Each pair gets the same priority, and both count in the
+Benjamini-Hochberg adjustment. Genes follow CellChat's ligand, receptor and complex tables, which CellChat scores: its
+gene symbol columns give CXCL1 for CXCL8_CXCR1 and mouse Cd99 / Pilrb for CD99_PILRB, which this table had before 0.3.1
 }
 \description{
 The ligand-receptor interactions of the CellChat database for H. sapiens, in the format HyperCom reads as \code{lrdb}.

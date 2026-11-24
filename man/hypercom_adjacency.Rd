@@ -35,10 +35,14 @@ dim: the number of nodes twice; dimnames: the node names twice; \code{[} and as.
 \code{hypercom_adjacency} objects are made by generate_adjacency_matrix
 }
 \details{
-A hypercom_adjacency keeps the node x hyperedge incidence H of a hypergraph; its adjacency matrix is H H' with the diagonal set
-to zero. dim and dimnames give those of the matrix, \code{adj[i, j]} makes the indexed entries as a dense matrix (indices as for a
-matrix: names, positions or logical; factors are read by name, not by their codes) and as.matrix the whole dense matrix (nodes
-squared doubles).
+A hypercom_adjacency keeps which nodes are in which hyperedge (the node x hyperedge incidence H of the hypergraph) instead of the
+adjacency matrix, which is H H' with the diagonal set to zero. It works like a matrix:
+\itemize{
+\item dim and dimnames give the number and the names of the nodes (cells and genes);
+\item \code{adj[i, j]} computes the indexed entries as a dense matrix (indices as for a matrix: names, positions or logical; factors are
+read by name, not by their codes);
+\item as.matrix computes the whole dense matrix, 8 bytes times the number of nodes squared: slice instead on large data.
+}
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

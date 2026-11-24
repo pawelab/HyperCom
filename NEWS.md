@@ -1,3 +1,70 @@
+# HyperCom 0.3.1.1
+
+The pure R version now follows HyperCom 0.3.1 (branch `master`): the same functions, arguments, checks and fixes, with cell grids
+scored in R instead of compiled code. It still installs from CRAN packages only.
+
+* **Much faster than 0.0.1.** Cells are compared only within their sample (0.0.1 built the whole cell x cell grid and dropped the
+  pairs across samples), each grid of a ligand and a receptor subunit is scored once for all the pairs and weights that use it, and
+  the influence matrix is kept as its factors (`infmat.method="woodbury"`, the new default). The bundled data with p-values take
+  about a minute on 8 cores instead of about 8 minutes on 12.
+* **Same results.** With `infmat.method="lu"`, scores, priorities and seeded p-values are identical to 0.0.1's (and to those of the
+  paper's code, branch `handwritten`). The default `"woodbury"` differs from them by rounding (about 1e-15), which can reorder pairs
+  with exactly tied priorities.
+* **P-values are exact.** Every real and background pair is scored exactly. The main version screens pairs to save time; in R,
+  screening a grid takes longer than scoring it, so this version does not, and has no `exact.priority`.
+* **Memory is checked before the run.** Each R process that scores grids needs about 79 bytes per pair of cells in the same sample
+  (one sample of 10,000 cells: 7.9 GB). A run that cannot fit stops at the start, giving the estimate.
+
+## Breaking changes
+
+* **`parallel` and `cl` are gone; `threads` gives the number of R processes.** The default (`threads=NULL`) starts one process per
+  physical core, at a lower priority than other programs, and fewer when they would not fit in memory (with a message). `threads=1`
+  runs in the R session alone. Results do not depend on it. Cluster jobs and containers use only their allocated cores;
+  `options(mc.cores=)` caps the default. Clusters across several machines (`cl` on SGE) are no longer supported.
+* **`cache` is now `resume`.** A run stopped under 0.0.1 is not resumed (the version changed).
+* **R 4.2 or later** and Matrix 1.5 or later are needed.
+* **New argument orders**, as in the main version. The leading arguments are unchanged, so calls that give the first arguments by
+  position still work; give the others by name:
+  * `HyperCom(lrdb, counts, metadata, sample, group=NULL, keep=NULL, weights=1, significance=FALSE, seed=NULL, r=0.5,
+    infmat.method="woodbury", threads=NULL, memory.gb=NULL, resume=TRUE, verbose=TRUE, outdir="HyperCom")`
+  * `prioritize_lr(lrs, adj, infMat, metadata, weights=1, significance=FALSE, seed=NULL, threads=NULL, memory.gb=NULL, resume=TRUE,
+    verbose=TRUE, outdir="6.priority")`
+  * `score_hypercom(infMat, metadata, ligand=NULL, receptors=NULL, memory.gb=NULL, verbose=FALSE)`
+  * `generate_infMat(adj, r=0.5, method=NULL, hyperedges=NULL, outfile="4.infMat.rds")`
+* **Wrappers pass arguments on.** `HyperCom_seurat(seurat, lrdb, sample, assay="RNA", layer="counts", group=NULL, keep=NULL, ...)`
+  and `HyperCom_sce(sce, lrdb, sample, assay="counts", group=NULL, keep=NULL, ...)` pass every other argument on to `HyperCom()`; a
+  misspelled or removed argument (`parallel=`, `cl=`, `cache=`, `exact.priority=`) stops with "unused argument".
+* **The adjacency and the influence matrix are stored compactly** (`generate_adjacency_matrix()` keeps which cells and genes share a
+  hyperedge, `"woodbury"` keeps the factors of the influence matrix). They work like matrices: `dim`, `dimnames`, `x[i, j]` and
+  `as.matrix()`; call `library(HyperCom)` before `readRDS()` of `3.adj.rds` or `4.infMat.rds`.
+* The bundled databases: `cellchat.mm.lrdb` drops 3 interactions whose receptor has no mouse gene (never used);
+  `cellchat.hs.lrdb` fixes CXCL8_CXCR1 (it scored CXCL1) and CD99_PILRB (it had mouse symbols), so their results change.
+
+## New arguments
+
+* `memory.gb` in `HyperCom()`, the wrappers, `prioritize_lr()` and `score_hypercom()`: the gigabytes (10^9 bytes) a run may use. The
+  default is 90% of the computer's memory, or on Linux of a container's or cluster job's memory limit when that is smaller. On a
+  cluster, give the job's memory request.
+* `r` in `HyperCom()` and the wrappers: the restart probability of `generate_infMat()` (default 0.5, as before).
+* `infmat.method` in `HyperCom()` and the wrappers: `"woodbury"` (default), `"chol"` or `"lu"`.
+* `verbose` in `score_hypercom()`: reports the memory the scoring needs.
+* `HyperCom(outdir=NULL)` runs without writing files (and keeps no cache to resume from).
+
+## Fixes and checks
+
+Every fix and check of the main version up to 0.3.1 (see its [NEWS](https://github.com/pawelab/HyperCom/blob/master/NEWS.md)),
+among them:
+
+* Cells and genes that no path of the hypergraph connects to the rest are left out by `generate_hyperedges()`, with a warning; the
+  interactions of their genes are left out too.
+* Without gene rows in `metadata`, priorities counted one group too few.
+* `HyperCom()` reads counts held on disk or delayed (DelayedArray, HDF5) for the genes of the database only.
+* The interaction table is checked (column names, interaction names, empty entries) and cleaned; interactions without a ligand or a
+  receptor are left out with a warning.
+* `HyperCom()` stops before it writes a file on cells with a missing sample or group (or one named "gene"), on a run that cannot fit
+  in memory, and on `outdir` naming a file.
+* `significance`, `resume` and `verbose` must each be `TRUE` or `FALSE`; `threads` one number of at least 1.
+
 # HyperCom 0.0.1
 
 Bug fixes for the R-only version (base-R). On valid input every output is unchanged from 0.0.0.9000 (run under `LC_COLLATE=C`),

@@ -1,1 +1,1 @@
-utils::globalVariables(c("b", "cell", "hypercom"))
+utils::globalVariables("cell")

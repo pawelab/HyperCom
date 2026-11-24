@@ -51,10 +51,8 @@ test_that("full data: scores and priorities match handwritten", {
     expect_same_scores(scores[[n]], ref.scores[[n]])
   }
 
-  workers <- min(as.integer(Sys.getenv("HYPERCOM_TEST_WORKERS", "4")), parallelly::availableCores())
-  cl <- parallelly::makeClusterPSOCK(workers, autoStop=TRUE, rscript_envs=c(R_LIBS=paste(.libPaths(), collapse=.Platform$path.sep)))
-  withr::defer(parallel::stopCluster(cl))
-  priority <- run_priority(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, seed=1, parallel=TRUE, cl=cl)
+  workers <- as.integer(Sys.getenv("HYPERCOM_TEST_WORKERS", "4"))
+  priority <- run_priority(lrs, adj, ref.inf, md, weights=c(1, 0.5), significance=TRUE, seed=1, threads=test_threads(workers))
   ref.priority <- readRDS(ref_path("6.priority.rds"))
   for(w in names(ref.priority)){
     expect_same_priority(priority[[w]], ref.priority[[w]])

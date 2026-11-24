@@ -7,11 +7,13 @@
 filter_counts(counts, lrdb, outfile = "0.counts.rds")
 }
 \arguments{
-\item{counts}{A matrix with row names being genes and column names being cells}
+\item{counts}{A matrix (dense or sparse) with row names being genes and column names being cells: raw or normalized counts, not
+scaled data}
 
-\item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions, e.g. \code{cellchat.mm.lrdb}}
+\item{lrdb}{A data frame of ligand-receptor interactions where the first column names the interaction, the second column is named
+ligand, and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of
+ligand-receptor interactions, e.g. \code{cellchat.mm.lrdb}. Interactions without a ligand or a receptor are left out with a warning;
+interaction names must be distinct and differ from the gene names}
 
 \item{outfile}{A string naming the output file, or NULL to write none}
 }
@@ -25,8 +27,10 @@ sparse if counts is sparse
 \details{
 This function takes a gene x cell counts matrix and filters it to
 just ligand and receptor genes with greater than 0 expression. Missing (NA) counts are ignored.
-A gene name used by several rows keeps its first row, with a warning. Raw and normalised counts give the same results (HyperCom uses
+A gene name used by several rows keeps its first row, with a warning. Raw and normalized counts give the same results (HyperCom uses
 whether each gene is above 0 in each cell); counts with negative values (scaled data) and counts with genes as column names stop.
+Counts held another way than a base or Matrix matrix (e.g. a DelayedArray of HDF5-backed data) are read for the genes of lrdb
+only, into a sparse matrix.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)

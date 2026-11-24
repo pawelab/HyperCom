@@ -5,3 +5,5 @@
 ^LICENSE\.md$
 ^NEWS\.md$
 ^tests/testthat/fixtures/make_.*\.R$
+^AGENTS\.md$
+^\.git$

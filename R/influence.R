@@ -1,31 +1,36 @@
-# Pipeline step 4: the influence matrix (methods woodbury, lu, chol; woodbury kept as its factors, class hypercom_influence)
+# Pipeline step 4: the influence matrix (methods woodbury, lu, chol, in R/grids.R; woodbury kept as its factors, class
+# hypercom_influence)
 
 #' Calculate influence matrix of hypergraph
 #'
 #' `generate_infMat` returns the influence matrix of the hypergraph
 #'
-#' This function takes an adjacency matrix and returns its influence matrix by heat diffusion (a random walk with restart),
-#' r (I - (1 - r) adj / D)^-1 with D the row sums of adj. Three methods give the same matrix up to rounding (about 1e-15 relative,
-#' which can reorder exactly tied scores):
+#' This function takes an adjacency and returns its influence matrix by a random walk with restart: entry (i, j) is the share of a
+#' walk started at node i that ends at node j, so each row sums to 1. At every step the walk returns to its start with probability r.
+#' In matrix form it is r (I - (1 - r) adj / D)^-1, with D the row sums of adj. Three methods give the same matrix up to rounding
+#' (about 1e-15 relative, which can reorder exactly tied scores):
 #'
-#' - "woodbury" (the default) works through the hyperedges, so no node x node matrix is made: memory grows with the number of nodes
-#'   instead of its square. The result works like a matrix for dim, dimnames and rownames; `infMat[i, j]` gives those entries and
-#'   as.matrix the whole matrix. An adjacency from generate_adjacency_matrix holds its hyperedges; an adjacency matrix needs
-#'   `hyperedges`, and without them (and without a method given) gets "lu". Small data with at least as many hyperedges as nodes get
-#'   the dense matrix of "chol", which is then no bigger.
-#' - "lu" makes the dense matrix with exactly the numbers of HyperCom 0.0.0.9000; it holds four node x node matrices at once.
-#' - "chol" makes the dense matrix faster, with three node x node matrices at once.
+#' - "woodbury" (the default) works through the hyperedges and keeps the matrix as its factors (a hypercom_influence), so its memory
+#'   grows with the number of nodes instead of its square. Data with at least as many hyperedges (of two or more nodes) as nodes get
+#'   the dense matrix of "chol" instead, which is then no bigger: that is, data with no more cells than interactions of two or more
+#'   distinct genes, all expressed (the bundled 1,000 cells stay factored: 1,661 hyperedges, 1,663 nodes). An adjacency from
+#'   generate_adjacency_matrix holds its hyperedges; a plain adjacency matrix needs `hyperedges`.
+#' - "lu" makes the dense matrix with exactly the numbers of the original release, HyperCom 0.0.0.9000; it holds two node x node
+#'   matrices at once.
+#' - "chol" makes the dense matrix faster, with one node x node matrix.
 #'
-#' All methods stop when the matrix cannot be inverted (r near 0).
+#' A hypercom_influence works like a matrix: dim, dimnames, `infMat[i, j]` and as.matrix (the whole matrix; see
+#' `hypercom_influence`). All methods stop when r is not in (0, 1] or the matrix cannot be inverted.
 #' @param adj An adjacency from generate_adjacency_matrix, or a named adjacency matrix
-#' @param r A double between 0 and 1 representing the restart probability
-#' @param method A string naming the method: "woodbury" (the default; "lu" for an adjacency matrix given without hyperedges), "lu"
-#' or "chol"
-#' @param hyperedges A dataframe of the hyperedges an adjacency matrix was made from, needed by method "woodbury" with an adjacency
+#' @param r A number greater than 0 and at most 1, the restart probability of the random walk (0.5 by default): about r of each
+#' node's influence stays on itself and the rest spreads over the nodes it shares hyperedges with
+#' @param method A string naming the method, "woodbury", "lu" or "chol", or NULL (the default) for "woodbury" when the hyperedges are
+#' known (adj from generate_adjacency_matrix, or hyperedges given) and "lu" otherwise
+#' @param hyperedges A data frame of the hyperedges a plain adjacency matrix was made from, needed by method "woodbury" with such a
 #' matrix; ignored with an adjacency from generate_adjacency_matrix, which holds its own
 #' @inheritParams filter_counts
-#' @returns An influence matrix with node names: a hypercom_influence (method "woodbury", unless there are at least as many hyperedges
-#' as nodes) or a dense matrix
+#' @returns An influence matrix with node names: a hypercom_influence (method "woodbury", except on small data, see Details) or a
+#' dense matrix
 #' @examples
 #' counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
 #' lrs <- generate_lrs_table(counts, cellchat.mm.lrdb, outfile=NULL)
@@ -35,13 +40,10 @@
 #' infMat
 #' infMat[c("Thbs1", "Sdc4"), 1:3]
 #' @export
-generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbury", "lu", "chol"), hyperedges=NULL){
-  # woodbury: adj = H H' with a zero diagonal (H the node x hyperedge incidence), so the Woodbury identity inverts it through a
-  # hyperedge x hyperedge matrix and the result stays factored (influence_factors). lu: the arithmetic and solve() of HyperCom
-  # 0.0.0.9000, bit for bit. chol: chol() and chol2inv() of a symmetric matrix similar to I - W.
+generate_infMat <- function(adj, r=0.5, method=NULL, hyperedges=NULL, outfile="4.infMat.rds"){
   graph <- inherits(adj, "hypercom_adjacency")
-  if(missing(method) && !graph && is.null(hyperedges)){
-    method <- "lu"
+  if(is.null(method)){
+    method <- if(graph || !is.null(hyperedges)) "woodbury" else "lu"
   }
   method <- match_method(method)
   if(is.data.frame(adj)){
@@ -63,10 +65,8 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbu
       adj <- methods::as(methods::as(methods::as(adj, "CsparseMatrix"), "generalMatrix"), "dMatrix")
     }
   }
+  check_restart(r)
   if(method != "lu"){
-    if(!(is.numeric(r) && length(r) == 1 && isTRUE(r > 0 & r <= 1))){
-      stop("r must be one number in (0, 1] for method \"", method, "\"")
-    }
     if(!all(is.finite(rs))){
       stop("method \"", method, "\" needs finite adjacency weights")
     }
@@ -79,7 +79,7 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbu
   }
 
   if(method == "lu"){
-    infMat <- solve_influence_lu(adj, rs, r)
+    infMat <- solve_influence(adj, rs, r)
   } else if(method == "chol"){
     infMat <- solve_influence_chol(adj, rs, r)
   } else {
@@ -105,28 +105,105 @@ generate_infMat <- function(adj, r=0.5, outfile="4.infMat.rds", method=c("woodbu
   return(infMat)
 }
 
+#' Check the restart probability
+#'
+#' `check_restart` stops unless r is one number in (0, 1]
+#' @param r The r argument of generate_infMat or HyperCom
+#' @returns NULL, invisibly
+#' @noRd
+check_restart <- function(r){
+  if(!(is.numeric(r) && length(r) == 1 && isTRUE(r > 0 && r <= 1))){
+    stop("r must be one number in (0, 1]")
+  }
+
+  return(invisible(NULL))
+}
+
 #' Match the name of an influence matrix method
 #'
 #' `match_method` returns the full name of an influence matrix method
 #'
 #' This function takes a method name as generate_infMat's method argument and returns it matched to "woodbury", "lu" or "chol"
 #' (a unique abbreviation is completed; any other name stops).
-#' @param method A string naming the method, or the vector of all three for the first
+#' @param method A string naming the method
 #' @returns A string naming the method
 #' @noRd
 match_method <- function(method){
   return(match.arg(method, c("woodbury", "lu", "chol")))
 }
 
+#' Factor the influence matrix through the hyperedges
+#'
+#' `influence_factors` returns the influence matrix of a hypergraph as a hypercom_influence
+#'
+#' This function takes the node x hyperedge incidence, the row sums of the adjacency and the restart probability and returns the
+#' factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z (Y = H / Delta, Z = C^-1 Y' D): H, the row sums D, Delta and the
+#' hyperedge x node matrix Z.
+#' @param H A sparse node x hyperedge matrix of counts with node and hyperedge names
+#' @param rs A numeric vector of the row sums of the adjacency
+#' @param r A double between 0 and 1 representing the restart probability
+#' @returns A hypercom_influence: a list with H, rs, delta, Z and r
+#' @noRd
+influence_factors <- function(H, rs, r){
+  rs <- as.numeric(rs)
+  f <- influence_factors_r(H, rs, r)
+  Z <- f$Z
+  dimnames(Z) <- list(edge=colnames(H), node=rownames(H))
+  infMat <- list(H=H, rs=rs, delta=f$delta, Z=Z, r=r)
+  class(infMat) <- "hypercom_influence"
+
+  return(infMat)
+}
+
+#' Make a block of a factored influence matrix
+#'
+#' `influence_slice` returns the entries of a hypercom_influence at given rows and columns
+#'
+#' This function takes a hypercom_influence and positions of rows and columns and returns those entries as a dense matrix:
+#' r (1 - r) Y[rows, ] Z[, cols], plus r rs / Delta where a row and a column are the same node.
+#' @param infMat A hypercom_influence
+#' @param rows An integer vector of row positions
+#' @param cols An integer vector of column positions
+#' @returns A dense matrix without names
+#' @noRd
+influence_slice <- function(infMat, rows, cols){
+  rows <- as.integer(rows)
+  cols <- as.integer(cols)
+  r <- infMat$r
+  Y <- infMat$H[rows, , drop=FALSE] / infMat$delta[rows]
+  block <- Y %*% infMat$Z[, cols, drop=FALSE]
+  block <- (r * (1 - r)) * methods::as(block, "matrix")
+  dimnames(block) <- NULL
+
+  if(anyDuplicated(cols) == 0){
+    same <- match(rows, cols)
+    hit <- which(!is.na(same))
+    at <- cbind(hit, same[hit])
+    block[at] <- block[at] + r * infMat$rs[rows[hit]] / infMat$delta[rows[hit]]
+  } else {
+    for(a in which(rows %in% cols)){
+      b <- which(cols == rows[a])
+      block[a, b] <- block[a, b] + r * infMat$rs[rows[a]] / infMat$delta[rows[a]]
+    }
+  }
+
+  return(block)
+}
+
 #' Influence matrix of a hypergraph, stored as its factors
 #'
 #' `hypercom_influence` objects are made by generate_infMat with method "woodbury"
 #'
-#' A hypercom_influence keeps the factors of the influence matrix F = r Delta^-1 D + r (1 - r) Y Z of a hypergraph (H, the node x
-#' hyperedge incidence; rs, the row sums D of the adjacency; delta, Delta = D + (1 - r) diag(H H'); Z, hyperedge x node; Y = H /
-#' Delta) instead of F. dim and dimnames give those of F, `infMat[i, j]` makes the indexed entries as a dense matrix (indices as for a
-#' matrix: names, positions or logical; factors are read by name, not by their codes) and as.matrix the whole dense
-#' matrix (nodes squared doubles).
+#' A hypercom_influence is an influence matrix kept as smaller pieces from which any entry can be computed, so the whole node x node
+#' matrix is never stored. It works like a matrix:
+#'
+#' - dim and dimnames give the number and the names of the nodes (cells and genes);
+#' - `infMat[i, j]` computes the indexed entries as a dense matrix (indices as for a matrix: names, positions or logical; factors are
+#'   read by name, not by their codes);
+#' - as.matrix computes the whole dense matrix, 8 bytes times the number of nodes squared: slice instead on large data.
+#'
+#' For the record, the pieces are the factors of F = r Delta^-1 D + r (1 - r) Y Z: H (the node x hyperedge incidence), rs (the row sums
+#' D of the adjacency), delta (Delta = D + (1 - r) diag(H H')), Z (hyperedge x node) and Y = H / Delta.
 #' @param x A hypercom_influence
 #' @param i,j Indices of rows and columns
 #' @param drop A boolean of whether to drop dimensions of extent one
@@ -145,47 +222,38 @@ match_method <- function(method){
 NULL
 
 #' @rdname hypercom_influence
-#' @export
+#' @exportS3Method dim hypercom_influence
 dim.hypercom_influence <- function(x){
-  return(rep(nrow(x$H), 2L))
+  return(node_dim(x))
 }
 
 #' @rdname hypercom_influence
-#' @export
+#' @exportS3Method dimnames hypercom_influence
 dimnames.hypercom_influence <- function(x){
-  return(list(rownames(x$H), rownames(x$H)))
+  return(node_dimnames(x))
 }
 
 #' @rdname hypercom_influence
 #' @export
 `[.hypercom_influence` <- function(x, i, j, drop=TRUE){
-  narg <- nargs() - !missing(drop)
-  if(narg < 3){
-    stop("index an influence matrix as infMat[i, j]")
-  }
-  nodes <- rownames(x$H)
-  rows <- if(missing(i)) seq_along(nodes) else node_index(i, nodes)
-  cols <- if(missing(j)) seq_along(nodes) else node_index(j, nodes)
-  block <- influence_slice(x, rows, cols)
-  dimnames(block) <- list(nodes[rows], nodes[cols])
-  if(drop && any(dim(block) == 1)){
-    block <- block[, , drop=TRUE]
-  }
+  idx <- block_index(rownames(x$H), i, j, nargs() - !missing(drop), "an influence matrix as infMat[i, j]")
 
-  return(block)
+  return(name_block(influence_slice(x, idx$rows, idx$cols), idx, drop))
 }
 
 #' @rdname hypercom_influence
+#' @method as.matrix hypercom_influence
 #' @export
 as.matrix.hypercom_influence <- function(x, ...){
   nodes <- rownames(x$H)
   block <- influence_slice(x, seq_along(nodes), seq_along(nodes))
-  dimnames(block) <- list(nodes, nodes)
+  dimnames(block) <- node_dimnames(x)
 
   return(block)
 }
 
 #' @rdname hypercom_influence
+#' @method print hypercom_influence
 #' @export
 print.hypercom_influence <- function(x, ...){
   cat("HyperCom influence matrix of ", nrow(x$H), " nodes (r = ", x$r, "), stored as its factors through ", ncol(x$H), " hyperedges\n",

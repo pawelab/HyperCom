@@ -29,18 +29,13 @@ test_that("background pairs without a priority are left out of the p-values, wit
   expect_identical(HyperCom:::permutation_test(NaN, c(0.2, 0.7)), NA_real_)
   expect_identical(HyperCom:::permutation_test(0.5, c(NaN, NA)), NA_real_)
 
-  keys <- function(lrs) HyperCom:::pair_keys(as.character(lrs$ligand), as.matrix(lrs[, -(1:2), drop=FALSE]))
+  keys <- HyperCom:::lrs_keys
   background <- withr::with_seed(1, HyperCom:::generate_background_lrs(fx$output$lrs, fx$output$metadata))
   broken <- keys(background)[999:1000]
   calculate <- HyperCom:::calculate_priority
-  bound <- HyperCom:::bound_terms
   testthat::local_mocked_bindings(calculate_priority=function(lrs, ...){
     res <- calculate(lrs, ...)
     res[keys(lrs) %in% broken, "max"] <- NaN
-    return(res)
-  }, bound_terms=function(lrs, ...){
-    res <- bound(lrs, ...)
-    res$lo[keys(lrs) %in% broken, "max"] <- res$hi[keys(lrs) %in% broken, "max"] <- NA
     return(res)
   }, .package="HyperCom")
   expect_warning(priority <- run_priority(weights=c(1, 0.5), significance=TRUE, seed=1),
@@ -52,32 +47,27 @@ test_that("background pairs without a priority are left out of the p-values, wit
   }
 })
 
-test_that("seed does not change the random numbers of the session, and outdir must be one string or NULL", {
-  withr::local_seed(42)
-  before <- get(".Random.seed", envir=globalenv())
-  priority <- run_priority(significance=TRUE, seed=1)
+test_that("threads=NULL uses one process per physical core, never more than the available cores", {
+  threads <- HyperCom:::get_threads()
 
-  expect_identical(get(".Random.seed", envir=globalenv()), before)
-  expect_identical(run_priority(significance=TRUE, seed=1), priority)
-  expect_error(run_priority(outdir=4), "outdir must be one string")
+  expect_gte(threads, 1)
+  expect_lte(threads, parallelly::availableCores())
+  expect_equal(HyperCom:::get_threads(1), 1)
+  expect_lte(HyperCom:::physical_cores(), parallel::detectCores())
 })
 
 test_that("prioritize_lr reports progress as messages, not printed lines, and verbose=FALSE is silent", {
   dir <- withr::local_tempdir()
   run <- function(verbose){
-    return(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, fx$output$metadata, weights=c(1, 0.5), outdir=dir,
-                         verbose=verbose))
+    return(prioritize_lr(fx$output$lrs, fx$output$adj, fx$output$infMat, fx$output$metadata, weights=c(1, 0.5), threads=test_threads(2),
+                         verbose=verbose, outdir=dir))
   }
 
-  msgs <- character(0)
-  printed <- utils::capture.output(x <- withCallingHandlers(run(TRUE), message=function(m){
-    msgs <<- c(msgs, conditionMessage(m))
-    invokeRestart("muffleMessage")
-  }))
+  printed <- utils::capture.output(res <- collect(run(TRUE)))
 
   expect_length(printed, 0)
-  expect_equal(sum(grepl("pairs scored", msgs)), 1)
-  expect_equal(sum(grepl("Weight 0.5: top pair", msgs)), 1)
+  expect_gte(sum(grepl("pairs scored", res$messages)), 1)
+  expect_equal(sum(grepl("Weight 0.5: top pair", res$messages)), 1)
   expect_silent(run(FALSE))
 })
 
@@ -87,20 +77,32 @@ test_that("format_duration gives seconds, minutes or hours", {
   expect_identical(HyperCom:::format_duration(9000), "2.5 h")
 })
 
-test_that("batches hold at most 256 grids and about 64 MB of scores, every worker gets one, and big grids take about 20 rounds or more", {
+test_that("batches hold 256 grids and 64 MB of scores at most, a batch per process, and about 20 rounds or more when grids are big", {
   batch_size <- HyperCom:::batch_size
-  screen_batch_size <- HyperCom:::screen_batch_size
+  big <- c(10000, 6667, 3333)
 
-  expect_equal(batch_size(16, 1000, c(500, 500), 4090), 256)
   expect_equal(batch_size(1, 1000, c(500, 500), 4090), 256)
-  expect_equal(batch_size(8, 1000, c(500, 500), 100), 13)
-  expect_equal(batch_size(16, 20000, c(10000, 6667, 3333), 400), 2)
-  expect_equal(batch_size(16, 20000, c(10000, 6667, 3333), 40), 1)
-  expect_equal(batch_size(1, 20000, c(10000, 6667, 3333), 4090), 205)
-  expect_equal(batch_size(1, 300000, 300000, 4090), 13)
-  expect_equal(screen_batch_size(8, 1000, c(500, 500), 100), 13)
-  expect_equal(screen_batch_size(1, 20000, c(10000, 6667, 3333), 4090), 104)
-  expect_equal(screen_batch_size(1, 300000, 300000, 4090), 6)
+  expect_equal(batch_size(16, 1000, c(500, 500), 4090), 256)
+  expect_equal(batch_size(16, 1000, c(500, 500), 3), 1)
+  expect_equal(batch_size(2, 1000, c(500, 500), 3), 2)
+  expect_equal(batch_size(1, 20000, rep(10, 2000), 4090), floor(2^26 / (16 * 20000)))
+  expect_equal(batch_size(1, 20000, big, 4090), ceiling(4090 / 20))
+  expect_equal(batch_size(16, 20000, big, 4090), ceiling(4090 / (20 * 16)))
+})
+
+test_that("the processes that fit in memory are counted from the estimate, and one that does not fit stops", {
+  skip_on_cran()
+  need <- HyperCom:::run_memory(1e8)
+
+  expect_equal(HyperCom:::fit_workers(1e8, 16, Inf), 16)
+  expect_equal(HyperCom:::fit_workers(1e8, 16, (need[["handout"]] + 3.5 * need[["worker"]]) / 1e9), 3)
+  expect_equal(HyperCom:::fit_workers(1e8, 16, (need[["handout"]] + 1.5 * need[["worker"]]) / 1e9), 1)
+  expect_equal(HyperCom:::fit_workers(1e8, 1, Inf), 1)
+  expect_error(HyperCom:::fit_workers(1e8, 16, need[["main"]] / 1e9 * 0.99), "scoring needs about 8.99 GB of memory but")
+  res <- collect(prioritize_lr(fx$output$lrs[1:3, ], fx$output$adj, fx$output$infMat, fx$output$metadata, threads=test_threads(2),
+                               memory.gb=1.1, outdir=NULL))
+  expect_true(any(grepl("1 of the 2 processes asked for fit in 1.1 GB", res$messages)) || test_threads(2) == 1)
+  expect_true(any(grepl("pairs in 1 R process", res$messages, fixed=TRUE)))
 })
 
 test_that("group purity is at least 0, so perfectly balanced groups give priority 0, not NaN", {

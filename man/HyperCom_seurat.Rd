@@ -2,7 +2,7 @@
 % Please edit documentation in R/pipeline.R
 \name{HyperCom_seurat}
 \alias{HyperCom_seurat}
-\title{Run the HyperCom pipeline on a seurat object}
+\title{Run the HyperCom pipeline on a Seurat object}
 \usage{
 HyperCom_seurat(
   seurat,
@@ -12,70 +12,71 @@ HyperCom_seurat(
   layer = "counts",
   group = NULL,
   keep = NULL,
-  weights = c(1),
-  significance = FALSE,
-  parallel = FALSE,
-  cl = NULL,
-  outdir = "HyperCom",
-  seed = NULL,
-  verbose = TRUE,
-  infmat.method = "woodbury",
-  cache = TRUE
+  ...
 )
 }
 \arguments{
 \item{seurat}{A Seurat object}
 
-\item{lrdb}{A dataframe of ligand-receptor interactions where the first column names the interaction, the second column is named ligand,
-and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of ligand-receptor
-interactions, e.g. \code{cellchat.mm.lrdb}}
+\item{lrdb}{A data frame of ligand-receptor interactions where the first column names the interaction, the second column is named
+ligand, and subsequent columns are named r1, ..., rn where n is the maximum number of genes in a receptor complex in the list of
+ligand-receptor interactions, e.g. \code{cellchat.mm.lrdb}. Interactions without a ligand or a receptor are left out with a warning;
+interaction names must be distinct and differ from the gene names}
 
-\item{sample}{A string that is the column name for sample in the cell metadata of the Seurat object}
+\item{sample}{A string that is the column name for sample (library or replicate) in the cell metadata of the Seurat object; cells
+are compared only within their sample}
 
-\item{assay}{A string naming the assay to read counts from}
+\item{assay}{A string naming the assay to read counts from, "RNA" by default}
 
-\item{layer}{A string naming the layer of the assay to read counts from}
+\item{layer}{A string naming the layer of the assay to read counts from: "counts" (the default) or "data", not the scaled
+"scale.data"}
 
-\item{group}{A string that is the column name for group in the cell metadata of the Seurat object}
+\item{group}{A string that is the column name for group (e.g. condition) in the cell metadata of the Seurat object, or NULL (the
+default) for one group; groups feed the purity term of the priority (see \code{prioritize_lr})}
 
-\item{keep}{A vector of strings that are additional column names to keep from the cell metadata of the Seurat object}
+\item{keep}{A vector of strings that are additional column names to keep from the cell metadata of the Seurat object, or NULL}
 
-\item{weights}{A vector of weights of at least 0, one result each, for the fraction of cells expressing a pair's genes in the priority
-score: 1 weighs it like the other four terms, less than 1 favors pairs of fewer cells, 0 leaves it out}
-
-\item{significance}{A boolean of whether to generate p-values for ligand-receptor interactions}
-
-\item{parallel}{A boolean of whether to run in parallel on the cluster cl}
-
-\item{cl}{A cluster object, which is left running. Default if parallel: inside an SGE parallel job (PE_HOSTFILE set)
-\code{parallelly::makeClusterPSOCK(parallelly::availableWorkers(), rshcmd = "qrsh", rshopts = c("-inherit", "-nostdin", "-V"), outfile = "")},
-elsewhere \code{parallelly::makeClusterPSOCK(parallelly::availableCores(), outfile = "")}; it is stopped at the end. Each worker holds
-the influence matrix and the within-sample blocks of the batch it scores (8 bytes per within-sample cell pair)}
-
-\item{outdir}{A string naming the output directory of the pipeline run}
-
-\item{seed}{An integer seed for the background interactions of the p-values, NULL to use the current random state; the session's
-random state is restored afterwards}
-
-\item{verbose}{A boolean of whether to report progress as messages: what each step found, the pairs scored and the top pair of
-each weight}
-
-\item{infmat.method}{A string naming the method of \code{generate_infMat}: "woodbury" (the default; fastest and least memory), "chol" or
-"lu" (a full matrix of all cells and genes; "lu" gives exactly the numbers of HyperCom 0.0.0.9000). The methods agree to about 1e-15}
-
-\item{cache}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/cache}, so that a stopped run continues where it
-stopped when run again; ignored when outdir is NULL}
+\item{...}{
+  Arguments passed on to \code{\link[=HyperCom]{HyperCom}}
+  \describe{
+    \item{\code{infmat.method}}{A string naming the method of \code{generate_infMat}: "woodbury" (the default: fastest, least memory), "chol" or
+"lu" (a dense matrix of all cells and genes squared). The methods agree to about 1e-15}
+    \item{\code{resume}}{A boolean of whether to keep the pairs scored so far in \verb{<outdir>/6.priority/cache}, so that a stopped run continues
+where it stopped when the same call is run again; TRUE by default, ignored when outdir is NULL}
+    \item{\code{verbose}}{A boolean of whether to report progress as messages: what each step found, the memory needed, the pairs scored with
+the time left, and the top pair of each weight}
+    \item{\code{outdir}}{A string naming the output directory of the run ("HyperCom" in the working directory by default), or NULL to write
+no files (and keep no cache to resume from)}
+    \item{\code{weights}}{A vector of numbers of at least 0, one result table each: the weight of frac, the fraction of cells expressing a
+pair's genes, in the priority score. 1 (the default) weighs it like the other four terms, less than 1 favors pairs of fewer cells,
+0 leaves it out}
+    \item{\code{significance}}{A boolean of whether to add p-values (columns p and p.adj) from 1000 background pairs; FALSE by default}
+    \item{\code{seed}}{An integer seed for drawing the background pairs, so that p-values are reproducible, or NULL (the default) to use the
+session's random numbers; the session's random state is restored afterwards. Ignored without significance}
+    \item{\code{threads}}{An integer number of R processes that score grids, NULL (the default) for one per physical core, or 1 to score in
+this R session alone; a number above the cores available to R warns and uses them all. Fewer are used, with a message, when they
+would not fit in memory.gb (see Memory and processes). Worker processes run at a lower priority than other programs, so the
+computer stays responsive while HyperCom uses all cores. A cluster job or container gets only its allocated cores, and
+\code{options(mc.cores=4)} (or the environment variable MC_CORES) caps the default. Results do not depend on it}
+    \item{\code{memory.gb}}{A number of gigabytes (10^9 bytes) the run may use, NULL (the default) for 90\% of the computer's memory (on Linux,
+of a container's or cluster job's memory limit when that is smaller), or Inf for no limit. It caps the number of processes and
+stops a run that cannot fit (see Memory and processes). On a cluster give the job's memory request, as the computer's memory may
+be more than the job may use}
+    \item{\code{r}}{A number greater than 0 and at most 1, the restart probability of the random walk (0.5 by default): about r of each
+node's influence stays on itself and the rest spreads over the nodes it shares hyperedges with}
+  }}
 }
 \value{
-Invisibly, a list of the results also written to outdir: priority (from prioritize_lr, one dataframe per weight), metadata
-(from generate_metadata), infMat (the influence matrix), adj (the adjacency) and lrs (the interactions with all genes expressed)
+Invisibly, the list of \code{HyperCom}: priority (the ranked pairs, one data frame per weight), metadata, infMat, adj and lrs,
+also written to outdir
 }
 \description{
-\code{HyperCom_seurat} runs the HyperCom pipeline on a Seurat object
+\code{HyperCom_seurat} returns the results of \code{HyperCom} on a Seurat object
 }
 \details{
-This function runs \code{HyperCom} on one assay layer and the cell metadata of a Seurat object (v5 or older assays). Needs the
-SeuratObject package.
+This function takes a Seurat object (v5 or older assays) and runs \code{HyperCom} on one layer of one assay (raw counts by default)
+and on the cell metadata (\code{seurat[[]]}). Every other argument is passed on to \code{HyperCom}; a misspelled one stops with "unused
+argument". Needs the SeuratObject package.
 }
 \examples{
 \dontshow{if (requireNamespace("SeuratObject", quietly=TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}

@@ -9,22 +9,29 @@ generate_hyperedges(counts, lrs, outfile = "2.hyperedges.csv")
 \arguments{
 \item{counts}{A filtered matrix with row names being cells and column names being genes, from filter_counts}
 
-\item{lrs}{A dataframe of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
+\item{lrs}{A data frame of ligand-receptor interactions from generate_lrs_table, in the format of lrdb with only interactions present
 in the counts matrix}
 
 \item{outfile}{A string naming the output file, or NULL to write none}
 }
 \value{
-A dataframe with one row per node of each hyperedge: columns edge (the hyperedge, an interaction or a gene), node (a gene or
+A tibble (a data frame) with one row per node of each hyperedge: columns edge (the hyperedge, an interaction or a gene), node (a gene or
 cell in it) and weight (1)
 }
 \description{
-\code{generate_hyperedges} returns a dataframe of hyperedges
+\code{generate_hyperedges} returns a data frame of hyperedges
 }
 \details{
 This function takes a filtered cell x gene counts matrix and table of ligand-receptor interactions to produce
-a table of hyperedges: one per ligand-receptor interaction (its genes) and one per gene (the gene and the cells that express it).
-Cells are nodes named by the row names of counts, so they must be unique (prefix barcodes with their sample when merging samples).
+a table of hyperedges (a hyperedge links any number of nodes): one per ligand-receptor interaction (its genes) and one per gene
+(the gene and the cells that express it). Cells are nodes named by the row names of counts, so they must be unique (prefix
+barcodes with their sample when merging samples).
+
+Only the largest connected part of the hypergraph is kept. Cells and genes that no chain of shared hyperedges joins to it (e.g. the
+genes of an interaction that shares no gene with any other, and cells that express only those genes) would have no influence on
+the other cells. They are
+left out, with a warning that counts them ("... cells and ... genes are not connected to the rest of the hypergraph and are left
+out"); a few such cells are normal and need no action.
 }
 \examples{
 counts <- filter_counts(alexanian2021.counts, cellchat.mm.lrdb, outfile=NULL)
