@@ -82,7 +82,7 @@ pak::pak("pawelab/HyperCom@base-R")
 2. **`sample`** names the metadata column that holds the sample (library or replicate). Cells are compared only within their sample.
    One sample? Add `metadata$sample <- "all"`. **`group`** (optional) names the condition column: pairs whose cells concentrate in
    some conditions rank higher. There is one ranking for the whole dataset, not one per condition.
-3. **Counts are raw or normalized, not scaled.**
+3. **No negative expression values:** raw or normalized counts are fine; scaled data is not.
 4. **Cell names are unique.** When you merge samples, add the sample name to each barcode.
 
 Then pick the line that matches your data:
