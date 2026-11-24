@@ -72,8 +72,8 @@ Most failed runs come from the input.
   memory, memory mode up to about 100,000 cells in 64 GB, much faster).
 - More samples of the same total size are cheap. Do not split a sample only to save memory without asking the user: it changes which
   cells are compared, and so the results.
-- Measured, one sample, 8 processes (Intel Core i9-12900K), the bundled mouse database (about 1,000 pairs expressed), with
-  p-values: 1,000 cells 1.7 min and 3.3 GB; 3,000 cells 18 min and 7.9 GB. 10,000 cells: about 3.5 h and 70 GB (estimate).
+- Measured, one sample (Intel Core i9-12900K), the bundled mouse database (about 1,000 pairs expressed), with
+  p-values: 1,000 cells 1.7 min and 3.3 GB, 3,000 cells 18 min and 7.9 GB (8 processes); 10,000 cells 3.1 h and 32 GB (4 processes, the default).
   Time also grows with the number of pairs. Past about 4 processes runs gain little (memory-bound).
 - With `significance=TRUE`, 1,000 background pairs are scored too. Every pair is scored exactly.
 

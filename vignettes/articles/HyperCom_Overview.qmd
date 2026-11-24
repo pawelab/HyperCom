@@ -203,15 +203,15 @@ head(Tgfb1_Tgfbr[, c("cell", "sender", "receiver", "hypercom")])
 
 ### Run time and memory
 Time and memory depend on the number of cells **per sample** (they grow with its square), so more samples of the same size cost
-little. One sample, with p-values, on 8 cores:
+little. One sample, with p-values:
 
-| Cells in the sample | Time | Peak memory |
-|---|---|---|
-| 1,000 | 1.7 min | 3.3 GB |
-| 3,000 | 18 min | 7.9 GB |
-| 10,000 | about 3.5 h (estimate) | about 70 GB (estimate; fewer processes on less memory, so longer) |
+| Cells in the sample | Time | Peak memory | R processes |
+|---|---|---|---|
+| 1,000 | 1.7 min | 3.3 GB | 8 |
+| 3,000 | 18 min | 7.9 GB | 8 |
+| 10,000 | 3.1 h | 32 GB | 4 (default) |
 
-Measured with `HyperCom()` on one sample of cells resampled from the bundled mouse heart data (counts thinned to 80%), with the bundled mouse database (about 1,000 pairs expressed), `significance=TRUE` and 8 R processes, on a desktop (Intel Core i9-12900K, 128 GB). Memory is the peak of all processes together. The 10,000-cell row is estimated from the time and memory per pair of cells. GB = 10^9^ bytes.
+Measured with `HyperCom()` on one sample of cells resampled from the bundled mouse heart data (counts thinned to 80%), with the bundled mouse database (about 1,000 pairs expressed), `significance=TRUE`, one run each, on a desktop (Intel Core i9-12900K, 128 GB). Memory is the peak of all processes together. GB = 10^9^ bytes.
 
 - **Pairs:** time also grows with the number of ligand-receptor pairs expressed.
 - **More than about 10,000 cells per sample:** use the compiled version on branch `master`. It gives the same results, takes

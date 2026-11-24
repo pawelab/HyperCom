@@ -2558,18 +2558,14 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <h2 class="anchored" data-anchor-id="large-data">5. Large data</h2>
 <section id="run-time-and-memory" class="level3">
 <h3 class="anchored" data-anchor-id="run-time-and-memory">Run time and memory</h3>
-<p>Time and memory depend on the number of cells <strong>per sample</strong> (they grow with its square), so more samples of the same size cost little. One sample, with p-values, on 8 cores:</p>
+<p>Time and memory depend on the number of cells <strong>per sample</strong> (they grow with its square), so more samples of the same size cost little. One sample, with p-values:</p>
 <table class="caption-top table">
-<colgroup>
-<col style="width: 33%">
-<col style="width: 33%">
-<col style="width: 33%">
-</colgroup>
 <thead>
 <tr class="header">
 <th>Cells in the sample</th>
 <th>Time</th>
 <th>Peak memory</th>
+<th>R processes</th>
 </tr>
 </thead>
 <tbody>
@@ -2577,20 +2573,23 @@ ACACCGGAGCTACCGC-2      2      SHAM Endothelial  3.9700553  -8.899605</code></pr
 <td>1,000</td>
 <td>1.7 min</td>
 <td>3.3 GB</td>
+<td>8</td>
 </tr>
 <tr class="even">
 <td>3,000</td>
 <td>18 min</td>
 <td>7.9 GB</td>
+<td>8</td>
 </tr>
 <tr class="odd">
 <td>10,000</td>
-<td>about 3.5 h (estimate)</td>
-<td>about 70 GB (estimate; fewer processes on less memory, so longer)</td>
+<td>3.1 h</td>
+<td>32 GB</td>
+<td>4 (default)</td>
 </tr>
 </tbody>
 </table>
-<p>Measured with <code>HyperCom()</code> on one sample of cells resampled from the bundled mouse heart data (counts thinned to 80%), with the bundled mouse database (about 1,000 pairs expressed), <code>significance=TRUE</code> and 8 R processes, on a desktop (Intel Core i9-12900K, 128 GB). Memory is the peak of all processes together. The 10,000-cell row is estimated from the time and memory per pair of cells. GB = 10<sup>9</sup> bytes.</p>
+<p>Measured with <code>HyperCom()</code> on one sample of cells resampled from the bundled mouse heart data (counts thinned to 80%), with the bundled mouse database (about 1,000 pairs expressed), <code>significance=TRUE</code>, one run each, on a desktop (Intel Core i9-12900K, 128 GB). Memory is the peak of all processes together. GB = 10<sup>9</sup> bytes.</p>
 <ul>
 <li><strong>Pairs:</strong> time also grows with the number of ligand-receptor pairs expressed.</li>
 <li><strong>More than about 10,000 cells per sample:</strong> use the compiled version on branch <code>master</code>. It gives the same results, takes seconds for this tutorial and fits about 100,000 cells in one sample in 64 GB.</li>
