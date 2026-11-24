@@ -54,21 +54,20 @@ GitHub (`pak::pak("pawelab/HyperCom")`) also builds from source.
 <details>
 <summary><b>Pure R version (no build tools)</b></summary>
 
-Branch [`base-R`](https://github.com/pawelab/HyperCom/tree/base-R) (HyperCom 0.0.1) is the paper's original R code (branch
-[`handwritten`](https://github.com/pawelab/HyperCom/tree/handwritten)) with the same bug fixes as this version. It installs from
-CRAN packages only, so Windows and macOS need no build tools:
+Branch [`base-R`](https://github.com/pawelab/HyperCom/tree/base-R) (HyperCom 0.3.1.1) is this version written in R only: the same
+functions, arguments and checks. It installs from CRAN packages only, so it needs no build tools on any system:
 
 ```r
 pak::pak("pawelab/HyperCom@base-R")
 ```
 
-- **Much slower:** about 8 minutes for the bundled data on 12 cores, instead of seconds.
-- **Much more memory:** it runs out of memory at about 20,000 cells.
-- **Same results** as this version, to about 1e-15 without p-values. With p-values, this version screens the real pairs:
-  priorities typically within ~1e-9 of exact, up to ~1e-7 on the bundled data (1.5e-8 measured on the full bundled run); p-values
-  and order exact; `exact.priority=TRUE` for exact values.
-- **Uses `cl` instead of `threads`** for parallel runs. On machines with many cores, pass a small cluster, e.g.
-  `cl=parallelly::makeClusterPSOCK(8)`.
+- **Slower:** about a minute for the bundled data with p-values, instead of seconds; 18 minutes for one sample of 3,000 cells.
+- **More memory:** about 79 bytes per pair of cells in the same sample for each of its R processes, instead of 17.6; practical up
+  to about 10,000 cells per sample. It has no memory mode.
+- **Same results**, to about 1e-15 (bit for bit with the paper's code under `infmat.method="lu"`). It scores every pair exactly,
+  so it has no `exact.priority`; with p-values this version's screened priorities differ from it by typically ~1e-9, up to ~1e-7
+  on the bundled data (p-values and order are the same).
+- **`threads` counts R processes**, at most 4 by default; `generate_infMat()` and `score_hypercom()` take no `threads`.
 - **It replaces this version:** both are the package `HyperCom`, so installing one removes the other.
 
 </details>
