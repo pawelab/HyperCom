@@ -64,7 +64,7 @@ pak::pak("pawelab/HyperCom@base-R")
 - **Slower:** about a minute for the bundled data with p-values, instead of seconds. One sample, with its default 4 processes:
   20 minutes and 4 GB for 3,000 cells, 3.1 hours and 32 GB for 10,000.
 - **More memory:** about 79 bytes per pair of cells in the same sample for each of its R processes, instead of 17.6; practical up
-  to about 10,000 cells per sample. It has no memory mode.
+  to about 10,000 cells per sample.
 - **Same results**, to about 1e-15 (bit for bit with the paper's code under `infmat.method="lu"`). It scores every pair exactly,
   so it has no `exact.priority`; with p-values this version's screened priorities differ from it by typically ~1e-9, up to ~1e-7
   on the bundled data (p-values and order are the same).
@@ -118,29 +118,29 @@ scores <- score_hypercom(res$infMat, res$metadata, ligand="TGFB1", receptors=c("
 ## Run time and memory
 
 Time and memory depend on the number of cells **per sample** (they grow with its square). Splitting the same cells into more
-samples reduces both, but changes which cells are compared. One sample, with p-values:
+samples reduces both, but changes which cells are compared. One sample, with p-values, 8 threads:
 
-| Cells in the sample | Time | Peak memory | Threads | HyperCom |
-|---|---|---|---|---|
-| 1,000 | 6 s | 0.5 GB | 8 | 0.2.x |
-| 3,000 | 42 s | 0.8 GB | 8 | 0.2.x |
-| 10,000 | 8 min | 2.6 GB | 8 | 0.2.x |
-| 30,000 | 1.3 h | 16 GB | 8 | 0.2.x |
-| 60,000 | 5.9 h | 61 GB | 8 | 0.2.x |
-| 100,000 | 8.2 h | 52 GB | 16 | 0.3.0, memory mode |
+| Cells in the sample | Time | Memory needed |
+|---|---|---|
+| 1,000 | 4 s | 0.5 GB |
+| 3,000 | 34 s | 0.7 GB |
+| 10,000 | 6 min | 1.5 GB |
+| 30,000 | 53 min | 6.4 GB |
+| 60,000 | 3.6 h | 21 GB |
+| 100,000 | 10.5 h | 53 GB |
 
-- **Memory mode:** when exact scoring does not fit in memory, HyperCom 0.3.0 switches to a mode that needs about a third of the
-  memory (priorities within ~1e-11 of exact scoring). About 100,000 cells in one sample fit in 64 GB. On a cluster, give the job's
-  memory: `memory.gb=64`.
+- **More memory, faster:** HyperCom fits its scoring to the memory it has and is up to 1.4× faster when it has more: 10,000
+  cells in 4.4 min with 2.7 GB, 30,000 in 38 min with 15 GB, 60,000 in 2.8 h with 57 GB. It uses 90% of the computer's memory,
+  or on Linux of the cluster job's limit; on a cluster, give the job's memory: `memory.gb=64`.
 - **Pairs:** time also grows with the number of ligand-receptor pairs expressed (about 700 here).
-- **P-values** took about 40% of the time in the 0.2.x runs. With p-values, 0.3.0 also screens the real pairs, in the same time or
-  less: priorities typically within ~1e-9 of exact, up to ~1e-7 on the bundled data (1.5e-8 measured on the full bundled run);
-  p-values and order exact; `exact.priority=TRUE` for exact values.
+- **P-values** (1,000 background pairs) take about two thirds of the time. With p-values, HyperCom also screens the real pairs:
+  priorities typically within ~1e-9 of exact, up to ~1e-7 on the bundled data (1.5e-8 measured on the full bundled run); p-values
+  and order exact; `exact.priority=TRUE` for exact values.
 
 <sub>Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian cancer slide, with the CellChat human database
-(about 700 pairs expressed) and `significance=TRUE`. Up to 60,000 cells: HyperCom 0.2.x on a cluster node (Intel Xeon Gold 6426Y,
-64 GB job), median of 5 runs (3 at 60,000 cells). 100,000 cells: HyperCom 0.3.0 on a desktop (Intel Core i9-12900K, 128 GB,
-`memory.gb=64`), one run. GB = 10<sup>9</sup> bytes.</sub>
+(about 700 pairs expressed) and `significance=TRUE`: HyperCom 0.3.1 on a cluster node (Intel Xeon Gold 6326, 8 cores), median of 5
+runs (3 at 60,000 and 100,000 cells). "Memory needed": peak memory with `memory.gb` just above HyperCom's own estimate; "more
+memory": with no `memory.gb` limit, in a 64 GiB job. GB = 10<sup>9</sup> bytes.</sub>
 
 ## Learn more
 

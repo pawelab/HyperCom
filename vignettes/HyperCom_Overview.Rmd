@@ -223,25 +223,27 @@ head(Tgfb1_Tgfbr[, c("cell", "sender", "receiver", "hypercom")])
 
 ### Run time and memory
 Time and memory depend on the number of cells **per sample** (they grow with its square), so more samples of the same size cost
-little. The data of this tutorial takes seconds. One sample, with p-values:
+little. The data of this tutorial takes seconds. One sample, with p-values, 8 threads:
 
-| Cells in the sample | Time | Peak memory | Threads | HyperCom |
-|---|---|---|---|---|
-| 1,000 | 6 s | 0.5 GB | 8 | 0.2.x |
-| 3,000 | 42 s | 0.8 GB | 8 | 0.2.x |
-| 10,000 | 8 min | 2.6 GB | 8 | 0.2.x |
-| 30,000 | 1.3 h | 16 GB | 8 | 0.2.x |
-| 60,000 | 5.9 h | 61 GB | 8 | 0.2.x |
-| 100,000 | 8.2 h | 52 GB | 16 | 0.3.0, memory mode |
+| Cells in the sample | Time | Memory needed |
+|---|---|---|
+| 1,000 | 4 s | 0.5 GB |
+| 3,000 | 34 s | 0.7 GB |
+| 10,000 | 6 min | 1.5 GB |
+| 30,000 | 53 min | 6.4 GB |
+| 60,000 | 3.6 h | 21 GB |
+| 100,000 | 10.5 h | 53 GB |
 
 Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian cancer slide, with the CellChat human database
-(about 700 pairs expressed) and `significance=TRUE`. Up to 60,000 cells: HyperCom 0.2.x on a cluster node (Intel Xeon Gold 6426Y,
-64 GB job), median of 5 runs (3 at 60,000 cells). 100,000 cells: HyperCom 0.3.0 on a desktop (Intel Core i9-12900K,
-`memory.gb=64`), one run. GB = 10^9^ bytes.
+(about 700 pairs expressed) and `significance=TRUE`: HyperCom 0.3.1 on a cluster node (Intel Xeon Gold 6326, 8 cores), median of 5
+runs (3 at 60,000 and 100,000 cells). "Memory needed": peak memory with `memory.gb` just above HyperCom's own estimate. GB = 10^9^
+bytes.
 
+- **More memory, faster:** HyperCom fits its scoring to the memory it has and is up to 1.4× faster when it has more: 10,000
+  cells in 4.4 min with 2.7 GB, 30,000 in 38 min with 15 GB, 60,000 in 2.8 h with 57 GB (no `memory.gb` limit, 64 GiB job).
 - **Pairs:** time also grows with the number of ligand-receptor pairs expressed (about 700 here).
-- **P-values** took about 40% of the time in the 0.2.x runs. HyperCom 0.3.0 also screens the real pairs when it computes p-values,
-  which takes the same time or less.
+- **P-values** (1,000 background pairs) take about two thirds of the time. HyperCom also screens the real pairs when it computes
+  p-values.
 
 ### Where the memory goes
 - **Scoring the pairs** takes most of the memory: about 17.6 bytes for every pair of cells in the same sample, plus about 1.1 GB
@@ -256,21 +258,21 @@ Measured with `HyperCom_seurat()` on one sample of a Xenium 5K human ovarian can
   `infmat.method="lu"` always makes the full matrix, with exactly the numbers of the original release of HyperCom (0.0.0.9000), and
   needs two matrices of all cells and genes squared.
 
-### Memory mode in practice
-- **When it switches on.** Before scoring, HyperCom compares its estimate with `memory.gb` (default: 90% of the computer's memory,
-  or of a container's or cluster job's limit on Linux). If exact scoring does not fit, it scores in memory mode: about 5.5 bytes
-  per pair of cells instead of 17.6, with priorities within ~1e-11 of exact scoring. About 100,000 cells in one sample fit in 64 GB.
+### Fitting the memory
+- **Automatic.** Before scoring, HyperCom compares its estimate with `memory.gb` (default: 90% of the computer's memory, or of a
+  container's or cluster job's limit on Linux). If the fastest scoring does not fit, it uses a leaner one: about 5.5 bytes per pair
+  of cells instead of 17.6, up to 1.4× slower, with priorities within ~1e-11. About 100,000 cells in one sample fit in 64 GB.
   With `verbose=TRUE` you see e.g. `Scoring needs at most about 56.5 GB of memory (memory mode; exact scoring would need 177 GB)`.
-  If even memory mode does not fit, the run stops at once, giving the estimate. The estimate is an upper bound with a floor of about
+  If even that does not fit, the run stops at once, giving the estimate. The estimate is an upper bound with a floor of about
   1.1 GB, so small runs report about 1.08 GB while using less, and `memory.gb` below that always stops.
 - **On a cluster, give the job's memory.** For a job that asks for 64 GB, pass `memory.gb=64`: the computer may have more memory
   than the job may use.
-- **Memory mode needs the default `infmat.method="woodbury"`.**
+- **The leaner scoring needs the default `infmat.method="woodbury"`.**
 - **"... cells and ... genes are not connected to the rest of the hypergraph and are left out".** This warning counts cells and
   genes that no chain of shared genes and interactions links to the rest (e.g. cells that express only the genes of an interaction
   that shares no gene with any other). They could neither send nor receive anything, so they get no scores. A few are normal; if
   many cells are left out, check the database species and the gene names.
-- **`score_hypercom` on big runs** needs as much memory as the run's scoring and switches to memory mode the same way: give it the
+- **`score_hypercom` on big runs** needs as much memory as the run's scoring and fits it the same way: give it the
   same `memory.gb`. Each call recomputes the within-sample influence values, so on large data each call takes a while.
 - **Splitting a sample into more samples** saves memory but changes which cells are compared, and so the results.
 
@@ -292,7 +294,7 @@ Without p-values the line ends in `pairs already scored`.
   `weights` and `threads` may change between the calls.
 - **The cache is deleted** once the priority files are written.
 - **The cache is not used**, but moved to `cache.old` with a warning that says why, when the second call differs in: the counts,
-  the database, the cells' sample or group, `r` or `infmat.method`; the kind of scoring (exact or memory mode, which follows
+  the database, the cells' sample or group, `r` or `infmat.method`; the kind of scoring (fastest or leaner, which follows
   `memory.gb` and the computer's memory); or the version of HyperCom. A damaged cache is moved aside too. Rename `cache.old` back to
   continue the run it belongs to.
 - **If the cache cannot be written** (e.g. a full disk), scoring goes on without it. `resume=FALSE` turns it off.
