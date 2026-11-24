@@ -1,6 +1,6 @@
 Package: HyperCom
 Title: A Hypergraph Method to Understand Cell-Cell Communication
-Version: 0.3.1
+Version: 0.3.2
 Authors@R: 
     c(person("Justin", "Moy", , "jmmoy@bu.edu", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7566-2215")),
