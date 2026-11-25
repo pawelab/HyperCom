@@ -12,6 +12,9 @@
 namespace f2 {
 
 // 128-bit integers (a GCC and clang extension on 64-bit targets; __extension__ keeps -pedantic quiet)
+#ifndef __SIZEOF_INT128__
+#error "HyperCom needs 64-bit R (a compiler with __int128): install the 64-bit build of R 4.2 or later"
+#endif
 __extension__ typedef __int128 i128;
 __extension__ typedef unsigned __int128 u128;
 

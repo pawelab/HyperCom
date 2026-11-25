@@ -10,6 +10,8 @@
   into in-cache pieces before sorting instead of taking a slower general sort: grid scoring takes up to ~10% less time at
   100,000-150,000 cells in one sample (measured on a cluster node). Results are identical to the last bit. Memory mode and
   screening are unchanged.
+* **32-bit R stops with a clear message** at install ("HyperCom needs 64-bit R"), instead of a compiler error about `__int128`.
+  This matters on 32-bit Linux (e.g. i686, armv7), which `R (>= 4.2)` does not rule out; R on Windows and macOS is 64-bit.
 
 # HyperCom 0.3.1
 
