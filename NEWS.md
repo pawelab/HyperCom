@@ -7,9 +7,9 @@
   time: the run stops after the influence matrix and metadata, for `score_hypercom()` on chosen pairs. `res$priority` is then
   `NULL` and `6.priority` is not written.
 * **Faster exact scoring of very large samples.** The biggest value buckets (one sample of more than ~80,000 cells) are now cut
-  into in-cache pieces before sorting instead of taking a slower general sort: grid scoring takes ~18% less time at the bucket size
-  of 100,000 cells in one sample and ~40% less at 200,000-400,000 cells (measured on 50,000 cells with fewer buckets). Results are
-  identical to the last bit. Memory mode and screening are unchanged.
+  into in-cache pieces before sorting instead of taking a slower general sort: grid scoring takes up to ~10% less time at
+  100,000-150,000 cells in one sample (measured on a cluster node). Results are identical to the last bit. Memory mode and
+  screening are unchanged.
 
 # HyperCom 0.3.1
 
