@@ -6,12 +6,15 @@ This file is for AI agents that help a user run HyperCom. The installed copy is 
 
 Run `packageVersion("HyperCom")`. Several versions share the package name but have different arguments:
 
-- **0.3.x:** this file. Threads, memory mode, resume after a stop, compiled code.
+- **0.3.x** (branch `master`): this file. Compiled code, threads, memory mode, resume after a stop; up to about 100,000 cells per
+  sample. Since 0.3.2 `sample` and `metadata` are optional and `prioritize=FALSE` skips ranking the pairs.
+- **0.3.1.1** (branch `base-R`): the same functions and arguments in R only (no compiled code): `threads` counts R processes, no
+  memory mode, no `exact.priority`; for up to about 10,000 cells per sample. Same results. Its own AGENTS.md describes it.
 - **0.2.x:** has `parallel=` and `cache=`, and uses one thread by default; no `memory.gb`, `exact.priority` or `r` in `HyperCom()`.
 - **0.1.x** (branch `spatial`, formerly `v1-fast`): has `cores=`, `infMat.cell=`, `cell.info=`, `method="auto"` and spatial scores.
   0.3.x has none of these.
-- **0.0.1** (branch `base-R`): R code only, with the same bug fixes. Has `cl=`, `seed=` and `verbose=`; no `threads`, `resume` or
-  `infmat.method`.
+- **0.0.1** (branch `base-R` before 0.3.1.1): R code only, with the same bug fixes. Has `parallel=`, `cl=`, `cache=`, `seed=` and
+  `verbose=`; no `threads`, `resume` or `infmat.method`.
 - **0.0.0.9000** (branch `handwritten`): the original code of the paper, with bugs fixed in 0.0.1. Needs mltools (archived on
   CRAN).
 
@@ -26,17 +29,23 @@ res <- HyperCom(cellchat.mm.lrdb, counts, metadata, sample="sample", group="cond
                 significance=TRUE, seed=1, outdir="HyperCom")
 res$priority[["1"]]
 s <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
+
+res <- HyperCom(cellchat.mm.lrdb, counts)    # one sample, no conditions: counts alone
 ```
 
-- **Seurat:** `HyperCom_seurat(seurat, lrdb, sample=, assay="RNA", layer="counts", ...)`. Needs SeuratObject.
-- **SingleCellExperiment:** `HyperCom_sce(sce, lrdb, sample=, assay="counts", ...)`. Columns come from `colData`, cell names from
-  `colnames(sce)`. Needs SummarizedExperiment (Bioconductor; installed with SingleCellExperiment).
+- **Seurat:** `HyperCom_seurat(seurat, lrdb, sample=NULL, assay="RNA", layer="counts", group=NULL, ...)`. Needs SeuratObject.
+- **SingleCellExperiment:** `HyperCom_sce(sce, lrdb, sample=NULL, assay="counts", group=NULL, ...)`. Columns come from `colData`,
+  cell names from `colnames(sce)`. Needs SummarizedExperiment (Bioconductor; installed with SingleCellExperiment).
 - The wrappers pass every other argument on to `HyperCom()`. A misspelled or removed argument (`parallel=`, `cache=`, `cl=`) stops
   with "unused argument".
 - **Install check:** `example(HyperCom)` takes seconds.
-- **Threads:** the default uses one thread per physical core. `threads=n` sets the number; `threads=1` runs on one thread. Results
-  do not depend on it.
+- **Threads:** the default uses one thread per physical core, at a lower priority than other programs, so the computer stays
+  responsive. `threads=n` sets the number; `threads=1` runs on one thread. A cluster job or container gets only its allocated cores;
+  `options(mc.cores=n)` (or the environment variable `MC_CORES`) caps the default. Results do not depend on it.
+- **Cell scores only:** `prioritize=FALSE` skips ranking the pairs, which takes most of the run time; then `score_hypercom()` scores
+  the pairs the user chooses.
 - **Output folder:** set `outdir` yourself; the default is `HyperCom/` in the working directory. `outdir=NULL` writes no files.
+  Running again with the same `outdir` overwrites its files.
 
 ## Check the input before a run
 
@@ -47,8 +56,9 @@ Most failed runs come from the input.
 - Cell names must be unique. When samples are merged, prefix each barcode with its sample.
 - `metadata` has one row per cell, with the cell names as row names. Cells of counts that are not in metadata are left out, with a
   warning.
-- `sample` is the library or replicate column, not the cell type. Cells are compared only within their sample, and each sample needs
-  at least 2 cells that express a ligand or receptor gene. One sample? Add `metadata$sample <- "all"`; `sample` is required.
+- `sample` (optional) is the library or replicate column, not the cell type. Cells are compared only within their sample, and each
+  sample needs at least 2 cells that express a ligand or receptor gene. Without `sample` all cells are one sample (`"all"`). With no
+  `sample`, `group` or `keep`, `metadata` can be left out too.
 - `group` (optional) is the condition column. It has no NA in cells that express a ligand or receptor gene, and no value "gene". It
   feeds the purity term of the priority (pairs whose cells concentrate in some groups rank higher); there is no ranking per group.
 - `lrdb` must match the species of the counts: `cellchat.mm.lrdb` for mouse (`Tgfb1`), `cellchat.hs.lrdb` for human (`TGFB1`). The
@@ -61,25 +71,27 @@ Most failed runs come from the input.
 ## Estimate size before a run
 
 - Memory: about 17.6 bytes x (sum over samples of the squared number of cells), plus about 1.1 GB. In R:
-  `sum(as.numeric(table(metadata$sample))^2) * 17.6 / 1e9 + 1.1` GB (an upper bound).
+  `sum(as.numeric(table(metadata$sample))^2) * 17.6 / 1e9 + 1.1` GB (an upper bound; without `sample`, `ncol(counts)^2` pairs).
 - If that does not fit, HyperCom switches to memory mode by itself: about 5.5 bytes per pair of cells, priorities within ~1e-11 of
-  exact scoring. About 100,000 cells in one sample fit in 64 GB (8.2 h on 16 threads, with p-values). Memory mode needs
+  exact scoring. About 100,000 cells in one sample fit in 64 GB (10.5 h on 8 cores, with p-values; table below). Memory mode needs
   `infmat.method="woodbury"` (the default). If even memory mode does not fit, the run stops at the start with the estimate.
 - The memory limit is `memory.gb` (default: 90% of the computer's memory, or of a container's or cluster job's limit on Linux). On a
   cluster, pass the job's request, e.g. `memory.gb=64`.
 - More samples of the same total size are cheap. Do not split a sample only to save memory without asking the user: it changes which
   cells are compared, and so the results.
-- Measured with HyperCom 0.2.x, one sample, 8 threads (Intel Xeon Gold 6426Y), the CellChat human database (about 700 pairs
-  expressed), with p-values: 1,000 cells 6 s and 0.5 GB; 10,000 cells 8 min and 2.6 GB; 30,000 cells 1.3 h and 16 GB; 60,000 cells
-  5.9 h and 61 GB. Time also grows with the number of pairs.
+- Measured with HyperCom 0.3.1, one sample, 8 cores (Intel Xeon Gold 6326), the CellChat human database (about 700 pairs
+  expressed), with p-values, `memory.gb` just above HyperCom's own memory-mode estimate: 1,000 cells 4 s and
+  0.5 GB; 3,000 cells 34 s and 0.7 GB; 10,000 cells 6 min and 1.5 GB; 30,000 cells 53 min and 6.4 GB; 60,000 cells 3.6 h and 21 GB;
+  100,000 cells 10.5 h and 53 GB. With more memory (no limit, 64 GiB job) it is up to 1.4 times faster: 10,000 cells 4.4 min and
+  2.7 GB, 30,000 cells 38 min and 15 GB, 60,000 cells 2.8 h and 57 GB. Time also grows with the number of pairs.
 - With `significance=TRUE`, 1,000 background pairs are added and real pairs are screened too, in the same time or less: priorities
   typically within ~1e-9 of exact, up to ~1e-7 on the bundled data (1.5e-8 measured on the full bundled run); p-values and order
   exact. Use `exact.priority=TRUE` when exact priority values are needed, e.g. to compare with an older version.
 
 ## Long runs and clusters
 
-- If a run stops (time limit, crash), run the same call again. It continues from `<outdir>/6.priority/cache` and loses at most one
-  batch of pairs.
+- If a run stops (time limit, crash, Esc), run the same call again. It continues from `<outdir>/6.priority/cache` and loses at most
+  one batch of pairs. Without `seed` it keeps the background pairs drawn before it stopped.
 - The cache is not reused, but moved to `cache.old` with a warning, when the new call differs in counts, lrdb, the cells' sample or
   group, `r`, `infmat.method`, the kind of scoring (exact or memory mode, which follows `memory.gb`) or the HyperCom version. Keep
   these the same, and keep `seed`. `weights` and `threads` may change.
@@ -88,10 +100,10 @@ Most failed runs come from the input.
 
 ## Output
 
-- `HyperCom()` returns its list invisibly, so assign it: `priority` (a list named by weight, e.g. `"1"`), `metadata`, `infMat`,
-  `adj` and `lrs`.
+- `HyperCom()` returns its list invisibly, so assign it: `priority` (a list named by weight, e.g. `"1"`; NULL with
+  `prioritize=FALSE`), `metadata`, `infMat`, `adj` and `lrs`.
 - Files: `0.counts.rds`, `1.lrs.csv`, `2.hyperedges.csv`, `3.adj.rds`, `4.infMat.rds`, `5.metadata.csv`,
-  `6.priority/priority.<weight>.csv`.
+  `6.priority/priority.<weight>.csv` (not with `prioritize=FALSE`).
 - Call `library(HyperCom)` before `readRDS` of `3.adj.rds` or `4.infMat.rds`.
 - `adj` and `infMat` are stored compactly, not as matrices. `dim`, `dimnames` and `x[i, j]` work. `as.matrix()` builds the full
   nodes x nodes matrix, which is huge on large data: take slices instead.
@@ -112,8 +124,8 @@ Most failed runs come from the input.
 
 - `seed=` makes p-values reproducible. The session's random state is restored afterwards.
 - `infmat.method="woodbury"` (the default) is fast. `"lu"` reproduces the numbers of the original release (0.0.0.9000, branch
-  `handwritten`) but holds the full matrix; the two differ by about 1e-15. Branch `base-R` (0.0.1) is that original code with bug
-  fixes, in R only.
+  `handwritten`) but holds the full matrix; the two differ by about 1e-15. Branch `base-R` (0.3.1.1) is this version in R only,
+  with the same results.
 
 ## Change the package (source repository)
 
