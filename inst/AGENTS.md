@@ -8,7 +8,8 @@ Run `packageVersion("HyperCom")`. Several versions share the package name but ha
 
 - **0.3.1.1** (branch `base-R`): this file. HyperCom 0.3.1 in R only (no compiled code): R processes, resume after a stop, no memory
   mode, no `exact.priority`, no `threads` in `generate_infMat()` or `score_hypercom()`. For up to about 10,000 cells per sample.
-- **0.3.0, 0.3.1** (branch `master`): compiled code, threads, memory mode; up to about 100,000 cells per sample. Same results.
+  Like master 0.3.2, `sample` and `metadata` are optional and `prioritize=FALSE` skips ranking the pairs.
+- **0.3.x** (branch `master`, now 0.3.2): compiled code, threads, memory mode; up to about 100,000 cells per sample. Same results.
 - **0.2.x:** has `parallel=` and `cache=`, and uses one thread by default; no `memory.gb`, `exact.priority` or `r` in `HyperCom()`.
 - **0.1.x** (branch `spatial`, formerly `v1-fast`): has `cores=`, `infMat.cell=`, `cell.info=`, `method="auto"` and spatial scores.
   0.3.x has none of these.
@@ -28,17 +29,23 @@ res <- HyperCom(cellchat.mm.lrdb, counts, metadata, sample="sample", group="cond
                 significance=TRUE, seed=1, outdir="HyperCom")
 res$priority[["1"]]
 s <- score_hypercom(res$infMat, res$metadata, ligand="Thbs1", receptors="Sdc4")
+
+res <- HyperCom(cellchat.mm.lrdb, counts)    # one sample, no conditions: counts alone
 ```
 
-- **Seurat:** `HyperCom_seurat(seurat, lrdb, sample=, assay="RNA", layer="counts", ...)`. Needs SeuratObject.
-- **SingleCellExperiment:** `HyperCom_sce(sce, lrdb, sample=, assay="counts", ...)`. Columns come from `colData`, cell names from
-  `colnames(sce)`. Needs SummarizedExperiment (Bioconductor; installed with SingleCellExperiment).
+- **Seurat:** `HyperCom_seurat(seurat, lrdb, sample=NULL, assay="RNA", layer="counts", group=NULL, ...)`. Needs SeuratObject.
+- **SingleCellExperiment:** `HyperCom_sce(sce, lrdb, sample=NULL, assay="counts", group=NULL, ...)`. Columns come from `colData`,
+  cell names from `colnames(sce)`. Needs SummarizedExperiment (Bioconductor; installed with SingleCellExperiment).
 - The wrappers pass every other argument on to `HyperCom()`. A misspelled or removed argument (`parallel=`, `cache=`, `cl=`,
   `exact.priority=`) stops with "unused argument".
 - **Install check:** `example(HyperCom)` takes seconds.
 - **Processes:** `threads` is the number of R processes that score. The default starts one per physical core, at most 4 (more gain
-  little), fewer when they would not fit in `memory.gb` (with a message). `threads=1` scores in the R session alone. Results do not depend on it.
+  little), fewer when they would not fit in `memory.gb` (with a message). `threads=1` scores in the R session alone.
+  Results do not depend on it.
+- **Cell scores only:** `prioritize=FALSE` skips ranking the pairs, which takes most of the run time; then `score_hypercom()` scores
+  the pairs the user chooses.
 - **Output folder:** set `outdir` yourself; the default is `HyperCom/` in the working directory. `outdir=NULL` writes no files.
+  Running again with the same `outdir` overwrites its files.
 
 ## Check the input before a run
 
@@ -49,8 +56,9 @@ Most failed runs come from the input.
 - Cell names must be unique. When samples are merged, prefix each barcode with its sample.
 - `metadata` has one row per cell, with the cell names as row names. Cells of counts that are not in metadata are left out, with a
   warning.
-- `sample` is the library or replicate column, not the cell type. Cells are compared only within their sample, and each sample needs
-  at least 2 cells that express a ligand or receptor gene. One sample? Add `metadata$sample <- "all"`; `sample` is required.
+- `sample` (optional) is the library or replicate column, not the cell type. Cells are compared only within their sample, and each
+  sample needs at least 2 cells that express a ligand or receptor gene. Without `sample` all cells are one sample (`"all"`). With no
+  `sample`, `group` or `keep`, `metadata` can be left out too.
 - `group` (optional) is the condition column. It has no NA in cells that express a ligand or receptor gene, and no value "gene". It
   feeds the purity term of the priority (pairs whose cells concentrate in some groups rank higher); there is no ranking per group.
 - `lrdb` must match the species of the counts: `cellchat.mm.lrdb` for mouse (`Tgfb1`), `cellchat.hs.lrdb` for human (`TGFB1`). The
@@ -63,8 +71,8 @@ Most failed runs come from the input.
 ## Estimate size before a run
 
 - Memory of one R process: about 79 bytes x (sum over samples of the squared number of cells), plus about 1.1 GB. In R:
-  `sum(as.numeric(table(metadata$sample))^2) * 79 / 1e9 + 1.1` GB (an upper bound). Each further process needs about as much
-  again (0.4 GB instead of 1.1 GB on top).
+  `sum(as.numeric(table(metadata$sample))^2) * 79 / 1e9 + 1.1` GB (an upper bound; without `sample`, `ncol(counts)^2`
+  pairs). Each further process needs about as much again (0.4 GB instead of 1.1 GB on top).
 - HyperCom starts only as many processes as fit in `memory.gb` (default: 90% of the computer's memory, or of a container's or
   cluster job's limit on Linux). If one process does not fit, the run stops at the start with the estimate. On a cluster, pass the
   job's request, e.g. `memory.gb=64`.
@@ -88,10 +96,10 @@ Most failed runs come from the input.
 
 ## Output
 
-- `HyperCom()` returns its list invisibly, so assign it: `priority` (a list named by weight, e.g. `"1"`), `metadata`, `infMat`,
-  `adj` and `lrs`.
+- `HyperCom()` returns its list invisibly, so assign it: `priority` (a list named by weight, e.g. `"1"`; NULL with
+  `prioritize=FALSE`), `metadata`, `infMat`, `adj` and `lrs`.
 - Files: `0.counts.rds`, `1.lrs.csv`, `2.hyperedges.csv`, `3.adj.rds`, `4.infMat.rds`, `5.metadata.csv`,
-  `6.priority/priority.<weight>.csv`.
+  `6.priority/priority.<weight>.csv` (not with `prioritize=FALSE`).
 - Call `library(HyperCom)` before `readRDS` of `3.adj.rds` or `4.infMat.rds`.
 - `adj` and `infMat` are stored compactly, not as matrices. `dim`, `dimnames` and `x[i, j]` work. `as.matrix()` builds the full
   nodes x nodes matrix, which is huge on large data: take slices instead.
